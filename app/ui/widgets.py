@@ -1,0 +1,159 @@
+"""재사용 위젯 및 애니메이션 헬퍼 (문서 Section 8.6, 9).
+
+- FadeImageLabel: 이미지 교체 시 부드러운 fade(기준) / 빠른 fade(비교) 전환.
+- ClickableThumb: 클릭 가능한 썸네일(현재 선택 강조).
+- 모든 움직임은 부드럽게(QPropertyAnimation 이징).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPropertyAnimation,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsOpacityEffect,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.ui import theme
+
+
+class FadeImageLabel(QLabel):
+    """이미지를 fade 로 부드럽게 교체하는 라벨."""
+
+    def __init__(self, parent: Optional[QWidget] = None, duration: int = 220):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(120, 120)
+        self.setScaledContents(False)
+        self._effect = QGraphicsOpacityEffect(self)
+        self._effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._effect)
+        self._anim = QPropertyAnimation(self._effect, b"opacity", self)
+        self._anim.setDuration(duration)
+        self._anim.setEasingCurve(QEasingCurve.InOutCubic)
+        self._source_pixmap: Optional[QPixmap] = None
+        self._placeholder = "이미지 없음"
+
+    def set_duration(self, ms: int) -> None:
+        self._anim.setDuration(ms)
+
+    def _scaled(self) -> Optional[QPixmap]:
+        if self._source_pixmap is None or self._source_pixmap.isNull():
+            return None
+        return self._source_pixmap.scaled(
+            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        sc = self._scaled()
+        if sc is not None:
+            super().setPixmap(sc)
+
+    def show_path(self, path: Optional[str | Path], animated: bool = True) -> None:
+        """이미지 경로를 표시. None 이면 placeholder."""
+        pix: Optional[QPixmap] = None
+        if path is not None:
+            p = QPixmap(str(path))
+            if not p.isNull():
+                pix = p
+        self._apply(pix, animated)
+
+    def show_message(self, text: str) -> None:
+        self._source_pixmap = None
+        super().clear()
+        self.setText(text)
+        self._effect.setOpacity(1.0)
+
+    def _apply(self, pixmap: Optional[QPixmap], animated: bool) -> None:
+        self._source_pixmap = pixmap
+        if pixmap is None:
+            self.show_message(self._placeholder)
+            return
+        self.setText("")
+        sc = self._scaled()
+        if sc is not None:
+            super().setPixmap(sc)
+        if animated:
+            self._anim.stop()
+            self._anim.setStartValue(0.0)
+            self._anim.setEndValue(1.0)
+            self._anim.start()
+        else:
+            self._effect.setOpacity(1.0)
+
+
+class ClickableThumb(QFrame):
+    """클릭 가능한 기준 썸네일 (현재 선택 강조)."""
+
+    clicked = Signal(int)
+
+    def __init__(self, index: int, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.index = index
+        self._selected = False
+        self.setObjectName("thumb")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(108, 124)
+        self._build()
+        self._refresh_style()
+
+    def _build(self) -> None:
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(2)
+        self.img = QLabel()
+        self.img.setAlignment(Qt.AlignCenter)
+        self.img.setFixedSize(96, 92)
+        self.caption = QLabel("")
+        self.caption.setObjectName("dim")
+        self.caption.setAlignment(Qt.AlignCenter)
+        self.caption.setStyleSheet("font-size: 9px;")
+        lay.addWidget(self.img)
+        lay.addWidget(self.caption)
+
+    def set_image(self, path: Optional[str | Path]) -> None:
+        if path is not None:
+            p = QPixmap(str(path))
+            if not p.isNull():
+                self.img.setPixmap(
+                    p.scaled(96, 92, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+                return
+        self.img.setText("?")
+
+    def set_caption(self, text: str) -> None:
+        self.caption.setText(text)
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._refresh_style()
+
+    def _refresh_style(self) -> None:
+        if self._selected:
+            self.setStyleSheet(
+                f"QFrame#thumb {{ background: {theme.NEON_DIM};"
+                f" border: 2px solid {theme.BASE_GLOW}; border-radius: 8px; }}"
+            )
+        else:
+            self.setStyleSheet(
+                f"QFrame#thumb {{ background: {theme.BG_ELEV};"
+                f" border: 1px solid {theme.NEON_SOFT}; border-radius: 8px; }}"
+                f"QFrame#thumb:hover {{ border: 1px solid {theme.NEON}; }}"
+            )
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.index)
+        super().mousePressEvent(event)
