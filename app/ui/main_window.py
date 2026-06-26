@@ -22,16 +22,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import config, layout, matcher
+from app import layout, matcher
 from app.config import AppSettings
 from app.export.excel_report import export_excel
-from app.models import BaseDefectMatches, DefectRecord
-from app.safety import OriginalProtectionError
+from app.models import BaseDefectMatches, DefectRecord, ParseStatus
+from app.safety import OriginalProtectionError, conflicting_source
 from app.scanner import LotIndex
 from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
 from app.ui.controls import NavBar, TopBar
 from app.ui.export_dialog import ExportSelectDialog
+from app.ui.image_loader import ImageLoader
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.workers import ScanWorker, ThumbnailWorker
 
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self.settings = settings or AppSettings.load()
         self.settings.ensure_workspace()
         self.thumb_cache = ThumbnailCache(self.settings.cache_path)
+        self.image_loader = ImageLoader()
         self.pool = QThreadPool.globalInstance()
 
         self.lot_index: Optional[LotIndex] = None
@@ -87,7 +89,7 @@ class MainWindow(QMainWindow):
         grid_host.setObjectName("panel")
         grid_host_layout = QVBoxLayout(grid_host)
         grid_host_layout.setContentsMargins(10, 10, 10, 10)
-        self.grid = CompareGrid()
+        self.grid = CompareGrid(loader=self.image_loader)
         grid_host_layout.addWidget(self.grid)
         self._empty_label = QLabel("LOT 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
@@ -115,6 +117,10 @@ class MainWindow(QMainWindow):
             self.load_lot(folder)
 
     def load_lot(self, folder: str) -> None:
+        # 2차 원본 보호(Section 1.1): 캐시/결과 작업공간이 이 LOT 내부면 차단한다.
+        if not self._verify_workspace_outside(folder):
+            return
+
         self.settings.last_lot_folder = folder
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)
@@ -126,6 +132,23 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(self._on_scan_finished)
         worker.signals.error.connect(self._on_scan_error)
         self.pool.start(worker)
+
+    def _verify_workspace_outside(self, folder: str) -> bool:
+        """캐시/내보내기 작업공간이 선택한 LOT 폴더 내부면 경고하고 차단한다."""
+        for target in (self.settings.cache_path, self.settings.exports_path):
+            conflict = conflicting_source(target, [folder])
+            if conflict is not None:
+                QMessageBox.critical(
+                    self,
+                    "원본 보호",
+                    "프로그램 작업공간(캐시/결과)이 선택한 원본 LOT 폴더 내부에 있습니다.\n"
+                    "원본 보호 규칙상 원본 폴더 안에는 어떤 파일도 만들 수 없습니다.\n\n"
+                    f"  작업공간 : {target}\n"
+                    f"  원본 폴더 : {conflict}\n\n"
+                    "작업공간을 원본 밖으로 옮긴 뒤 다시 시도하세요.",
+                )
+                return False
+        return True
 
     def _on_scan_progress(self, msg: str, cur: int, total: int) -> None:
         self.nav.set_status(msg)
@@ -145,12 +168,41 @@ class MainWindow(QMainWindow):
             return
         self.top.set_layers(layers)
         self.settings.save()
+
         ok = sum(1 for r in index.records if r.ok)
-        self.nav.set_status(
+        failed = [r for r in index.records if not r.ok]
+        status = (
             f"layer {len(layers)}개 · wafer {len(index.wafers())}개 · "
-            f"이미지 {len(index.records)}개(좌표 OK {ok}개)"
+            f"이미지 {len(index.records)}개(좌표 OK {ok}개"
         )
+        if failed:
+            status += f", 실패 {len(failed)}개"
+        status += ")"
+        self.nav.set_status(status)
+        self.nav.set_status_tooltip(self._failure_summary(failed))
         self._recompute()
+
+    @staticmethod
+    def _failure_summary(failed: list[DefectRecord]) -> str:
+        """좌표 파싱 실패 항목 요약(상태 표시줄 tooltip)."""
+        if not failed:
+            return "모든 이미지의 좌표를 정상 추출했습니다."
+        by_status: dict[str, int] = {}
+        for r in failed:
+            by_status[r.status.value] = by_status.get(r.status.value, 0) + 1
+        lines = ["좌표 추출 실패 항목:"]
+        labels = {
+            ParseStatus.NOT_FOUND.value: "좌표/매칭 정보 없음",
+            ParseStatus.INFO_FILE_NOT_FOUND.value: "info 파일 없음",
+            ParseStatus.INVALID_INFO.value: "info 값 부족/오류",
+        }
+        for code, n in sorted(by_status.items(), key=lambda kv: -kv[1]):
+            lines.append(f"  · {labels.get(code, code)}: {n}개")
+        for r in failed[:8]:
+            lines.append(f"    - {r.layer}/{r.wafer_id}/{Path(r.image_path).name}")
+        if len(failed) > 8:
+            lines.append(f"    … 외 {len(failed) - 8}개")
+        return "\n".join(lines)
 
     # -------------------------------------------------------------- 매칭
     def _recompute(self) -> None:

@@ -10,7 +10,6 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -194,6 +193,9 @@ class NavBar(QFrame):
 
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
+
+    def set_status_tooltip(self, text: str) -> None:
+        self.lbl_status.setToolTip(text)
 
     def set_enabled(self, enabled: bool) -> None:
         self.btn_prev.setEnabled(enabled)

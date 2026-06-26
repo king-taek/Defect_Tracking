@@ -24,6 +24,8 @@
 - **이전/다음 탐색**, 기준 변경 시 비교 이미지 빠른 Fade 갱신 (Section 8.5)
 - **Excel 결과 출력** — 이미지·wafer 정보·매칭 결과 포함 (Section 8.7)
 - **다크 + 파란 네온 UI**, hover/pressed 시각 변화, 부드러운 전환 (Section 9)
+- **비동기 이미지 로딩 + LRU 캐시** — 네트워크 경로에서도 탐색 시 UI 멈춤 최소화 (Section 10)
+- **진단 표시** — 좌표 추출 실패 건수/사유를 상태 표시줄 tooltip 으로 안내 (Section 11)
 
 ---
 
@@ -67,6 +69,7 @@ python build_exe.py        # -> dist/ConderCompare.exe
 - `settings.json` — 사용자 설정(마지막 LOT, 허용 오차 등)
 
 출력 경로가 원본 LOT 폴더와 같거나 그 하위이면 저장이 **차단**됩니다.
+또한 LOT 폴더를 열 때 작업공간(캐시/결과)이 그 LOT 내부에 있으면 경고 후 작업을 막습니다.
 
 ---
 
@@ -107,7 +110,7 @@ app/
   workers.py            백그라운드 스캔/썸네일
   parsers/              camtek_filename · camtek_ini · kla_info
   export/excel_report.py  Excel 출력
-  ui/                   theme · main_window · thumbnail_strip · compare_grid · controls · export_dialog · widgets
+  ui/                   theme · main_window · thumbnail_strip · compare_grid · controls · export_dialog · widgets · image_loader
 tools/make_sample_data.py  합성 데이터 생성기
 tests/                  pytest
 ```

@@ -73,6 +73,11 @@ class DefectRecord:
     def die_key(self) -> tuple[int, int]:
         return (int(self.col), int(self.row))  # type: ignore[arg-type]
 
+    @property
+    def die_key_full(self) -> tuple[str, int, int]:
+        """매칭 인덱스 키: (wafer_id, col, row)."""
+        return (self.wafer_id, int(self.col), int(self.row))  # type: ignore[arg-type]
+
     def distance_to(self, other: "DefectRecord") -> Optional[float]:
         """같은 die 내 local 좌표 유클리드 거리. 둘 중 하나라도 좌표 없으면 None."""
         if not self.ok or not other.ok:

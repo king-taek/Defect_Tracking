@@ -19,18 +19,27 @@ from PySide6.QtWidgets import (
 
 from app.models import BaseDefectMatches, DefectRecord
 from app.ui import theme
+from app.ui.image_loader import ImageLoader
 from app.ui.widgets import FadeImageLabel
 
 
 class LayerCell(QFrame):
     """단일 layer 이미지 셀 (제목 + 매칭 정보 + 이미지)."""
 
-    def __init__(self, layer: str, is_base: bool, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        layer: str,
+        is_base: bool,
+        loader: Optional[ImageLoader] = None,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self.layer = layer
         self.is_base = is_base
         self.setObjectName("cell")
         self._build()
+        if loader is not None:
+            self.image.set_loader(loader)
         self._apply_style(active=is_base)
 
     def _build(self) -> None:
@@ -97,13 +106,16 @@ class LayerCell(QFrame):
 class CompareGrid(QWidget):
     """layer 배치 그리드 컨테이너."""
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(
+        self, loader: Optional[ImageLoader] = None, parent: Optional[QWidget] = None
+    ):
         super().__init__(parent)
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setSpacing(10)
         self._cells: dict[str, LayerCell] = {}
         self._base_layer: str = ""
+        self._loader = loader
 
     def build_layout(
         self, grid: list[list[Optional[str]]], base_layer: str
@@ -123,7 +135,9 @@ class CompareGrid(QWidget):
             for c, layer in enumerate(row):
                 if not layer:
                     continue
-                cell = LayerCell(layer, is_base=(layer == base_layer))
+                cell = LayerCell(
+                    layer, is_base=(layer == base_layer), loader=self._loader
+                )
                 self._cells[layer] = cell
                 self._grid.addWidget(cell, r, c)
 

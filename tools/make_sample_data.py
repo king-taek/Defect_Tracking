@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import random
 from pathlib import Path
 
@@ -52,6 +53,12 @@ LAYERS = [
 _COLORS = [(40, 70, 120), (90, 40, 110), (30, 100, 90), (120, 80, 30)]
 
 
+def _stable_seed(*parts: object) -> int:
+    """프로세스 간 재현 가능한 결정적 시드(파이썬 hash() 랜덤화 회피)."""
+    digest = hashlib.md5("|".join(map(str, parts)).encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
 def _make_image(path: Path, label: str, seed: int) -> None:
     rnd = random.Random(seed)
     color = _COLORS[seed % len(_COLORS)]
@@ -78,7 +85,7 @@ def _jitter(x: float, y: float, seed: int) -> tuple[float, float]:
 def _gen_camtek_name(folder: Path, layer_tag: str, wafer: str) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     for i, (col, row, bx, by, name) in enumerate(BASE_DEFECTS):
-        x, y = _jitter(bx, by, hash((layer_tag, wafer, i)) & 0xFFFF)
+        x, y = _jitter(bx, by, _stable_seed(layer_tag, wafer, i))
         fname = (
             f"R_TB500_LIVE_{layer_tag}_WLW_{layer_tag}_{wafer}_"
             f"{col}_{row}_{x:.6f}_{y:.6f}_{name}.jpg"
@@ -96,7 +103,7 @@ def _gen_camtek_ini(folder: Path, layer_tag: str, wafer: str) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     ini_lines: list[str] = []
     for i, (col, row, bx, by, name) in enumerate(BASE_DEFECTS):
-        x, y = _jitter(bx, by, hash((layer_tag, wafer, i, "ini")) & 0xFFFF)
+        x, y = _jitter(bx, by, _stable_seed(layer_tag, wafer, i, "ini"))
         col_ini = col + config.CAMTEK_COL_OFFSET
         row_ini = config.CAMTEK_ROW_BASE - row
         X = x + col_ini * config.CAMTEK_PITCH_X
@@ -136,7 +143,7 @@ def _gen_kla(folder: Path, layer_tag: str, wafer: str) -> None:
         "SampleType WAFER;",
     ]
     for i, (col, row, bx, by, name) in enumerate(BASE_DEFECTS):
-        x, y = _jitter(bx, by, hash((layer_tag, wafer, i, "kla")) & 0xFFFF)
+        x, y = _jitter(bx, by, _stable_seed(layer_tag, wafer, i, "kla"))
         xindex = col - config.kla_zero_x()
         yindex = row - config.kla_zero_y()
         xrel = x

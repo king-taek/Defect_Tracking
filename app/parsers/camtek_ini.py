@@ -119,5 +119,5 @@ def convert_camtek_ini(ini_path: str | Path, original_name: str) -> CamtekIniRes
     try:
         sections = load_ini(ini_path)
     except OSError:
-        return CamtekIniResult(ParseStatus.INFO_FILE_NOT_FOUND)  # type: ignore[return-value]
+        return CamtekIniResult(ParseStatus.INFO_FILE_NOT_FOUND)
     return convert_from_sections(sections, original_name)

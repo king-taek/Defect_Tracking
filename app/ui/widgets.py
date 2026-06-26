@@ -16,7 +16,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
@@ -26,10 +26,15 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui import theme
+from app.ui.image_loader import ImageLoader
 
 
 class FadeImageLabel(QLabel):
-    """이미지를 fade 로 부드럽게 교체하는 라벨."""
+    """이미지를 fade 로 부드럽게 교체하는 라벨.
+
+    ImageLoader 가 주입되면 이미지를 비동기로 로드하여 UI 멈춤을 막는다(Section 10).
+    주입되지 않으면 동기 로드로 폴백한다(테스트/단독 사용).
+    """
 
     def __init__(self, parent: Optional[QWidget] = None, duration: int = 220):
         super().__init__(parent)
@@ -44,6 +49,12 @@ class FadeImageLabel(QLabel):
         self._anim.setEasingCurve(QEasingCurve.InOutCubic)
         self._source_pixmap: Optional[QPixmap] = None
         self._placeholder = "이미지 없음"
+        self._loader: Optional[ImageLoader] = None
+        self._pending_id = -1
+
+    def set_loader(self, loader: ImageLoader) -> None:
+        self._loader = loader
+        loader.loaded.connect(self._on_loaded)
 
     def set_duration(self, ms: int) -> None:
         self._anim.setDuration(ms)
@@ -63,12 +74,26 @@ class FadeImageLabel(QLabel):
 
     def show_path(self, path: Optional[str | Path], animated: bool = True) -> None:
         """이미지 경로를 표시. None 이면 placeholder."""
-        pix: Optional[QPixmap] = None
-        if path is not None:
+        if path is None:
+            self._pending_id = -1
+            self._apply(None, animated)
+            return
+        self._pending_animated = animated
+        if self._loader is not None:
+            # 비동기 로드: 결과 도착 시 _on_loaded 에서 적용
+            self._pending_id = self._loader.request(str(path))
+        else:
             p = QPixmap(str(path))
-            if not p.isNull():
-                pix = p
-        self._apply(pix, animated)
+            self._apply(p if not p.isNull() else None, animated)
+
+    def _on_loaded(self, request_id: int, image: object) -> None:
+        if request_id != self._pending_id:
+            return  # 빠른 탐색으로 인한 지난 요청 결과는 무시
+        animated = getattr(self, "_pending_animated", True)
+        if isinstance(image, QImage) and not image.isNull():
+            self._apply(QPixmap.fromImage(image), animated)
+        else:
+            self._apply(None, animated)
 
     def show_message(self, text: str) -> None:
         self._source_pixmap = None

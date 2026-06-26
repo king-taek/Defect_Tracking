@@ -73,6 +73,23 @@ def assert_output_safe(
     return out
 
 
+def is_output_safe(output_path: str | Path, source_roots: Iterable[str | Path]) -> bool:
+    """예외 없이 안전 여부만 반환(경고 표시 등 비차단 검사용)."""
+    out = _resolve(output_path)
+    return not any(str(root) and is_within(out, root) for root in source_roots)
+
+
+def conflicting_source(
+    output_path: str | Path, source_roots: Iterable[str | Path]
+) -> Path | None:
+    """output_path 를 포함하는 원본 루트가 있으면 그 경로를, 없으면 None 을 반환."""
+    out = _resolve(output_path)
+    for root in source_roots:
+        if str(root) and is_within(out, root):
+            return _resolve(root)
+    return None
+
+
 def safe_makedirs(target_dir: str | Path, source_roots: Iterable[str | Path]) -> Path:
     """출력 디렉터리를 만들되, 원본 내부면 차단한다."""
     out = assert_output_safe(target_dir, source_roots)

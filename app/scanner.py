@@ -167,12 +167,16 @@ def _scan_wafer_folder(
     filenames = [f.name for f in files]
 
     image_files = [f for f in files if _is_image(f.name)]
-    ini_files = [f for f in files if _INI_HINT in f.name.lower() and f.suffix.lower() == ".ini"]
+    ini_files = [
+        f for f in files if _INI_HINT in f.name.lower() and f.suffix.lower() == ".ini"
+    ]
     ini_sections = _merge_ini_sections(ini_files)
 
-    # KLA info 파일 (이미지가 Camtek 으로 해석 안 될 때만 의미가 있지만 미리 파싱)
+    # KLA info 파일 선택. Camtek INI 파일(.ini)은 KLA info 후보에서 제외하여
+    # 혼재 폴더에서 오인하지 않도록 한다. 이 파싱은 .001/info 가 있는 KLA 폴더에서만 발생.
     kla_parsed = None
-    info_name = kla_info.select_info_file(filenames)
+    kla_candidates = [n for n in filenames if Path(n).suffix.lower() != ".ini"]
+    info_name = kla_info.select_info_file(kla_candidates)
     if info_name:
         try:
             kla_parsed = kla_info.load_info(wafer_dir / info_name)

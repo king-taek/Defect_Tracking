@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
@@ -147,7 +147,7 @@ def export_excel(
         # 이미지 행
         _set_cell(ws, r, 1, "이미지", bold=True, align="center", fill=_LIGHT)
         ws.row_dimensions[r].height = _IMG_ROW_HEIGHT
-        for ci, layer in enumerate(columns):
+        for ci in range(len(columns)):
             col_letter = get_column_letter(2 + ci)
             cell = ws.cell(row=r, column=1 + 1 + ci)
             cell.border = _BORDER
@@ -173,7 +173,7 @@ def export_excel(
 
         # 상세 정보 행
         _set_cell(ws, r, 1, "정보", bold=True, align="center", fill=_LIGHT)
-        for ci, layer in enumerate(columns):
+        for ci in range(len(columns)):
             if ci == 0:
                 rec = base
                 matched = True
