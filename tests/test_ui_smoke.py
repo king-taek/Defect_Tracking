@@ -223,18 +223,43 @@ def test_match_status_classification():
     assert MainWindow._match_status(_item([False, False])) == "none"
 
 
+def _set_filter(win, mode):
+    """필터를 바꾸고 보기 캐시를 무효화(직접 _filter 설정 시)."""
+    win._filter = mode
+    win._view_cache = None
+
+
 def test_filter_traversal_skips(win):
-    # 허용오차 0 → 전부 미매칭(none). '완전 매칭' 필터면 대상 없음.
+    # 허용오차 0 → 전부 미매칭(none).
     win.top.spn_tol.setValue(0.0)
     for _ in range(5):
         QCoreApplication.processEvents()
     statuses = {win._match_status(m) for m in win.matches}
     assert statuses == {"none"}
-    assert win._view_indices() != []  # 'all'
-    win._filter = "full"
-    assert win._view_indices() == []  # 완전매칭 없음
-    win._filter = "unmatched"
+    # 기본 '매칭만' 필터: 모든 후보가 none 이면 빈 화면 대신 전체를 보인다(혼란 방지).
+    _set_filter(win, "matched")
     assert len(win._view_indices()) == len(win.matches)
+    _set_filter(win, "all")
+    assert win._view_indices() != []
+    _set_filter(win, "full")
+    assert win._view_indices() == []  # 완전매칭 없음
+    _set_filter(win, "unmatched")
+    assert len(win._view_indices()) == len(win.matches)
+
+
+def test_matched_filter_excludes_unmatched(win):
+    # '매칭만' 필터는 매칭 0(none)인 기준을 후보에서 제외한다(일부는 매칭되게 큰 허용오차).
+    win.top.spn_tol.setValue(100000.0)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    statuses = [win._match_status(m) for m in win.matches]
+    _set_filter(win, "matched")
+    view = win._view_indices()
+    # none 인 기준은 모두 빠지고, 그 외(full/partial)는 모두 포함된다.
+    assert all(statuses[i] != "none" for i in view)
+    non_none = [i for i, s in enumerate(statuses) if s != "none"]
+    if non_none:  # 매칭이 하나라도 있으면 제외 의미 성립
+        assert view == non_none
 
 
 def test_recent_folders_push(win, tmp_path):

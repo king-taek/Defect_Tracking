@@ -72,6 +72,22 @@ def _mad(values: list[float], center: float) -> float:
     return statistics.median([abs(v - center) for v in values]) if values else 0.0
 
 
+def _estimate_offset(
+    dxs: list[float], dys: list[float], tolerance: float
+) -> LayerOffset:
+    """1:1 매칭 쌍의 dx,dy 표본에서 전역 정합오차(중앙값)를 추정한다.
+
+    오적용을 막기 위해 (1) 표본 수 ≥ _MIN_OFFSET_SAMPLES, (2) 표본이 일관(MAD ≤
+    tolerance)할 때만 보정값을 만든다. 그 외에는 보정 없음(LayerOffset()).
+    """
+    if len(dxs) >= _MIN_OFFSET_SAMPLES:
+        mdx = statistics.median(dxs)
+        mdy = statistics.median(dys)
+        if _mad(dxs, mdx) <= tolerance and _mad(dys, mdy) <= tolerance:
+            return LayerOffset(mdx, mdy, len(dxs))
+    return LayerOffset()
+
+
 def compute_layer_offsets(
     base_records: list[DefectRecord],
     compare_layers: list[str],
@@ -83,8 +99,6 @@ def compute_layer_offsets(
 
     die 주변(±die_tol)에 후보가 **정확히 1개**인 경우만 표본으로 사용한다(모호 배제).
     거리 게이트를 두지 않으므로 **허용오차보다 큰 계통적 shift 도 추정**할 수 있다.
-    단, 오적용을 막기 위해 (1) 표본 수 ≥ _MIN_OFFSET_SAMPLES, (2) 표본이 일관(MAD ≤
-    tolerance)할 때만 적용한다. 그 외에는 보정 없음(LayerOffset()).
     """
     offsets: dict[str, LayerOffset] = {}
     for layer in compare_layers:
@@ -98,13 +112,7 @@ def compute_layer_offsets(
             if len(cands) == 1:
                 dxs.append(base.x - cands[0].x)  # type: ignore[operator]
                 dys.append(base.y - cands[0].y)  # type: ignore[operator]
-        if len(dxs) >= _MIN_OFFSET_SAMPLES:
-            mdx = statistics.median(dxs)
-            mdy = statistics.median(dys)
-            if _mad(dxs, mdx) <= tolerance and _mad(dys, mdy) <= tolerance:
-                offsets[layer] = LayerOffset(mdx, mdy, len(dxs))
-                continue
-        offsets[layer] = LayerOffset()
+        offsets[layer] = _estimate_offset(dxs, dys, tolerance)
     return offsets
 
 
@@ -203,6 +211,42 @@ def _select_match(
     return best, best_raw, ambiguous
 
 
+def _build_result(
+    base: DefectRecord,
+    layer: str,
+    candidates: list[DefectRecord],
+    tolerance: float,
+    offset: LayerOffset,
+    failed_count: int,
+) -> MatchResult:
+    """미리 수집한 후보(candidates)로 한 layer 의 매칭 결과를 만든다.
+
+    후보 수집을 호출자가 책임지므로(중복 수집 제거) 매칭 로직만 담당한다.
+    """
+    matched: DefectRecord | None = None
+    dist: float | None = None
+    nearest: DefectRecord | None = None
+    nearest_dist: float | None = None
+    failed_in_die = 0
+    ambiguous = False
+    if base.ok:
+        matched, dist, ambiguous = _select_match(base, candidates, tolerance, offset)
+        if matched is None:
+            nearest, nearest_dist = find_nearest(base, candidates)
+            failed_in_die = failed_count
+    return MatchResult(
+        compare_layer=layer,
+        base=base,
+        matched=matched,
+        distance=dist,
+        nearest=nearest,
+        nearest_distance=nearest_dist,
+        die_candidates=len(candidates),
+        failed_in_die=failed_in_die,
+        ambiguous=ambiguous,
+    )
+
+
 def match_base_against_layers(
     base: DefectRecord,
     compare_layers: list[str],
@@ -227,33 +271,13 @@ def match_base_against_layers(
     )
     result = BaseDefectMatches(base=base)
     for layer in compare_layers:
-        matched: DefectRecord | None = None
-        dist: float | None = None
-        nearest: DefectRecord | None = None
-        nearest_dist: float | None = None
-        die_candidates = 0
-        failed_in_die = 0
-        ambiguous = False
-        if base.ok:
-            offset = (offsets or {}).get(layer, LayerOffset())
-            candidates = _gather_candidates(base, idx.get(layer, {}), die_tol)
-            die_candidates = len(candidates)
-            matched, dist, ambiguous = _select_match(base, candidates, tolerance, offset)
-            if matched is None:
-                nearest, nearest_dist = find_nearest(base, candidates)
-                failed_in_die = fidx.get(layer, {}).get(_norm_wafer(base.wafer_id), 0)
+        candidates = (
+            _gather_candidates(base, idx.get(layer, {}), die_tol) if base.ok else []
+        )
+        offset = (offsets or {}).get(layer, LayerOffset())
+        failed_count = fidx.get(layer, {}).get(_norm_wafer(base.wafer_id), 0)
         result.results.append(
-            MatchResult(
-                compare_layer=layer,
-                base=base,
-                matched=matched,
-                distance=dist,
-                nearest=nearest,
-                nearest_distance=nearest_dist,
-                die_candidates=die_candidates,
-                failed_in_die=failed_in_die,
-                ambiguous=ambiguous,
-            )
+            _build_result(base, layer, candidates, tolerance, offset, failed_count)
         )
     return result
 
@@ -268,21 +292,55 @@ def match_all_with_offsets(
     fail_index: FailIndex | None = None,
     die_tol: int = DEFAULT_DIE_TOL,
 ) -> tuple[list[BaseDefectMatches], dict[str, LayerOffset]]:
-    """매칭 결과 목록과 비교 layer 별 전역 정합오차를 함께 반환한다."""
+    """매칭 결과 목록과 비교 layer 별 전역 정합오차를 함께 반환한다.
+
+    각 (base, layer) 후보를 **한 번만** 수집해 정합오차 추정과 매칭에 함께 쓴다
+    (이전엔 두 패스에서 각각 수집 → 중복 제거로 대량 이미지에서 빨라진다).
+    """
     idx = index if index is not None else build_die_index(records_by_layer, compare_layers)
     fidx = (
         fail_index
         if fail_index is not None
         else build_fail_index(records_by_layer, compare_layers)
     )
-    offsets = compute_layer_offsets(base_records, compare_layers, idx, tolerance, die_tol)
-    matches = [
-        match_base_against_layers(
-            base, compare_layers, records_by_layer, tolerance,
-            index=idx, fail_index=fidx, offsets=offsets, die_tol=die_tol,
-        )
-        for base in base_records
-    ]
+    buckets = {layer: idx.get(layer, {}) for layer in compare_layers}
+
+    # 1패스: (base, layer) 후보 수집 + 1:1 쌍에서 정합오차 표본 적립.
+    cand_table: list[dict[str, list[DefectRecord]]] = []
+    samples: dict[str, tuple[list[float], list[float]]] = {
+        layer: ([], []) for layer in compare_layers
+    }
+    for base in base_records:
+        row: dict[str, list[DefectRecord]] = {}
+        for layer in compare_layers:
+            cands = _gather_candidates(base, buckets[layer], die_tol) if base.ok else []
+            row[layer] = cands
+            if base.ok:
+                ok_cands = [c for c in cands if c.ok]
+                if len(ok_cands) == 1:
+                    dxs, dys = samples[layer]
+                    dxs.append(base.x - ok_cands[0].x)  # type: ignore[operator]
+                    dys.append(base.y - ok_cands[0].y)  # type: ignore[operator]
+        cand_table.append(row)
+
+    offsets = {
+        layer: _estimate_offset(samples[layer][0], samples[layer][1], tolerance)
+        for layer in compare_layers
+    }
+
+    # 2패스: 수집한 후보 재사용해 매칭 결과 구성.
+    matches: list[BaseDefectMatches] = []
+    for base, row in zip(base_records, cand_table):
+        result = BaseDefectMatches(base=base)
+        wafer = _norm_wafer(base.wafer_id)
+        for layer in compare_layers:
+            failed_count = fidx.get(layer, {}).get(wafer, 0)
+            result.results.append(
+                _build_result(
+                    base, layer, row[layer], tolerance, offsets[layer], failed_count
+                )
+            )
+        matches.append(result)
     return matches, offsets
 
 

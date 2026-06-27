@@ -94,6 +94,20 @@ class ThumbnailStrip(QScrollArea):
         if 0 <= index < len(self._thumbs):
             self._thumbs[index].set_marked(marked)
 
+    def set_visible_set(self, indices: Optional[list[int]]) -> None:
+        """주어진 인덱스의 썸네일만 보이고 나머지는 숨긴다(후보 제외 반영).
+
+        indices 가 None 이면 전부 표시. 인덱스는 기준 record 전체 기준(불변)이라
+        클릭 시 emit 되는 index 도 그대로 유효하다.
+        """
+        if indices is None:
+            for t in self._thumbs:
+                t.setVisible(True)
+            return
+        sel = set(indices)
+        for i, t in enumerate(self._thumbs):
+            t.setVisible(i in sel)
+
     def set_current(self, index: int) -> None:
         if not (0 <= index < len(self._thumbs)):
             return
