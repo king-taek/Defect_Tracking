@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from app import layout
-from app.matcher import match_base_against_layers
+from app.matcher import match_all_with_offsets, match_base_against_layers
 from app.models import DefectRecord, ParseStatus, Source
 
 
@@ -78,6 +78,43 @@ def test_not_ambiguous_with_clear_winner():
     far = _rec("LYB4", "W1", 4, 5, 1080.0, 2000.0, name="far.jpg")    # 80
     out = match_base_against_layers(base, ["LYB4"], {"LYB4": [near, far]}, tolerance=100.0)
     assert out.for_layer("LYB4").ambiguous is False
+
+
+def test_die_within_one_matches():
+    """die index 가 (±1) 어긋나도 매칭된다(원본 AOI 알고리즘)."""
+    base = _rec("LYA4", "W1", 4, 5, 1000.0, 2000.0)
+    cmp = _rec("LYB4", "W1", 5, 6, 1010.0, 2000.0)  # die +1,+1, 거리 10
+    out = match_base_against_layers(base, ["LYB4"], {"LYB4": [cmp]}, tolerance=100.0)
+    assert out.for_layer("LYB4").is_match
+
+
+def test_die_two_off_still_no_match():
+    base = _rec("LYA4", "W1", 4, 5, 1000.0, 2000.0)
+    cmp = _rec("LYB4", "W1", 6, 7, 1000.0, 2000.0)  # die +2,+2 → 범위 밖
+    out = match_base_against_layers(base, ["LYB4"], {"LYB4": [cmp]}, tolerance=100.0)
+    assert not out.for_layer("LYB4").is_match
+
+
+def test_median_offset_corrects_selection():
+    """layer 간 계통적 이동이 있으면, 그 중앙값에 맞는 후보를 선택한다."""
+    # die 를 2칸 간격으로 띄워 die±1 이웃이 겹치지 않게 한다.
+    bases = [
+        _rec("LYA4", "W1", 1, 1, 1000.0, 0.0),
+        _rec("LYA4", "W1", 3, 3, 1000.0, 0.0),
+        _rec("LYA4", "W1", 5, 5, 1000.0, 0.0),
+        _rec("LYA4", "W1", 7, 7, 1000.0, 0.0),  # 같은 die 후보 2개(모호)
+    ]
+    cmps = [
+        _rec("LYB4", "W1", 1, 1, 1040.0, 0.0, name="c1.jpg"),
+        _rec("LYB4", "W1", 3, 3, 1040.0, 0.0, name="c2.jpg"),
+        _rec("LYB4", "W1", 5, 5, 1040.0, 0.0, name="c3.jpg"),
+        _rec("LYB4", "W1", 7, 7, 1045.0, 0.0, name="ca.jpg"),  # raw 45, 보정후 잔차 5
+        _rec("LYB4", "W1", 7, 7, 965.0, 0.0, name="cb.jpg"),   # raw 35, 보정후 잔차 75
+    ]
+    matches, offsets = match_all_with_offsets(bases, ["LYB4"], {"LYB4": cmps}, tolerance=100.0)
+    assert round(offsets["LYB4"].dx) == -40 and offsets["LYB4"].count == 3
+    mr = matches[3].for_layer("LYB4")
+    assert mr.is_match and mr.matched.image_path.name == "ca.jpg"
 
 
 def test_normalize_layer_order_prefix_and_rereview():

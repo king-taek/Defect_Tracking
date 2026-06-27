@@ -1,18 +1,26 @@
-"""매칭 엔진 (문서 Section 8.3).
+"""매칭 엔진 (문서 Section 8.3 + 원본 AOI 도구 Module_Compare 알고리즘).
 
 기준 layer 의 각 defect 에 대해 비교 layer 에서 다음 조건을 만족하는 defect 를 찾는다:
   1. wafer ID 동일
-  2. die 위치 (col,row) 동일
-  3. local x,y 좌표 거리 <= tolerance (기본 100, 사용자 조정)
+  2. die 위치 (col,row) 가 ±DIE_TOL(기본 1) 이내 — 경계 정렬 차이를 흡수
+  3. local x,y 거리(아래 '정합오차 보정' 적용) <= tolerance
 
-여러 후보가 있으면 가장 가까운 것을 선택한다. 대량 이미지에서도 빠르도록(Section 10)
-비교 layer 의 record 를 (wafer, col, row) 키로 한 번만 인덱싱한 뒤 조회한다.
-모든 계산은 메모리에서만 수행하며 원본 파일을 수정하지 않는다.
+원본 AOI 도구의 비교 알고리즘에서 가져온 개선:
+  - **die ±1 허용**: 두 layer 의 die index 가 1 칸 어긋나도 매칭.
+  - **layer 간 전역 정합오차(median offset) 보정**: 1:1 로 분명히 매칭되는 쌍들로
+    두 layer 사이의 계통적 이동량(중앙값 dx,dy)을 추정하고, 그 이동량을 뺀 잔차로
+    게이팅·선택한다. 두 스캔 사이에 일정한 위치 오프셋이 있어도 매칭이 성립한다.
+
+대량 이미지에서도 빠르도록 비교 layer record 를 (wafer, col, row) 키로 한 번만
+인덱싱한다. 모든 계산은 메모리에서만 수행하며 원본 파일을 수정하지 않는다.
 """
 
 from __future__ import annotations
 
+import math
+import statistics
 from collections import defaultdict
+from dataclasses import dataclass
 
 from app.models import BaseDefectMatches, DefectRecord, MatchResult
 
@@ -21,10 +29,73 @@ DieIndex = dict[str, dict[tuple[str, int, int], list[DefectRecord]]]
 # layer -> {norm_wafer: 좌표 추출 실패(not ok) record 수}
 FailIndex = dict[str, dict[str, int]]
 
+# die index 허용 오차(±). 0 이면 정확 일치.
+DEFAULT_DIE_TOL = 1
+
+
+@dataclass(frozen=True)
+class LayerOffset:
+    """비교 layer 의 기준 layer 대비 전역 정합오차(중앙값)와 표본 수."""
+
+    dx: float = 0.0
+    dy: float = 0.0
+    count: int = 0  # 추정에 쓰인 1:1 매칭 쌍 수
+
 
 def _norm_wafer(wafer_id: str) -> str:
     """layer 간 wafer 폴더명 표기 차이(대소문자/공백)를 흡수해 매칭을 완화."""
     return wafer_id.strip().lower()
+
+
+def _gather_candidates(
+    base: DefectRecord,
+    layer_bucket: dict,
+    die_tol: int,
+) -> list[DefectRecord]:
+    """base 의 die 주변 ±die_tol 범위 비교 후보를 모은다(같은 wafer)."""
+    if base.col is None or base.row is None:
+        return []
+    w = _norm_wafer(base.wafer_id)
+    out: list[DefectRecord] = []
+    for dc in range(-die_tol, die_tol + 1):
+        for dr in range(-die_tol, die_tol + 1):
+            out.extend(layer_bucket.get((w, base.col + dc, base.row + dr), []))
+    return out
+
+
+def compute_layer_offsets(
+    base_records: list[DefectRecord],
+    compare_layers: list[str],
+    index: DieIndex,
+    tolerance: float,
+    die_tol: int = DEFAULT_DIE_TOL,
+) -> dict[str, LayerOffset]:
+    """비교 layer 별 전역 정합오차(중앙값 dx,dy)를 1:1 매칭 쌍으로 추정한다.
+
+    1:1 매칭(허용오차 내 후보가 정확히 1개)인 경우만 표본으로 사용해 모호함을 배제한다.
+    """
+    offsets: dict[str, LayerOffset] = {}
+    for layer in compare_layers:
+        bucket = index.get(layer, {})
+        dxs: list[float] = []
+        dys: list[float] = []
+        for base in base_records:
+            if not base.ok:
+                continue
+            within = [
+                c for c in _gather_candidates(base, bucket, die_tol)
+                if c.ok and math.hypot(base.x - c.x, base.y - c.y) <= tolerance  # type: ignore[operator]
+            ]
+            if len(within) == 1:
+                dxs.append(base.x - within[0].x)  # type: ignore[operator]
+                dys.append(base.y - within[0].y)  # type: ignore[operator]
+        if dxs:
+            offsets[layer] = LayerOffset(
+                statistics.median(dxs), statistics.median(dys), len(dxs)
+            )
+        else:
+            offsets[layer] = LayerOffset()
+    return offsets
 
 
 def build_die_index(
@@ -63,52 +134,15 @@ def build_fail_index(
     return index
 
 
-# 두 후보의 거리 차가 이 값 미만이면 "동률(모호)"로 본다(µm).
+# 두 후보의 잔차 차가 이 값 미만이면 "동률(모호)"로 본다(µm).
 _AMBIGUOUS_EPSILON = 1.0
-
-
-def find_best_match(
-    base: DefectRecord,
-    candidates: list[DefectRecord],
-    tolerance: float,
-) -> tuple[DefectRecord | None, float | None]:
-    """후보들 중 base 와 거리 <= tolerance 인 최근접 record 를 반환."""
-    best: DefectRecord | None = None
-    best_dist: float | None = None
-    for cand in candidates:
-        dist = base.distance_to(cand)
-        if dist is None or dist > tolerance:
-            continue
-        if best_dist is None or dist < best_dist:
-            best = cand
-            best_dist = dist
-    return best, best_dist
-
-
-def is_ambiguous_match(
-    base: DefectRecord,
-    candidates: list[DefectRecord],
-    tolerance: float,
-    best_dist: float | None,
-) -> bool:
-    """허용오차 내에서 최근접과 거의 같은 거리의 후보가 또 있으면 True(모호)."""
-    if best_dist is None:
-        return False
-    near = 0
-    for cand in candidates:
-        dist = base.distance_to(cand)
-        if dist is None or dist > tolerance:
-            continue
-        if abs(dist - best_dist) < _AMBIGUOUS_EPSILON:
-            near += 1
-    return near >= 2
 
 
 def find_nearest(
     base: DefectRecord,
     candidates: list[DefectRecord],
 ) -> tuple[DefectRecord | None, float | None]:
-    """허용오차와 무관하게 같은 die 후보 중 최근접 record 를 반환(진단용)."""
+    """허용오차와 무관하게 후보 중 최근접 record 를 반환(진단용, raw 거리)."""
     best: DefectRecord | None = None
     best_dist: float | None = None
     for cand in candidates:
@@ -121,6 +155,44 @@ def find_nearest(
     return best, best_dist
 
 
+def _select_match(
+    base: DefectRecord,
+    candidates: list[DefectRecord],
+    tolerance: float,
+    offset: LayerOffset,
+) -> tuple[DefectRecord | None, float | None, bool]:
+    """정합오차(offset)를 보정한 잔차 기준으로 최적 후보를 고른다.
+
+    잔차 = hypot(dx-offset.dx, dy-offset.dy) <= tolerance 인 후보 중 잔차 최소.
+    반환 distance 는 보정 전 실제 거리(raw)로 보고한다(사용자에게 실제 분리량 표시).
+    offset 이 (0,0) 이면 raw 거리 기준 최근접과 동일하게 동작한다.
+    """
+    if not base.ok:
+        return None, None, False
+    best: DefectRecord | None = None
+    best_resid: float | None = None
+    best_raw: float | None = None
+    resids: list[float] = []
+    for c in candidates:
+        if not c.ok:
+            continue
+        dx = base.x - c.x  # type: ignore[operator]
+        dy = base.y - c.y  # type: ignore[operator]
+        resid = math.hypot(dx - offset.dx, dy - offset.dy)
+        if resid > tolerance:
+            continue
+        resids.append(resid)
+        if best_resid is None or resid < best_resid:
+            best_resid = resid
+            best = c
+            best_raw = math.hypot(dx, dy)
+    ambiguous = (
+        best is not None
+        and sum(1 for r in resids if abs(r - best_resid) < _AMBIGUOUS_EPSILON) >= 2
+    )
+    return best, best_raw, ambiguous
+
+
 def match_base_against_layers(
     base: DefectRecord,
     compare_layers: list[str],
@@ -129,11 +201,13 @@ def match_base_against_layers(
     *,
     index: DieIndex | None = None,
     fail_index: FailIndex | None = None,
+    offsets: dict[str, LayerOffset] | None = None,
+    die_tol: int = DEFAULT_DIE_TOL,
 ) -> BaseDefectMatches:
     """기준 defect 1개를 모든 비교 layer 와 매칭.
 
-    index/fail_index 를 미리 만들어 넘기면 재사용한다(match_all 에서 사용).
-    넘기지 않으면 이 호출에 한해 즉석에서 인덱싱한다.
+    index/fail_index/offsets 를 미리 만들어 넘기면 재사용한다(match_all 에서 사용).
+    넘기지 않으면 이 호출에 한해 즉석에서 만든다(offsets 미지정 시 정합오차 보정 없음).
     """
     idx = index if index is not None else build_die_index(records_by_layer, compare_layers)
     fidx = (
@@ -151,15 +225,13 @@ def match_base_against_layers(
         failed_in_die = 0
         ambiguous = False
         if base.ok:
-            key = (_norm_wafer(base.wafer_id), base.col, base.row)
-            candidates = idx.get(layer, {}).get(key, [])  # type: ignore[arg-type]
+            offset = (offsets or {}).get(layer, LayerOffset())
+            candidates = _gather_candidates(base, idx.get(layer, {}), die_tol)
             die_candidates = len(candidates)
-            matched, dist = find_best_match(base, candidates, tolerance)
+            matched, dist, ambiguous = _select_match(base, candidates, tolerance, offset)
             if matched is None:
                 nearest, nearest_dist = find_nearest(base, candidates)
                 failed_in_die = fidx.get(layer, {}).get(_norm_wafer(base.wafer_id), 0)
-            else:
-                ambiguous = is_ambiguous_match(base, candidates, tolerance, dist)
         result.results.append(
             MatchResult(
                 compare_layer=layer,
@@ -176,26 +248,42 @@ def match_base_against_layers(
     return result
 
 
+def match_all_with_offsets(
+    base_records: list[DefectRecord],
+    compare_layers: list[str],
+    records_by_layer: dict[str, list[DefectRecord]],
+    tolerance: float,
+    *,
+    index: DieIndex | None = None,
+    fail_index: FailIndex | None = None,
+    die_tol: int = DEFAULT_DIE_TOL,
+) -> tuple[list[BaseDefectMatches], dict[str, LayerOffset]]:
+    """매칭 결과 목록과 비교 layer 별 전역 정합오차를 함께 반환한다."""
+    idx = index if index is not None else build_die_index(records_by_layer, compare_layers)
+    fidx = (
+        fail_index
+        if fail_index is not None
+        else build_fail_index(records_by_layer, compare_layers)
+    )
+    offsets = compute_layer_offsets(base_records, compare_layers, idx, tolerance, die_tol)
+    matches = [
+        match_base_against_layers(
+            base, compare_layers, records_by_layer, tolerance,
+            index=idx, fail_index=fidx, offsets=offsets, die_tol=die_tol,
+        )
+        for base in base_records
+    ]
+    return matches, offsets
+
+
 def match_all(
     base_records: list[DefectRecord],
     compare_layers: list[str],
     records_by_layer: dict[str, list[DefectRecord]],
     tolerance: float,
 ) -> list[BaseDefectMatches]:
-    """기준 layer 의 모든 defect 에 대해 매칭 결과 목록을 만든다.
-
-    비교 layer 인덱스를 한 번만 만들어 전체 기준 record 에 재사용한다.
-    """
-    index = build_die_index(records_by_layer, compare_layers)
-    fail_index = build_fail_index(records_by_layer, compare_layers)
-    return [
-        match_base_against_layers(
-            base,
-            compare_layers,
-            records_by_layer,
-            tolerance,
-            index=index,
-            fail_index=fail_index,
-        )
-        for base in base_records
-    ]
+    """기준 layer 의 모든 defect 에 대해 매칭 결과 목록을 만든다(정합오차 보정 포함)."""
+    matches, _ = match_all_with_offsets(
+        base_records, compare_layers, records_by_layer, tolerance
+    )
+    return matches
