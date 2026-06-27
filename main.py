@@ -43,6 +43,7 @@ def main() -> int:
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication
 
+    from app import logging_config
     from app.config import AppSettings
     from app.ui import theme
     from app.ui.main_window import MainWindow
@@ -56,6 +57,8 @@ def main() -> int:
     theme.apply_theme(app)
 
     settings = AppSettings.load()
+    logging_config.setup_logging(settings.workspace_path)
+    logging_config.get_logger().info("애플리케이션 시작")
     window = MainWindow(settings)
     window.show()
     return app.exec()

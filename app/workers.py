@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from app import scanner
 from app.scanner import LotIndex
+
+_log = logging.getLogger("conder.workers")
 
 
 class ScanSignals(QObject):
@@ -36,6 +39,7 @@ class ScanWorker(QRunnable):
             index: LotIndex = scanner.scan_lot(self.lot_path, progress=cb)
             self.signals.finished.emit(index)
         except Exception as exc:  # noqa: BLE001 - 워커는 모든 예외를 UI 로 전달
+            _log.exception("스캔 워커 실패: %s", self.lot_path)
             self.signals.error.emit(str(exc))
 
 

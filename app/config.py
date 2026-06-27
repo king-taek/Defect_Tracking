@@ -10,6 +10,7 @@ JSON 파일에 저장한다. 원본 폴더에는 어떤 것도 쓰지 않는다.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -127,11 +128,15 @@ class AppSettings:
         self.cache_path.mkdir(parents=True, exist_ok=True)
 
     def save(self) -> None:
+        """설정을 원자적으로 저장한다(임시파일 작성 후 교체 → 크래시 시 손상 방지)."""
         self.ensure_workspace()
         data = asdict(self)
-        self.settings_file().write_text(
+        target = self.settings_file()
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        os.replace(tmp, target)  # 같은 디렉터리 내 원자적 교체
 
     @classmethod
     def load(cls, workspace: Path | None = None) -> "AppSettings":
@@ -142,6 +147,8 @@ class AppSettings:
                 raw: dict[str, Any] = json.loads(settings_file.read_text(encoding="utf-8"))
                 known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
                 return cls(**{k: v for k, v in raw.items() if k in known})
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                logging.getLogger("conder.config").warning(
+                    "settings.json 을 읽지 못해 기본값을 사용합니다: %s", exc
+                )
         return cls(workspace=str(ws))

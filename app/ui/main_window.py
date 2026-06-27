@@ -334,6 +334,20 @@ class MainWindow(QMainWindow):
                 f"{len(failed)}개 이미지의 좌표를 추출하지 못했습니다(상태표시줄에 상세).",
                 "warn",
             )
+        # 접근 불가(권한/네트워크) 경로가 있으면 조용히 누락되지 않도록 알린다.
+        errors = getattr(index, "scan_errors", [])
+        if errors:
+            preview = "\n".join(errors[:8])
+            if len(errors) > 8:
+                preview += f"\n… 외 {len(errors) - 8}개"
+            self.banner.show_message(
+                f"{len(errors)}개 경로를 읽지 못해 일부 layer/wafer 가 누락됐을 수 있습니다.",
+                "warn",
+                timeout_ms=0,
+            )
+            self.nav.set_status_tooltip(
+                self._failure_summary(failed) + "\n\n[접근 실패 경로]\n" + preview
+            )
         self._rebuild_all()
 
     @staticmethod

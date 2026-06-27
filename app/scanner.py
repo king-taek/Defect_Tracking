@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -23,6 +25,18 @@ from app.parsers import camtek_filename, camtek_ini, kla_info
 ProgressCb = Optional[Callable[[str, int, int], None]]
 
 _INI_HINT = "colorimagegrabinginfo"
+_log = logging.getLogger("conder.scanner")
+
+# 디렉터리/파일 나열 중 접근 오류를 누적(스캔 1회 단위). 병렬 스캔(Phase 3) 대비 lock 사용.
+_scan_errors: list[str] = []
+_scan_errors_lock = threading.Lock()
+
+
+def _record_scan_error(path: Path, exc: OSError) -> None:
+    msg = f"{path}: {exc.__class__.__name__}: {exc}"
+    with _scan_errors_lock:
+        _scan_errors.append(msg)
+    _log.warning("접근 실패 — %s", msg)
 
 
 @dataclass
@@ -33,6 +47,7 @@ class LotIndex:
     lot_path: Path
     layers: list[LayerInfo] = field(default_factory=list)
     records: list[DefectRecord] = field(default_factory=list)
+    scan_errors: list[str] = field(default_factory=list)  # 접근 불가 경로(권한/네트워크)
 
     def layer_canonicals(self) -> list[str]:
         """선택 UI 에 표시할 layer 이름 목록(폴더 순서, 유니크).
@@ -67,14 +82,16 @@ class LotIndex:
 def _list_dirs(path: Path) -> list[Path]:
     try:
         return sorted([p for p in path.iterdir() if p.is_dir()], key=lambda p: p.name)
-    except OSError:
+    except OSError as exc:
+        _record_scan_error(path, exc)
         return []
 
 
 def _list_files(path: Path) -> list[Path]:
     try:
         return sorted([p for p in path.iterdir() if p.is_file()], key=lambda p: p.name)
-    except OSError:
+    except OSError as exc:
+        _record_scan_error(path, exc)
         return []
 
 
@@ -228,6 +245,10 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
     lot = Path(lot_path)
     index = LotIndex(lot_name=lot.name, lot_path=lot)
 
+    with _scan_errors_lock:
+        _scan_errors.clear()
+    _log.info("스캔 시작: %s", lot)
+
     layer_dirs = _list_dirs(lot)
     total = len(layer_dirs) or 1
 
@@ -253,6 +274,12 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
                 _scan_wafer_folder(wafer_dir, info.display, info.folder_name)
             )
 
+    with _scan_errors_lock:
+        index.scan_errors = list(_scan_errors)
+    _log.info(
+        "스캔 완료: layer %d · record %d · 접근오류 %d",
+        len(index.layers), len(index.records), len(index.scan_errors),
+    )
     if progress:
         progress("스캔 완료", total, total)
     return index
