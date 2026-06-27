@@ -95,6 +95,15 @@ class LayerInfo:
     is_re_review: bool = False  # _재리뷰 여부
 
 
+class NoMatchReason(str, Enum):
+    """비교 매칭 실패 사유(화면 진단 문구의 단일 출처)."""
+
+    NONE = "NONE"  # 매칭 성공
+    NO_DIE_PHOTO = "NO_DIE_PHOTO"  # 같은 die 의 비교 사진 자체가 없음
+    COORD_FAIL = "COORD_FAIL"  # 비교 사진은 있으나 좌표 추출 실패로 제외됨
+    OVER_TOLERANCE = "OVER_TOLERANCE"  # 같은 die 후보는 있으나 허용오차 초과
+
+
 @dataclass
 class MatchResult:
     """기준 defect 1개에 대한 특정 비교 layer 의 매칭 결과."""
@@ -103,10 +112,26 @@ class MatchResult:
     base: DefectRecord
     matched: Optional[DefectRecord] = None
     distance: Optional[float] = None
+    # ---- 진단용(매칭 실패 사유 파악) ----
+    nearest: Optional[DefectRecord] = None  # 허용오차 무시한 같은 die 최근접 후보
+    nearest_distance: Optional[float] = None  # 그 거리
+    die_candidates: int = 0  # 같은 (wafer,die) 의 좌표 OK 비교 record 수
+    failed_in_die: int = 0  # 이 비교 layer·같은 wafer 의 좌표 추출 실패 수(근사)
 
     @property
     def is_match(self) -> bool:
         return self.matched is not None
+
+    @property
+    def reason(self) -> NoMatchReason:
+        """매칭 실패 사유 분류."""
+        if self.is_match:
+            return NoMatchReason.NONE
+        if self.die_candidates > 0:
+            return NoMatchReason.OVER_TOLERANCE
+        if self.failed_in_die > 0:
+            return NoMatchReason.COORD_FAIL
+        return NoMatchReason.NO_DIE_PHOTO
 
 
 @dataclass

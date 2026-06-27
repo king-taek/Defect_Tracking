@@ -85,11 +85,13 @@ def convert_from_sections(
     sections: dict[str, dict[str, str]], original_name: str
 ) -> CamtekIniResult:
     """미리 파싱한 section 사전에서 원본 이름에 해당하는 좌표를 계산."""
-    section_key = f"{original_name}.jpeg".lower()
-    section = sections.get(section_key)
-    if section is None:
-        # ".jpeg" 없이 저장된 변형도 한 번 더 시도
-        section = sections.get(original_name.lower())
+    # INI section 키는 원본 이미지 파일명(확장자 포함)인데 저장된 확장자가
+    # 제각각일 수 있으므로 후보를 순서대로 시도한다(.jpeg 우선으로 기존 동작 보존).
+    section = None
+    for ext in (".jpeg", ".jpg", ".png", ".bmp", ".tif", ".tiff", ""):
+        section = sections.get(f"{original_name}{ext}".lower())
+        if section is not None:
+            break
     if section is None:
         return CamtekIniResult(ParseStatus.NOT_FOUND)
 

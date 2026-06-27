@@ -150,6 +150,14 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
     key = Path(jpg_filename).name.lower()
     fields = parsed.defects.get(key)
     if fields is None:
+        # 정확 파일명 실패 시 stem(확장자 제외) 일치로 한 번 더 시도.
+        # 예) 이미지 foo.jpg ↔ TiffFileName foo.tif 처럼 확장자만 다른 경우.
+        stem = Path(jpg_filename).stem.lower()
+        for k, v in parsed.defects.items():
+            if Path(k).stem == stem:
+                fields = v
+                break
+    if fields is None:
         return KlaResult(ParseStatus.NOT_FOUND)
     if parsed.die_pitch_y is None:
         return KlaResult(ParseStatus.INVALID_INFO)

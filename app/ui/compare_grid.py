@@ -15,11 +15,12 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QGridLayout,
     QLabel,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from app.models import BaseDefectMatches, DefectRecord
+from app.models import BaseDefectMatches, DefectRecord, NoMatchReason
 from app.ui import theme
 from app.ui.image_loader import ImageLoader
 from app.ui.widgets import FadeImageLabel
@@ -52,30 +53,29 @@ class LayerCell(QFrame):
 
     def _build(self) -> None:
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 6, 8, 8)
-        lay.setSpacing(4)
-
-        header = QLabel()
-        header.setAlignment(Qt.AlignCenter)
-        label = f"★ {self.layer} (기준)" if self.is_base else self.layer
-        header.setText(label)
-        header.setStyleSheet(
-            f"font-weight:700; color:{'#ffffff' if self.is_base else theme.TEXT};"
-        )
-        self.header = header
-
-        self.info = QLabel("")
-        self.info.setObjectName("dim")
-        self.info.setAlignment(Qt.AlignCenter)
-        self.info.setStyleSheet("font-size:10px;")
+        lay.setContentsMargins(10, 8, 10, 10)
+        lay.setSpacing(6)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # 기준은 부드럽게(긴 fade), 비교는 빠른 fade
         self.image = FadeImageLabel(duration=320 if self.is_base else 180)
-        self.image.setMinimumHeight(160)
+        self.image.setMinimumHeight(280)
+        self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        lay.addWidget(header)
-        lay.addWidget(self.info)
+        # Layer 이름 배지: 이미지 위에 floating (요구사항 4 — 사진 위 Layer명 표시)
+        self.badge = QLabel(self.image)
+        self.badge.setObjectName("layerBadgeBase" if self.is_base else "layerBadge")
+        self.badge.setText(f"★ {self.layer} (기준)" if self.is_base else self.layer)
+        self.badge.adjustSize()
+        self.badge.move(10, 10)
+
+        # 이미지 아래 작은 진단/부가정보 줄(wafer명 노출 X — 상세는 tooltip)
+        self.info = QLabel("")
+        self.info.setObjectName("diag")
+        self.info.setAlignment(Qt.AlignCenter)
+
         lay.addWidget(self.image, 1)
+        lay.addWidget(self.info)
 
     def _apply_style(self, active: bool) -> None:
         if self.is_base:
@@ -94,23 +94,32 @@ class LayerCell(QFrame):
                 f" border:1px solid {theme.NEON_SOFT}; border-radius:10px; }}"
             )
 
-    def show_record(self, rec: Optional[DefectRecord], info: str, matched: bool) -> None:
+    def _set_info(self, text: str, *, warn: bool = False) -> None:
+        """진단/부가정보 줄을 갱신하고 QSS objectName 을 다시 적용한다."""
+        self.info.setText(text)
+        self.info.setObjectName("diagWarn" if warn else "diag")
+        self.info.style().unpolish(self.info)
+        self.info.style().polish(self.info)
+
+    def show_record(
+        self, rec: Optional[DefectRecord], info: str, matched: bool, *, warn: bool = False
+    ) -> None:
         self._set_record(rec)
         if rec is not None:
             self.image.show_path(rec.image_path, animated=not self.is_base)
-            self.info.setText(info)
         else:
-            self.image.show_message("매칭 없음")
-            self.info.setText(info)
+            self.image.show_message("")
+        self._set_info(info, warn=warn)
+        self.badge.raise_()
         if not self.is_base:
             self._apply_style(active=matched)
 
     def show_base(self, rec: DefectRecord) -> None:
         self._set_record(rec)
         self.image.show_path(rec.image_path, animated=True)
-        self.info.setText(
-            f"wafer {rec.wafer_id}  die({rec.col},{rec.row})  {rec.position_key}"
-        )
+        # wafer명은 노출하지 않고 die 위치만 간단히(상세는 tooltip)
+        self._set_info(f"die ({rec.col}, {rec.row})")
+        self.badge.raise_()
 
     def _set_record(self, rec: Optional[DefectRecord]) -> None:
         self._record = rec
@@ -213,13 +222,23 @@ class CompareGrid(QWidget):
                 continue
             mr = item.for_layer(layer)
             if mr and mr.is_match and mr.matched is not None:
-                info = (
-                    f"매칭 O  거리 {mr.distance:.1f}  "
-                    f"{mr.matched.position_key}"
-                )
+                info = f"매칭 O · 거리 {mr.distance:.1f}"
                 cell.show_record(mr.matched, info, matched=True)
+            elif mr is not None:
+                info, warn = self._diag_text(mr)
+                cell.show_record(None, info, matched=False, warn=warn)
             else:
-                cell.show_record(None, "매칭 없음", matched=False)
+                cell.show_record(None, "매칭 없음", matched=False, warn=True)
+
+    @staticmethod
+    def _diag_text(mr) -> tuple[str, bool]:
+        """매칭 실패 사유를 사용자 문구로 변환 (text, warn)."""
+        reason = mr.reason
+        if reason == NoMatchReason.COORD_FAIL:
+            return f"좌표 추출 실패({mr.failed_in_die}장)", True
+        if reason == NoMatchReason.OVER_TOLERANCE and mr.nearest_distance is not None:
+            return f"허용오차 초과 · 최근접 {mr.nearest_distance:.1f}", True
+        return "이 layer에 같은 die 사진 없음", False
 
     def show_empty(self, message: str) -> None:
         for cell in self._cells.values():

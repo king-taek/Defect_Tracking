@@ -131,7 +131,7 @@ class ClickableThumb(QFrame):
         self._selected = False
         self.setObjectName("thumb")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(108, 124)
+        self.setFixedSize(96, 96)
         self._build()
         self._refresh_style()
 
@@ -141,7 +141,7 @@ class ClickableThumb(QFrame):
         lay.setSpacing(2)
         self.img = QLabel()
         self.img.setAlignment(Qt.AlignCenter)
-        self.img.setFixedSize(96, 92)
+        self.img.setFixedSize(84, 62)
         self.caption = QLabel("")
         self.caption.setObjectName("dim")
         self.caption.setAlignment(Qt.AlignCenter)
@@ -154,7 +154,7 @@ class ClickableThumb(QFrame):
             p = QPixmap(str(path))
             if not p.isNull():
                 self.img.setPixmap(
-                    p.scaled(96, 92, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    p.scaled(84, 62, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 )
                 return
         self.img.setText("?")

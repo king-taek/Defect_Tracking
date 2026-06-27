@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QScrollArea,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -37,7 +38,7 @@ from app.safety import OriginalProtectionError, conflicting_source
 from app.scanner import LotIndex
 from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
-from app.ui.controls import NavBar, TopBar
+from app.ui.controls import NavBar, SideBar
 from app.ui.export_dialog import ExportSelectDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
@@ -114,13 +115,17 @@ class MainWindow(QMainWindow):
         root = QWidget()
         root.setObjectName("root")
         main = QVBoxLayout(root)
-        main.setContentsMargins(12, 12, 12, 12)
-        main.setSpacing(10)
+        main.setContentsMargins(10, 10, 10, 10)
+        main.setSpacing(8)
 
         self.banner = NotificationBanner()
         main.addWidget(self.banner)
 
-        self.top = TopBar()
+        # 좌측 사이드바 | 우측(짧은 상단 + 큰 그리드) — 수평 스플리터
+        self.splitter = QSplitter(Qt.Horizontal)
+
+        # ── 좌측: 컨트롤 사이드바
+        self.top = SideBar()
         self.top.open_folder.connect(self._choose_folder)
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
         self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
@@ -128,41 +133,60 @@ class MainWindow(QMainWindow):
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         self.top.update_requested.connect(self._manual_update)
-        main.addWidget(self.top)
+        self.splitter.addWidget(self.top)
+
+        # ── 우측: 짧은 상단(썸네일 + 탐색) + 큰 비교 그리드
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        top_band = QFrame()
+        top_band.setObjectName("panel")
+        band_layout = QVBoxLayout(top_band)
+        band_layout.setContentsMargins(10, 8, 10, 8)
+        band_layout.setSpacing(6)
+        self.strip = ThumbnailStrip()
+        self.strip.thumb_clicked.connect(self._goto)
+        band_layout.addWidget(self.strip)
+        self.nav = NavBar()
+        self.nav.prev_clicked.connect(self._prev)
+        self.nav.next_clicked.connect(self._next)
+        band_layout.addWidget(self.nav)
+        right_layout.addWidget(top_band)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         self.progress.setTextVisible(False)
-        main.addWidget(self.progress)
+        right_layout.addWidget(self.progress)
 
-        self.strip = ThumbnailStrip()
-        self.strip.thumb_clicked.connect(self._goto)
-        main.addWidget(self.strip)
-
-        # 비교 그리드 (스크롤 가능)
+        # 비교 그리드 (스크롤 가능) — 큰 메인 영역
         grid_scroll = QScrollArea()
         grid_scroll.setWidgetResizable(True)
         grid_scroll.setFrameShape(QFrame.NoFrame)
         grid_host = QFrame()
         grid_host.setObjectName("panel")
         grid_host_layout = QVBoxLayout(grid_host)
-        grid_host_layout.setContentsMargins(10, 10, 10, 10)
+        grid_host_layout.setContentsMargins(12, 12, 12, 12)
         self.grid = CompareGrid(loader=self.image_loader)
         self.grid.image_clicked.connect(self._open_viewer)
         grid_host_layout.addWidget(self.grid)
-        self._empty_label = QLabel("LOT 폴더를 선택하면 비교 화면이 표시됩니다.")
+        self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setMinimumHeight(200)
         grid_host_layout.addWidget(self._empty_label)
         grid_host_layout.addStretch()
         grid_scroll.setWidget(grid_host)
-        main.addWidget(grid_scroll, 1)
+        right_layout.addWidget(grid_scroll, 1)
 
-        self.nav = NavBar()
-        self.nav.prev_clicked.connect(self._prev)
-        self.nav.next_clicked.connect(self._next)
-        main.addWidget(self.nav)
+        self.splitter.addWidget(right)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setCollapsible(0, False)
+        sw = max(220, int(self.settings.sidebar_width))
+        self.splitter.setSizes([sw, max(600, self.width() - sw)])
+        main.addWidget(self.splitter, 1)
 
         self.setCentralWidget(root)
 
@@ -186,7 +210,7 @@ class MainWindow(QMainWindow):
     def _choose_folder(self) -> None:
         last = self.settings.last_lot_folder
         start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "LOT 폴더 선택", start)
+        folder = QFileDialog.getExistingDirectory(self, "자재 폴더 선택", start)
         if folder:
             self.load_lot(folder)
 
@@ -270,7 +294,7 @@ class MainWindow(QMainWindow):
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(
-                "선택한 폴더에서 layer 를 찾지 못했습니다. LOT 폴더를 확인하세요.",
+                "선택한 폴더에서 layer 를 찾지 못했습니다. 자재 폴더를 확인하세요.",
                 "warn", timeout_ms=0,
             )
             self.nav.set_status("layer 없음")
@@ -538,7 +562,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ 출력
     def _export(self) -> None:
         if not self.matches:
-            self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
+            self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
             return
         dlg = ExportSelectDialog(self.matches, self.current, self.thumb_cache, self)
         if not dlg.exec():
@@ -595,6 +619,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):  # noqa: N802
         geo = self.geometry()
         self.settings.window_geometry = f"{geo.x()},{geo.y()},{geo.width()},{geo.height()}"
+        try:
+            self.settings.sidebar_width = self.splitter.sizes()[0]
+        except (AttributeError, IndexError):
+            pass
         self._save_prefs()
         try:
             self.settings.save()

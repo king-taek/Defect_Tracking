@@ -1,9 +1,10 @@
-"""상단 컨트롤 바 및 하단 탐색 바 (문서 Section 8.1, 8.3, 8.5).
+"""좌측 사이드바 컨트롤 및 하단 탐색 바 (문서 Section 8.1, 8.3, 8.5).
 
-상단: 폴더 선택 / LOT명 / 기준 Layer / 허용 오차 / 비교 Layer(체크, 줄바꿈) / 결과 출력하기
-하단: 이전 / 현재 index·전체 / 다음
+사이드바(세로): 자재 폴더 선택 / 자재명 / 기준 Layer / 허용 오차 /
+비교 Layer(체크, 세로 스크롤) / 설정·업데이트·결과 출력하기
+탐색 바: 이전 / 현재 index·전체 / 다음
 
-비교 Layer 선택부는 가로 스크롤(가로 휠 필요) 대신 줄바꿈 FlowLayout 을 사용한다.
+비교 Layer 선택부는 세로 스크롤 영역에 한 줄에 하나씩 쌓는다.
 layer 목록 설정 시 시그널을 차단해 재계산 폭주를 막는다.
 """
 
@@ -20,17 +21,19 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from app import config
-from app.ui.flow_layout import FlowLayout
 
 
-class TopBar(QFrame):
-    """상단 컨트롤 바."""
+class SideBar(QFrame):
+    """좌측 세로 컨트롤 사이드바.
+
+    상단 컨트롤 바를 대체하지만 공개 API(시그널/메서드/속성)는 동일하게 유지한다.
+    """
 
     open_folder = Signal()
     base_layer_changed = Signal(str)
@@ -42,23 +45,81 @@ class TopBar(QFrame):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setObjectName("panel")
+        self.setObjectName("sidebar")
+        self.setMinimumWidth(260)
         self._compare_checks: list[QCheckBox] = []
         self._build()
 
+    @staticmethod
+    def _section_label(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("section")
+        return lbl
+
     def _build(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 10, 12, 10)
-        outer.setSpacing(8)
+        outer.setContentsMargins(16, 16, 16, 14)
+        outer.setSpacing(12)
 
-        # 1행: 폴더 / LOT / 설정 / 업데이트 / 출력
-        row1 = QHBoxLayout()
-        self.btn_open = QPushButton("📁  LOT 폴더 선택")
-        self.btn_open.setToolTip("리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O)")
+        # ── 헤더: 자재 폴더 선택 + 자재명
+        self.btn_open = QPushButton("📁  자재 폴더 선택")
+        self.btn_open.setToolTip("리뷰가 진행된 자재(LOT) 폴더를 선택 (Ctrl+O)")
         self.btn_open.clicked.connect(self.open_folder)
-        self.lbl_lot = QLabel("선택된 LOT 없음")
+        self.lbl_lot = QLabel("선택된 자재 없음")
         self.lbl_lot.setObjectName("lotName")
+        self.lbl_lot.setWordWrap(True)
+        outer.addWidget(self.btn_open)
+        outer.addWidget(self.lbl_lot)
 
+        # ── 기준 Layer
+        outer.addWidget(self._section_label("기준 LAYER"))
+        self.cmb_base = QComboBox()
+        self.cmb_base.setMinimumWidth(150)
+        self.cmb_base.currentTextChanged.connect(self._on_base_changed)
+        outer.addWidget(self.cmb_base)
+
+        # ── 허용 오차
+        outer.addWidget(self._section_label("허용 오차"))
+        self.spn_tol = QDoubleSpinBox()
+        self.spn_tol.setRange(0.0, 100000.0)
+        self.spn_tol.setDecimals(1)
+        self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
+        self.spn_tol.setSingleStep(10.0)
+        self.spn_tol.setSuffix(" µm")
+        self.spn_tol.setToolTip("같은 die 내 local 좌표 거리 허용값 (작을수록 엄격)")
+        self.spn_tol.valueChanged.connect(self.tolerance_changed)
+        outer.addWidget(self.spn_tol)
+
+        # ── 비교 Layer: 라벨 + 전체/해제
+        cmp_head = QHBoxLayout()
+        cmp_head.addWidget(self._section_label("비교 LAYER"))
+        cmp_head.addStretch()
+        self.btn_all = QPushButton("전체")
+        self.btn_all.setToolTip("선택 가능한 비교 layer 를 모두 선택")
+        self.btn_all.clicked.connect(lambda: self._set_all_compares(True))
+        self.btn_none = QPushButton("해제")
+        self.btn_none.setToolTip("비교 layer 선택 모두 해제")
+        self.btn_none.clicked.connect(lambda: self._set_all_compares(False))
+        for b in (self.btn_all, self.btn_none):
+            b.setFixedHeight(24)
+        cmp_head.addWidget(self.btn_all)
+        cmp_head.addWidget(self.btn_none)
+        outer.addLayout(cmp_head)
+
+        # 비교 Layer 체크박스 (세로 스크롤 영역에 한 줄씩)
+        self._compare_scroll = QScrollArea()
+        self._compare_scroll.setWidgetResizable(True)
+        self._compare_scroll.setFrameShape(QFrame.NoFrame)
+        self._compare_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._compare_host = QWidget()
+        self._compare_box = QVBoxLayout(self._compare_host)
+        self._compare_box.setContentsMargins(0, 0, 0, 0)
+        self._compare_box.setSpacing(4)
+        self._compare_box.addStretch()
+        self._compare_scroll.setWidget(self._compare_host)
+        outer.addWidget(self._compare_scroll, 1)
+
+        # ── 푸터: 설정 / 업데이트 / 결과 출력
         self.btn_settings = QPushButton("⚙  설정")
         self.btn_settings.setToolTip("작업공간·출력 폴더·기본값 변경")
         self.btn_settings.clicked.connect(self.settings_requested)
@@ -73,64 +134,13 @@ class TopBar(QFrame):
         self.btn_export.clicked.connect(self.export_requested)
         self.btn_export.setEnabled(False)
 
-        row1.addWidget(self.btn_open)
-        row1.addSpacing(8)
-        row1.addWidget(self.lbl_lot, 1)
-        row1.addWidget(self.btn_settings)
-        row1.addWidget(self.btn_update)
-        row1.addWidget(self.btn_export)
-        outer.addLayout(row1)
-
-        # 2행: 기준 layer / 허용 오차
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("기준 Layer"))
-        self.cmb_base = QComboBox()
-        self.cmb_base.setMinimumWidth(150)
-        self.cmb_base.currentTextChanged.connect(self._on_base_changed)
-        row2.addWidget(self.cmb_base)
-
-        row2.addSpacing(16)
-        row2.addWidget(QLabel("허용 오차"))
-        self.spn_tol = QDoubleSpinBox()
-        self.spn_tol.setRange(0.0, 100000.0)
-        self.spn_tol.setDecimals(1)
-        self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
-        self.spn_tol.setSingleStep(10.0)
-        self.spn_tol.setSuffix(" µm")
-        self.spn_tol.setToolTip("같은 die 내 local 좌표 거리 허용값 (작을수록 엄격)")
-        self.spn_tol.valueChanged.connect(self.tolerance_changed)
-        row2.addWidget(self.spn_tol)
-        row2.addStretch()
-        outer.addLayout(row2)
-
-        # 3행: 비교 Layer 라벨 + 전체/해제
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("비교 Layer"))
-        self.btn_all = QPushButton("전체")
-        self.btn_all.setToolTip("선택 가능한 비교 layer 를 모두 선택")
-        self.btn_all.clicked.connect(lambda: self._set_all_compares(True))
-        self.btn_none = QPushButton("해제")
-        self.btn_none.setToolTip("비교 layer 선택 모두 해제")
-        self.btn_none.clicked.connect(lambda: self._set_all_compares(False))
-        for b in (self.btn_all, self.btn_none):
-            b.setFixedHeight(24)
-        row3.addWidget(self.btn_all)
-        row3.addWidget(self.btn_none)
-        row3.addStretch()
-        outer.addLayout(row3)
-
-        # 비교 Layer 체크박스 (줄바꿈 FlowLayout) — 가로 휠 불필요
-        self._compare_host = QWidget()
-        sp = self._compare_host.sizePolicy()
-        sp.setHeightForWidth(True)
-        sp.setVerticalPolicy(QSizePolicy.Minimum)
-        self._compare_host.setSizePolicy(sp)
-        self._compare_flow = FlowLayout(self._compare_host, margin=0, h_spacing=10, v_spacing=6)
-        outer.addWidget(self._compare_host)
+        outer.addWidget(self.btn_settings)
+        outer.addWidget(self.btn_update)
+        outer.addWidget(self.btn_export)
 
     # ---- API ----------------------------------------------------------
     def set_lot_name(self, name: str) -> None:
-        self.lbl_lot.setText(f"LOT: {name}")
+        self.lbl_lot.setText(f"자재: {name}")
 
     def set_layers(
         self,
@@ -147,9 +157,9 @@ class TopBar(QFrame):
         self.cmb_base.clear()
         self.cmb_base.addItems(layers)
 
-        # 비교 체크박스 재구성
+        # 비교 체크박스 재구성 (세로 스택: 끝의 stretch 앞에 삽입)
         for cb in self._compare_checks:
-            self._compare_flow.removeWidget(cb)
+            self._compare_box.removeWidget(cb)
             cb.setParent(None)
             cb.deleteLater()
         self._compare_checks.clear()
@@ -157,7 +167,7 @@ class TopBar(QFrame):
             cb = QCheckBox(lyr)
             cb.blockSignals(True)
             cb.stateChanged.connect(lambda _=0: self.compare_layers_changed.emit())
-            self._compare_flow.addWidget(cb)
+            self._compare_box.insertWidget(self._compare_box.count() - 1, cb)
             self._compare_checks.append(cb)
 
         # 기준 선택(복원 우선)
@@ -285,3 +295,7 @@ class NavBar(QFrame):
     def set_enabled(self, enabled: bool) -> None:
         self.btn_prev.setEnabled(enabled)
         self.btn_next.setEnabled(enabled)
+
+
+# 하위 호환: 옛 이름으로 import 하던 코드 지원
+TopBar = SideBar

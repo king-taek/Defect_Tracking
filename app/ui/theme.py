@@ -6,18 +6,20 @@
 
 from __future__ import annotations
 
-# 팔레트
-BG = "#0b0f17"
-BG_PANEL = "#121826"
-BG_ELEV = "#1a2333"
-NEON = "#1e90ff"
-NEON_DIM = "#1668c4"
-NEON_SOFT = "#2b3d5c"
-TEXT = "#e6edf7"
-TEXT_DIM = "#8a98ad"
-MATCH = "#34d399"
-NOMATCH = "#f87171"
-BASE_GLOW = "#38bdf8"
+# 팔레트 — 저채도 슬레이트 다크 테마(부드러운 대비, 넓은 여백 지향)
+BG = "#11151c"
+BG_PANEL = "#171c26"
+BG_ELEV = "#1f2632"
+NEON = "#5b8db8"        # 강조: 저채도 슬레이트블루
+NEON_DIM = "#456b8f"
+NEON_SOFT = "#2c343f"   # 저채도 경계선
+TEXT = "#dde3ec"
+TEXT_DIM = "#8b95a4"
+MATCH = "#6ec59a"
+NOMATCH = "#d98a8a"
+BASE_GLOW = "#7fa8cc"
+WARN = "#d8b773"        # "허용오차 초과" 등 진단 강조
+OVERLAY_BG = "rgba(17, 21, 28, 0.62)"  # 이미지 위 배지 반투명 배경
 
 STYLESHEET = f"""
 * {{
@@ -30,7 +32,12 @@ QWidget#root, QMainWindow {{
 QFrame#panel {{
     background-color: {BG_PANEL};
     border: 1px solid {NEON_SOFT};
-    border-radius: 10px;
+    border-radius: 14px;
+}}
+QFrame#sidebar {{
+    background-color: {BG_PANEL};
+    border: 1px solid {NEON_SOFT};
+    border-radius: 14px;
 }}
 QLabel {{
     color: {TEXT};
@@ -39,46 +46,59 @@ QLabel {{
 QLabel#dim {{ color: {TEXT_DIM}; }}
 QLabel#title {{ font-size: 16px; font-weight: 700; color: {TEXT}; }}
 QLabel#lotName {{ font-size: 13px; font-weight: 600; color: {BASE_GLOW}; }}
+QLabel#section {{ font-size: 11px; font-weight: 700; color: {TEXT_DIM};
+    letter-spacing: 1px; }}
+/* 이미지 위 Layer 배지 + 진단 라벨 */
+QLabel#layerBadge {{
+    background-color: {OVERLAY_BG}; color: {TEXT};
+    border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: 13px;
+}}
+QLabel#layerBadgeBase {{
+    background-color: {OVERLAY_BG}; color: {BASE_GLOW};
+    border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: 13px;
+}}
+QLabel#diag {{ color: {TEXT_DIM}; font-size: 10px; }}
+QLabel#diagWarn {{ color: {WARN}; font-size: 10px; }}
 
 /* ---- 버튼 ---- */
 QPushButton {{
     background-color: {BG_ELEV};
     color: {TEXT};
     border: 1px solid {NEON_SOFT};
-    border-radius: 8px;
-    padding: 7px 14px;
+    border-radius: 10px;
+    padding: 8px 16px;
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: {NEON_DIM};
+    background-color: {NEON_SOFT};
     border: 1px solid {NEON};
-    color: #ffffff;
+    color: {TEXT};
 }}
 QPushButton:pressed {{
-    background-color: {NEON};
-    border: 1px solid {BASE_GLOW};
-    padding-top: 8px; padding-bottom: 6px;
+    background-color: {NEON_DIM};
+    border: 1px solid {NEON};
 }}
 QPushButton:disabled {{
     color: {TEXT_DIM};
-    border: 1px solid #232b3a;
-    background-color: #131825;
+    border: 1px solid #232a33;
+    background-color: #161b23;
 }}
 QPushButton#primary {{
     background-color: {NEON_DIM};
     border: 1px solid {NEON};
     font-weight: 700;
+    color: {TEXT};
 }}
-QPushButton#primary:hover {{ background-color: {NEON}; }}
-QPushButton#primary:pressed {{ background-color: {BASE_GLOW}; }}
+QPushButton#primary:hover {{ background-color: {NEON}; color: {TEXT}; }}
+QPushButton#primary:pressed {{ background-color: {NEON_DIM}; }}
 
 /* ---- 입력 ---- */
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
     background-color: {BG_ELEV};
     border: 1px solid {NEON_SOFT};
-    border-radius: 6px;
-    padding: 4px 8px;
-    selection-background-color: {NEON};
+    border-radius: 8px;
+    padding: 5px 9px;
+    selection-background-color: {NEON_DIM};
 }}
 QComboBox:hover, QDoubleSpinBox:hover {{ border: 1px solid {NEON}; }}
 QComboBox QAbstractItemView {{
@@ -89,17 +109,17 @@ QComboBox QAbstractItemView {{
 }}
 
 /* ---- 체크박스(비교 layer 선택) ---- */
-QCheckBox {{ spacing: 6px; padding: 3px; }}
+QCheckBox {{ spacing: 6px; padding: 4px; }}
 QCheckBox::indicator {{
     width: 16px; height: 16px;
     border: 1px solid {NEON_SOFT};
-    border-radius: 4px;
+    border-radius: 5px;
     background: {BG_ELEV};
 }}
 QCheckBox::indicator:hover {{ border: 1px solid {NEON}; }}
 QCheckBox::indicator:checked {{
     background: {NEON};
-    border: 1px solid {BASE_GLOW};
+    border: 1px solid {NEON_DIM};
 }}
 
 /* ---- 다이얼로그 ---- */
@@ -109,12 +129,16 @@ QDialog {{ background-color: {BG}; }}
 QListWidget {{
     background-color: {BG_ELEV};
     border: 1px solid {NEON_SOFT};
-    border-radius: 8px;
+    border-radius: 10px;
     outline: none;
 }}
-QListWidget::item {{ padding: 8px; border-radius: 6px; min-height: 30px; }}
+QListWidget::item {{ padding: 10px; border-radius: 8px; min-height: 30px; }}
 QListWidget::item:hover {{ background: {NEON_SOFT}; }}
-QListWidget::item:selected {{ background: {NEON_DIM}; color: #fff; }}
+QListWidget::item:selected {{ background: {NEON_DIM}; color: {TEXT}; }}
+
+/* ---- 스플리터 손잡이(넓고 차분하게) ---- */
+QSplitter::handle {{ background: transparent; }}
+QSplitter::handle:horizontal {{ width: 10px; }}
 
 /* ---- 스크롤바 ---- */
 QScrollBar:horizontal, QScrollBar:vertical {{
@@ -125,27 +149,27 @@ QScrollBar:vertical {{ width: 10px; }}
 QScrollBar::handle {{
     background: {NEON_SOFT}; border-radius: 5px; min-width: 30px; min-height: 30px;
 }}
-QScrollBar::handle:hover {{ background: {NEON}; }}
+QScrollBar::handle:hover {{ background: {NEON_DIM}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 QProgressBar {{
     background-color: {BG_ELEV};
     border: 1px solid {NEON_SOFT};
-    border-radius: 6px;
+    border-radius: 8px;
     text-align: center;
     height: 16px;
 }}
 QProgressBar::chunk {{
-    background-color: {NEON};
-    border-radius: 5px;
+    background-color: {NEON_DIM};
+    border-radius: 7px;
 }}
 QToolTip {{
     background-color: {BG_ELEV};
     color: {TEXT};
-    border: 1px solid {NEON};
-    border-radius: 4px;
-    padding: 4px;
+    border: 1px solid {NEON_SOFT};
+    border-radius: 6px;
+    padding: 5px;
 }}
 """
 

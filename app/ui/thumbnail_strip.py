@@ -26,7 +26,7 @@ class ThumbnailStrip(QScrollArea):
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setFixedHeight(152)
+        self.setFixedHeight(120)
         self.setToolTip("세로 휠로 좌우 스크롤 · 클릭하면 기준 사진 변경")
         self._container = QWidget()
         self._layout = QHBoxLayout(self._container)
