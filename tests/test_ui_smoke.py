@@ -156,18 +156,19 @@ def test_safe_filename():
     assert MainWindow._safe_filename("") == "compare"
 
 
-def test_topbar_has_settings_update_buttons(win):
+def test_sidebar_settings_button_shows_update_mark(win):
     assert win.top.btn_settings is not None
-    assert win.top.btn_update is not None
-    # 가용 표시 토글이 예외 없이 동작
+    # 업데이트는 설정 다이얼로그로 이동 → 사이드바엔 업데이트 버튼 없음
+    assert win.top.btn_update is None
+    # 가용 시 설정 버튼에 표식(•)이 붙고, 해제 시 사라진다
     win.top.set_update_available(True)
-    assert "업데이트 있음" in win.top.btn_update.text()
+    assert "•" in win.top.btn_settings.text()
     win.top.set_update_available(False)
-    assert win.top.btn_update.text() == "⟳  업데이트"
+    assert win.top.btn_settings.text() == "⚙ 설정"
 
 
 def test_update_check_available_sets_flag(win, monkeypatch):
-    """업데이트 확인이 available 이면 버튼 강조 + 사용자가 'Yes' 시 적용 호출(모달 우회)."""
+    """업데이트 확인이 available 이면 설정 버튼 표식 + 사용자가 'Yes' 시 적용 호출(모달 우회)."""
     from PySide6.QtWidgets import QMessageBox
     from app import updater
 
@@ -176,7 +177,7 @@ def test_update_check_available_sets_flag(win, monkeypatch):
     monkeypatch.setattr(win, "_do_update", lambda s: called.setdefault("do", s))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     win._on_update_checked(st, manual=True)
-    assert "업데이트 있음" in win.top.btn_update.text()
+    assert "•" in win.top.btn_settings.text()
     assert called.get("do") is st
 
 
@@ -185,7 +186,21 @@ def test_update_check_uptodate_manual_banner(win):
 
     st = updater.UpdateStatus(available=False, local="a", remote="a", method="zip")
     win._on_update_checked(st, manual=True)  # 모달 없음(available=False)
-    assert win.top.btn_update.text() == "⟳  업데이트"
+    assert win.top.btn_settings.text() == "⚙ 설정"
+
+
+def test_settings_dialog_update_button_requests(app, tmp_path):
+    """설정 다이얼로그의 업데이트 버튼이 update_requested 를 emit 하고 wants_update 설정."""
+    from app.config import AppSettings
+    from app.ui.settings_dialog import SettingsDialog
+
+    s = AppSettings(workspace=str(tmp_path / "ws"))
+    dlg = SettingsDialog(s, current_lot=None, update_available=True)
+    fired = []
+    dlg.update_requested.connect(lambda: fired.append(1))
+    dlg._on_update_clicked()
+    assert dlg.wants_update() is True
+    assert fired == [1]
 
 
 def test_settings_dialog_constructs(app, tmp_path):

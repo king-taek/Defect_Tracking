@@ -9,10 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
-    QGraphicsOpacityEffect,
     QGridLayout,
     QLabel,
     QSizePolicy,
@@ -160,7 +159,6 @@ class CompareGrid(QWidget):
         self._cells: dict[str, LayerCell] = {}
         self._base_layer: str = ""
         self._loader = loader
-        self._fade: Optional[QPropertyAnimation] = None
 
     def build_layout(
         self, grid: list[list[Optional[str]]], base_layer: str
@@ -186,27 +184,6 @@ class CompareGrid(QWidget):
                 cell.record_clicked.connect(self.image_clicked)
                 self._cells[layer] = cell
                 self._grid.addWidget(cell, r, c)
-
-        self._play_fade_in()
-
-    def _play_fade_in(self) -> None:
-        """그리드 전환 시 전체를 부드럽게 페이드 인 (화면 전환 매끄럽게)."""
-        effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(effect)
-        anim = QPropertyAnimation(effect, b"opacity", self)
-        anim.setDuration(240)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-
-        def _clear() -> None:
-            # 더 새로운 페이드가 시작되지 않았을 때만 effect 제거(렌더/클릭 정상화).
-            if self.graphicsEffect() is effect:
-                self.setGraphicsEffect(None)
-
-        anim.finished.connect(_clear)
-        self._fade = anim
-        anim.start()
 
     def update_for_base(
         self, item: BaseDefectMatches, compare_layers: list[str]

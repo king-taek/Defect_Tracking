@@ -35,10 +35,16 @@ class LotIndex:
     records: list[DefectRecord] = field(default_factory=list)
 
     def layer_canonicals(self) -> list[str]:
+        """선택 UI 에 표시할 layer 이름 목록(폴더 순서, 유니크).
+
+        canonical 이 충돌하지 않으면 canonical 그대로, 충돌하면 재리뷰 등으로
+        구분된 display 이름을 사용한다(scan_lot 에서 display 산정).
+        """
         seen: list[str] = []
         for lyr in self.layers:
-            if lyr.canonical not in seen:
-                seen.append(lyr.canonical)
+            name = lyr.display or lyr.canonical
+            if name not in seen:
+                seen.append(name)
         return seen
 
     def records_for_layer(self, canonical: str) -> list[DefectRecord]:
@@ -192,6 +198,31 @@ def _scan_wafer_folder(
     ]
 
 
+def _assign_displays(infos: list[LayerInfo]) -> None:
+    """canonical 이 충돌하는 경우에만 재리뷰 등으로 구분한 display 이름을 부여한다.
+
+    충돌이 없으면 display = canonical (기존 동작 유지). 충돌 시 재리뷰는
+    "{canonical}_재리뷰", 일반은 canonical, 그래도 겹치면 " (2)", " (3)" … 로 유일화.
+    """
+    counts: dict[str, int] = {}
+    for inf in infos:
+        counts[inf.canonical] = counts.get(inf.canonical, 0) + 1
+
+    used: set[str] = set()
+    for inf in infos:
+        if counts.get(inf.canonical, 0) <= 1:
+            name = inf.canonical
+        else:
+            name = f"{inf.canonical}_재리뷰" if inf.is_re_review else inf.canonical
+        base = name
+        k = 2
+        while name in used:
+            name = f"{base} ({k})"
+            k += 1
+        used.add(name)
+        inf.display = name
+
+
 def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
     """LOT 폴더를 스캔해 LotIndex 를 만든다. 원본은 읽기 전용으로만 접근."""
     lot = Path(lot_path)
@@ -199,7 +230,9 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
 
     layer_dirs = _list_dirs(lot)
     total = len(layer_dirs) or 1
-    for li, layer_dir in enumerate(layer_dirs):
+
+    # 1차: layer 폴더별 정규화 정보 수집 후 표시 이름(display) 산정(충돌 시에만 구분).
+    for layer_dir in layer_dirs:
         canonical, is_rr = layout.normalize_layer(layer_dir.name)
         index.layers.append(
             LayerInfo(
@@ -209,12 +242,15 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
                 is_re_review=is_rr,
             )
         )
-        if progress:
-            progress(f"layer 스캔: {layer_dir.name}", li, total)
+    _assign_displays(index.layers)
 
-        for wafer_dir in _list_dirs(layer_dir):
+    # 2차: 각 layer 폴더의 wafer 를 스캔(record.layer 는 display 이름 사용).
+    for li, info in enumerate(index.layers):
+        if progress:
+            progress(f"layer 스캔: {info.folder_name}", li, total)
+        for wafer_dir in _list_dirs(info.path):
             index.records.extend(
-                _scan_wafer_folder(wafer_dir, canonical, layer_dir.name)
+                _scan_wafer_folder(wafer_dir, info.display, info.folder_name)
             )
 
     if progress:

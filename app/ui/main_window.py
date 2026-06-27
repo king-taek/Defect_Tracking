@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         self.top.tolerance_changed.connect(lambda _: self._rematch(rebuild_grid=False))
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
-        self.top.update_requested.connect(self._manual_update)
+        # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
         self.splitter.addWidget(self.top)
 
         # ── 우측: 짧은 상단(썸네일 + 탐색) + 큰 비교 그리드
@@ -184,7 +184,7 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setCollapsible(0, False)
-        sw = max(220, int(self.settings.sidebar_width))
+        sw = max(180, int(self.settings.sidebar_width))
         self.splitter.setSizes([sw, max(600, self.width() - sw)])
         main.addWidget(self.splitter, 1)
 
@@ -230,7 +230,10 @@ class MainWindow(QMainWindow):
         token = self._scan_token
 
         self.progress.setVisible(True)
-        self.progress.setRange(0, 0)
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(True)
+        self.progress.setFormat("스캔 준비 중...  %p%")
         self.nav.set_status("스캔 중...")
         self.top.set_lot_name(Path(folder).name)
         self.setWindowTitle(f"{self._base_title}  —  {Path(folder).name}")
@@ -278,6 +281,12 @@ class MainWindow(QMainWindow):
 
     def _on_scan_progress(self, msg: str, cur: int, total: int) -> None:
         self.nav.set_status(msg)
+        if total > 0:
+            # layer 단위 진행을 0~100%로 환산해 진행바에 표시
+            pct = int(round(min(cur, total) / total * 100))
+            self.progress.setRange(0, 100)
+            self.progress.setValue(pct)
+            self.progress.setFormat(f"{msg}  %p%")
 
     def _on_scan_error(self, message: str, token: int) -> None:
         if token != self._scan_token:
@@ -461,8 +470,20 @@ class MainWindow(QMainWindow):
         current_lot = str(self.lot_index.lot_path) if self.lot_index else None
         old_workspace = self.settings.workspace
         old_output = self.settings.output_folder
-        dlg = SettingsDialog(self.settings, current_lot, self)
-        if not dlg.exec():
+        update_available = bool(self._update_status and self._update_status.available)
+        dlg = SettingsDialog(
+            self.settings, current_lot, self, update_available=update_available
+        )
+        accepted = dlg.exec()
+        # "지금 업데이트/업데이트 확인" 클릭 시: 설정 저장 후 기존 비동기 흐름 재사용
+        if dlg.wants_update():
+            try:
+                dlg.updated_settings().save()
+            except OSError:
+                pass
+            self._manual_update()
+            return
+        if not accepted:
             return
         s = dlg.updated_settings()
         # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).

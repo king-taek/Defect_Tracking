@@ -10,16 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import (
-    QEasingCurve,
-    QPropertyAnimation,
-    Qt,
-    Signal,
-)
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
-    QGraphicsOpacityEffect,
     QLabel,
     QVBoxLayout,
     QWidget,
@@ -30,10 +24,14 @@ from app.ui.image_loader import ImageLoader
 
 
 class FadeImageLabel(QLabel):
-    """이미지를 fade 로 부드럽게 교체하는 라벨.
+    """이미지를 표시하는 라벨.
 
     ImageLoader 가 주입되면 이미지를 비동기로 로드하여 UI 멈춤을 막는다(Section 10).
     주입되지 않으면 동기 로드로 폴백한다(테스트/단독 사용).
+
+    주의: QScrollArea 안에서 QGraphicsOpacityEffect 를 쓰면 스크롤 시 위젯이
+    엉뚱한 위치에 그려지거나 사라지는 Qt 렌더 버그가 있어, 그리드 이미지는
+    그래픽 이펙트 fade 를 쓰지 않고 즉시 교체한다.
     """
 
     def __init__(self, parent: Optional[QWidget] = None, duration: int = 220):
@@ -41,12 +39,6 @@ class FadeImageLabel(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(120, 120)
         self.setScaledContents(False)
-        self._effect = QGraphicsOpacityEffect(self)
-        self._effect.setOpacity(1.0)
-        self.setGraphicsEffect(self._effect)
-        self._anim = QPropertyAnimation(self._effect, b"opacity", self)
-        self._anim.setDuration(duration)
-        self._anim.setEasingCurve(QEasingCurve.InOutCubic)
         self._source_pixmap: Optional[QPixmap] = None
         self._placeholder = "이미지 없음"
         self._loader: Optional[ImageLoader] = None
@@ -57,8 +49,8 @@ class FadeImageLabel(QLabel):
         self._loader = loader
         loader.loaded.connect(self._on_loaded)
 
-    def set_duration(self, ms: int) -> None:
-        self._anim.setDuration(ms)
+    def set_duration(self, ms: int) -> None:  # 호환용 no-op (fade 제거)
+        pass
 
     def _scaled(self) -> Optional[QPixmap]:
         if self._source_pixmap is None or self._source_pixmap.isNull():
@@ -100,7 +92,6 @@ class FadeImageLabel(QLabel):
         self._source_pixmap = None
         super().clear()
         self.setText(text)
-        self._effect.setOpacity(1.0)
 
     def _apply(self, pixmap: Optional[QPixmap], animated: bool) -> None:
         self._source_pixmap = pixmap
@@ -111,13 +102,6 @@ class FadeImageLabel(QLabel):
         sc = self._scaled()
         if sc is not None:
             super().setPixmap(sc)
-        if animated:
-            self._anim.stop()
-            self._anim.setStartValue(0.0)
-            self._anim.setEndValue(1.0)
-            self._anim.start()
-        else:
-            self._effect.setOpacity(1.0)
 
 
 class ClickableThumb(QFrame):
@@ -142,6 +126,9 @@ class ClickableThumb(QFrame):
         self.img = QLabel()
         self.img.setAlignment(Qt.AlignCenter)
         self.img.setFixedSize(84, 62)
+        self.img.setStyleSheet(
+            f"background:{theme.BG}; border-radius:6px; color:{theme.TEXT_DIM};"
+        )
         self.caption = QLabel("")
         self.caption.setObjectName("dim")
         self.caption.setAlignment(Qt.AlignCenter)

@@ -93,6 +93,7 @@ class LayerInfo:
     canonical: str  # 정규화 토큰 (예: RDL4)
     path: Path
     is_re_review: bool = False  # _재리뷰 여부
+    display: str = ""  # 선택 UI/매칭에 쓰는 표시 이름(충돌 시에만 canonical 과 다름)
 
 
 class NoMatchReason(str, Enum):

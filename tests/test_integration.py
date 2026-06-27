@@ -100,6 +100,30 @@ def test_export_into_source_blocked(lot, tmp_path):
     assert not (lot / "leak.xlsx").exists()
 
 
+def test_rereview_layers_kept_distinct(tmp_path):
+    """같은 canonical 의 일반/재리뷰 폴더가 둘 다 별도 layer 로 보여야 한다(충돌 시 구분)."""
+    lot = tmp_path / "204. TB500"
+    # 같은 canonical(RDL4) 의 일반 + 재리뷰 폴더, 그리고 충돌 없는 PI4
+    (lot / "1. RDL4" / "W1").mkdir(parents=True)
+    (lot / "2. RDL4_재리뷰" / "W1").mkdir(parents=True)
+    (lot / "3. PI4" / "W1").mkdir(parents=True)
+    # 각 wafer 폴더에 좌표가 파일명에 있는 Camtek 이미지 1장씩
+    for folder in ("1. RDL4", "2. RDL4_재리뷰", "3. PI4"):
+        img = lot / folder / "W1" / "R_TB500_LIVE_X_WLW_X_W1_4_5_1000.000000_2000.000000_Defect.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xd9")  # 최소 JPEG 바이트(좌표는 파일명에서 추출)
+
+    idx = scanner.scan_lot(lot)
+    names = idx.layer_canonicals()
+    # 충돌난 RDL4 는 일반/재리뷰로 구분, 충돌 없는 PI4 는 그대로
+    assert "RDL4" in names
+    assert "RDL4_재리뷰" in names
+    assert "PI4" in names
+    # records 도 섞이지 않고 각 display 로 분리
+    rbl = idx.records_by_layer()
+    assert rbl["RDL4"] and all(r.layer == "RDL4" for r in rbl["RDL4"])
+    assert rbl["RDL4_재리뷰"] and all(r.layer == "RDL4_재리뷰" for r in rbl["RDL4_재리뷰"])
+
+
 def test_sample_data_is_deterministic(tmp_path):
     a = generate(tmp_path / "a")
     b = generate(tmp_path / "b")

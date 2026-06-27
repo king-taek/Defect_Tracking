@@ -91,6 +91,15 @@ QPushButton#primary {{
 }}
 QPushButton#primary:hover {{ background-color: {NEON}; color: {TEXT}; }}
 QPushButton#primary:pressed {{ background-color: {NEON_DIM}; }}
+/* 컴팩트 버튼(전체/해제·설정 등) */
+QPushButton#mini {{
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: 8px;
+}}
+
+/* 스크롤 영역은 기본 흰 배경 대신 투명(뒤 패널이 비치게) */
+QScrollArea {{ background: transparent; border: none; }}
 
 /* ---- 입력 ---- */
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{

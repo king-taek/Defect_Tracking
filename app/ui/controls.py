@@ -46,7 +46,8 @@ class SideBar(QFrame):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setObjectName("sidebar")
-        self.setMinimumWidth(260)
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(360)
         self._compare_checks: list[QCheckBox] = []
         self._build()
 
@@ -58,8 +59,8 @@ class SideBar(QFrame):
 
     def _build(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 14)
-        outer.setSpacing(12)
+        outer.setContentsMargins(12, 12, 12, 10)
+        outer.setSpacing(8)
 
         # ── 헤더: 자재 폴더 선택 + 자재명
         self.btn_open = QPushButton("📁  자재 폴더 선택")
@@ -95,13 +96,13 @@ class SideBar(QFrame):
         cmp_head.addWidget(self._section_label("비교 LAYER"))
         cmp_head.addStretch()
         self.btn_all = QPushButton("전체")
+        self.btn_all.setObjectName("mini")
         self.btn_all.setToolTip("선택 가능한 비교 layer 를 모두 선택")
         self.btn_all.clicked.connect(lambda: self._set_all_compares(True))
         self.btn_none = QPushButton("해제")
+        self.btn_none.setObjectName("mini")
         self.btn_none.setToolTip("비교 layer 선택 모두 해제")
         self.btn_none.clicked.connect(lambda: self._set_all_compares(False))
-        for b in (self.btn_all, self.btn_none):
-            b.setFixedHeight(24)
         cmp_head.addWidget(self.btn_all)
         cmp_head.addWidget(self.btn_none)
         outer.addLayout(cmp_head)
@@ -111,7 +112,12 @@ class SideBar(QFrame):
         self._compare_scroll.setWidgetResizable(True)
         self._compare_scroll.setFrameShape(QFrame.NoFrame)
         self._compare_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # viewport 기본 흰색 제거 → 사이드바 패널이 비쳐 글자가 보이게
+        self._compare_scroll.setStyleSheet("background: transparent;")
+        self._compare_scroll.viewport().setAutoFillBackground(False)
         self._compare_host = QWidget()
+        self._compare_host.setAutoFillBackground(False)
+        self._compare_host.setStyleSheet("background: transparent;")
         self._compare_box = QVBoxLayout(self._compare_host)
         self._compare_box.setContentsMargins(0, 0, 0, 0)
         self._compare_box.setSpacing(4)
@@ -119,24 +125,29 @@ class SideBar(QFrame):
         self._compare_scroll.setWidget(self._compare_host)
         outer.addWidget(self._compare_scroll, 1)
 
-        # ── 푸터: 설정 / 업데이트 / 결과 출력
-        self.btn_settings = QPushButton("⚙  설정")
-        self.btn_settings.setToolTip("작업공간·출력 폴더·기본값 변경")
+        # ── 푸터: 설정(작게) + 결과 출력  — 업데이트는 설정 안으로 이동
+        self.btn_settings = QPushButton("⚙ 설정")
+        self.btn_settings.setObjectName("mini")
+        self.btn_settings.setToolTip("작업공간·출력 폴더·기본값·업데이트")
         self.btn_settings.clicked.connect(self.settings_requested)
+        self.btn_settings.setMaximumHeight(30)
 
-        self.btn_update = QPushButton("⟳  업데이트")
-        self.btn_update.setToolTip("최신 버전(메인 브랜치)으로 업데이트")
-        self.btn_update.clicked.connect(self.update_requested)
-
-        self.btn_export = QPushButton("결과 출력하기")
+        self.btn_export = QPushButton("결과 출력")
         self.btn_export.setObjectName("primary")
         self.btn_export.setToolTip("선택한 기준 사진의 비교 결과를 Excel 로 출력 (Ctrl+E)")
         self.btn_export.clicked.connect(self.export_requested)
         self.btn_export.setEnabled(False)
+        self.btn_export.setMaximumHeight(30)
 
-        outer.addWidget(self.btn_settings)
-        outer.addWidget(self.btn_update)
-        outer.addWidget(self.btn_export)
+        footer = QHBoxLayout()
+        footer.setSpacing(6)
+        footer.addWidget(self.btn_settings)
+        footer.addWidget(self.btn_export, 1)
+        outer.addLayout(footer)
+
+        # 업데이트 버튼은 사이드바에서 제거(설정 다이얼로그로 이동). 호환용 더미 참조.
+        self.btn_update = None
+        self._update_available = False
 
     # ---- API ----------------------------------------------------------
     def set_lot_name(self, name: str) -> None:
@@ -198,15 +209,15 @@ class SideBar(QFrame):
         self.spn_tol.blockSignals(False)
 
     def set_update_available(self, available: bool) -> None:
-        """업데이트 가용 시 버튼을 강조(네온)한다."""
-        self.btn_update.setObjectName("primary" if available else "")
-        self.btn_update.setText("⟳  업데이트 있음" if available else "⟳  업데이트")
-        # 동적 objectName 변경 후 스타일 재적용
-        self.btn_update.style().unpolish(self.btn_update)
-        self.btn_update.style().polish(self.btn_update)
+        """업데이트 가용 시 설정 버튼에 표식(•)을 단다(업데이트는 설정 안에 있음)."""
+        self._update_available = available
+        self.btn_settings.setText("⚙ 설정 •" if available else "⚙ 설정")
+        self.btn_settings.setToolTip(
+            "업데이트 있음 — 설정에서 적용" if available
+            else "작업공간·출력 폴더·기본값·업데이트"
+        )
 
     def set_update_busy(self, busy: bool) -> None:
-        self.btn_update.setEnabled(not busy)
         self.btn_settings.setEnabled(not busy)
         self.btn_open.setEnabled(not busy)
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -31,17 +32,22 @@ from app.safety import conflicting_source
 class SettingsDialog(QDialog):
     """설정 편집 다이얼로그."""
 
+    update_requested = Signal()  # "지금 업데이트 확인" 클릭 시
+
     def __init__(
         self,
         settings: AppSettings,
         current_lot: Optional[str] = None,
         parent: Optional[QWidget] = None,
+        update_available: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle("설정")
         self.setMinimumWidth(560)
         self._settings = settings
         self._current_lot = current_lot
+        self._update_available = update_available
+        self._wants_update = False
         self._build()
 
     def _build(self) -> None:
@@ -74,6 +80,26 @@ class SettingsDialog(QDialog):
         self.chk_update = QCheckBox("시작할 때 업데이트 확인")
         self.chk_update.setChecked(self._settings.auto_update_check)
         form.addRow("자동 업데이트", self.chk_update)
+
+        # 수동 업데이트(사이드바에서 이동): 확인/적용 버튼
+        upd_host = QWidget()
+        upd_lay = QHBoxLayout(upd_host)
+        upd_lay.setContentsMargins(0, 0, 0, 0)
+        upd_lay.setSpacing(8)
+        self.btn_update = QPushButton(
+            "지금 업데이트" if self._update_available else "업데이트 확인"
+        )
+        if self._update_available:
+            self.btn_update.setObjectName("primary")
+        self.btn_update.setToolTip("최신 버전(메인 브랜치)으로 업데이트")
+        self.btn_update.clicked.connect(self._on_update_clicked)
+        self.lbl_update = QLabel(
+            "새 버전이 있습니다." if self._update_available else ""
+        )
+        self.lbl_update.setObjectName("dim")
+        upd_lay.addWidget(self.btn_update)
+        upd_lay.addWidget(self.lbl_update, 1)
+        form.addRow("업데이트", upd_host)
 
         outer.addLayout(form)
 
@@ -135,6 +161,16 @@ class SettingsDialog(QDialog):
                     )
                     return
         self.accept()
+
+    def _on_update_clicked(self) -> None:
+        """현재 입력값을 먼저 저장 의도로 반영하고 업데이트를 요청하며 닫는다."""
+        self._wants_update = True
+        self.updated_settings()
+        self.update_requested.emit()
+        self.accept()
+
+    def wants_update(self) -> bool:
+        return self._wants_update
 
     def _error(self, msg: str) -> None:
         self.lbl_err.setText(msg)

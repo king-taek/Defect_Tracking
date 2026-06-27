@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QScrollArea, QWidget
 
 from app.ui.widgets import ClickableThumb
@@ -28,7 +28,14 @@ class ThumbnailStrip(QScrollArea):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFixedHeight(120)
         self.setToolTip("세로 휠로 좌우 스크롤 · 클릭하면 기준 사진 변경")
+        # viewport 기본 흰색 제거 → 뒤의 패널(BG_PANEL)이 비치게
+        self.setFrameShape(QScrollArea.NoFrame)
+        self.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.viewport().setAutoFillBackground(False)
         self._container = QWidget()
+        self._container.setObjectName("stripHost")
+        self._container.setAutoFillBackground(False)
+        self._container.setStyleSheet("#stripHost { background: transparent; }")
         self._layout = QHBoxLayout(self._container)
         self._layout.setContentsMargins(8, 8, 8, 8)
         self._layout.setSpacing(8)
@@ -36,6 +43,21 @@ class ThumbnailStrip(QScrollArea):
         self.setWidget(self._container)
         self._thumbs: list[ClickableThumb] = []
         self._current = -1
+        # 부드러운 가로 스크롤 애니메이션
+        self._scroll_anim = QPropertyAnimation(self.horizontalScrollBar(), b"value", self)
+        self._scroll_anim.setDuration(220)
+        self._scroll_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def _animate_scroll_to(self, target: int) -> None:
+        """수평 스크롤바를 target 값으로 부드럽게 이동."""
+        bar = self.horizontalScrollBar()
+        target = max(bar.minimum(), min(bar.maximum(), target))
+        if target == bar.value():
+            return
+        self._scroll_anim.stop()
+        self._scroll_anim.setStartValue(bar.value())
+        self._scroll_anim.setEndValue(target)
+        self._scroll_anim.start()
 
     def clear(self) -> None:
         for t in self._thumbs:
@@ -72,17 +94,32 @@ class ThumbnailStrip(QScrollArea):
         self._ensure_visible(index)
 
     def _ensure_visible(self, index: int) -> None:
-        if 0 <= index < len(self._thumbs):
-            self.ensureWidgetVisible(self._thumbs[index], 60, 0)
+        """선택 썸네일이 보이도록 부드럽게 가로 스크롤."""
+        if not (0 <= index < len(self._thumbs)):
+            return
+        thumb = self._thumbs[index]
+        bar = self.horizontalScrollBar()
+        left = thumb.x()
+        right = left + thumb.width()
+        view_w = self.viewport().width()
+        margin = 60
+        cur = bar.value()
+        if left - margin < cur:
+            self._animate_scroll_to(left - margin)
+        elif right + margin > cur + view_w:
+            self._animate_scroll_to(right + margin - view_w)
 
     def wheelEvent(self, event):  # noqa: N802
-        """세로 휠을 가로 스크롤로 변환 (가로 휠 불필요)."""
+        """세로 휠을 가로 스크롤로 변환 (가로 휠 불필요), 부드럽게 이동."""
         bar = self.horizontalScrollBar()
         delta = event.angleDelta().y()
         if delta == 0:
             delta = event.angleDelta().x()
         if delta != 0 and bar.maximum() > 0:
-            bar.setValue(bar.value() - delta)
+            # 진행 중 애니메이션의 목표값을 기준으로 누적 → 휠 연타도 매끄럽게
+            anim_running = self._scroll_anim.state() == QPropertyAnimation.Running
+            base = self._scroll_anim.endValue() if anim_running else bar.value()
+            self._animate_scroll_to(int(base) - delta)
             event.accept()
         else:
             super().wheelEvent(event)
