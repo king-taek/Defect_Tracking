@@ -117,10 +117,11 @@ def convert_from_sections(
     if x_raw is None or y_raw is None or col_ini is None or row_ini is None:
         return CamtekIniResult(ParseStatus.INVALID_INFO)
 
-    col = col_ini - config.CAMTEK_COL_OFFSET
-    row = config.CAMTEK_ROW_BASE - row_ini
-    x = x_raw - col_ini * config.CAMTEK_PITCH_X
-    y = y_raw - row_ini * config.CAMTEK_PITCH_Y
+    prod = config.active_product()
+    col = col_ini - prod.camtek_col_offset
+    row = prod.camtek_row_base - row_ini
+    x = x_raw - col_ini * prod.camtek_pitch_x
+    y = y_raw - row_ini * prod.camtek_pitch_y
 
     return CamtekIniResult(status=ParseStatus.OK, col=col, row=row, x=x, y=y)
 
