@@ -78,6 +78,7 @@ class MainWindow(QMainWindow):
         self._match_sig: object = None
         self._match_idx = None
         self._match_fail = None
+        self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
         self._filter = "all"  # 보기 필터: all / unmatched / full
         self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
@@ -536,13 +537,11 @@ class MainWindow(QMainWindow):
         tolerance = self.top.tolerance()
         rbl = self.lot_index.records_by_layer()
         idx, fidx = self._get_match_indices(compare_layers, rbl)
-        # 인덱스를 재사용하여 허용오차만 변경 시 재인덱싱 비용을 없앤다.
-        self.matches = [
-            matcher.match_base_against_layers(
-                base, compare_layers, rbl, tolerance, index=idx, fail_index=fidx
-            )
-            for base in self.base_records
-        ]
+        # 인덱스를 재사용(허용오차만 변경 시 재인덱싱 없음) + 전역 정합오차 보정 매칭.
+        self.matches, self._layer_offsets = matcher.match_all_with_offsets(
+            self.base_records, compare_layers, rbl, tolerance,
+            index=idx, fail_index=fidx,
+        )
         self._update_match_summary()
 
     def _get_match_indices(self, compare_layers, rbl):
@@ -568,6 +567,18 @@ class MainWindow(QMainWindow):
             f"매칭 {matched_pairs}/{total_pairs} 쌍 · "
             f"기준 {bases_matched}/{len(self.matches)}장"
         )
+        # layer 간 전역 정합오차(median)를 tooltip 으로 안내(레지스트레이션 shift 파악)
+        lines = ["[layer 간 정합오차(중앙값)]"]
+        for layer, off in self._layer_offsets.items():
+            if off.count:
+                lines.append(
+                    f"  {layer}: dx {off.dx:+.1f}, dy {off.dy:+.1f} µm "
+                    f"(1:1 {off.count}쌍 기준, 보정 적용)"
+                )
+        if len(lines) > 1:
+            self.top.lbl_match.setToolTip("\n".join(lines))
+        else:
+            self.top.lbl_match.setToolTip("")
 
     def _rebuild_grid(self) -> None:
         base_layer = self.top.base_layer()
