@@ -18,3 +18,7 @@ sample_source/
 
 # ZIP 업데이트가 설치본마다 기록하는 버전 파일(git 설치본은 미사용)
 version.json
+
+# 회사 기밀 참고자료(디바이스 DB 등) — 저장소에 올리지 않음
+Origin/
+*.xlsm
