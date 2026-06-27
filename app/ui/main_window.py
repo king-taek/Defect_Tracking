@@ -773,7 +773,9 @@ class MainWindow(QMainWindow):
         cols = max(prod.kla_package_x_count, max_col + 1)
         rows = max(prod.kla_package_y_count, max_row + 1)
         current = (item.base.col, item.base.row)
-        self.wafer_map.set_data(cols, rows, states, current)
+        # 디바이스 DB die 배치가 있으면 실제 모양으로(없으면 사각 전체)
+        valid = prod.die_map if prod.die_map else None
+        self.wafer_map.set_data(cols, rows, states, current, valid=valid)
 
     def _jump_to_die(self, col: int, row: int) -> None:
         if not self.matches:
@@ -822,6 +824,13 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         s = dlg.updated_settings()
+        # 디바이스 DB 경로가 지정되면 읽어 제품 목록을 갱신한 뒤 활성 제품 적용.
+        if s.device_db_path:
+            try:
+                from app.device_db import load_device_db
+                config.register_devices(load_device_db(s.device_db_path))
+            except Exception:  # noqa: BLE001
+                self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
         config.set_active_product(s.product)
         # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
         if s.workspace != old_workspace or s.output_folder != old_output:

@@ -24,6 +24,24 @@ def _check_dependencies() -> list[str]:
     return [name for name in _REQUIRED if importlib.util.find_spec(name) is None]
 
 
+def _load_device_db(settings) -> None:
+    """설정에 디바이스 DB 경로가 있으면 읽어 제품 목록에 병합한다(실패 무시)."""
+    from pathlib import Path
+
+    path = getattr(settings, "device_db_path", "")
+    if not path or not Path(path).exists():
+        return
+    try:
+        from app import config
+        from app.device_db import load_device_db
+
+        config.register_devices(load_device_db(path))
+    except Exception:  # noqa: BLE001 - DB 로드 실패는 치명적이지 않음
+        from app import logging_config
+
+        logging_config.get_logger().exception("디바이스 DB 로드 실패: %s", path)
+
+
 def main() -> int:
     missing = _check_dependencies()
     if missing:
@@ -74,6 +92,7 @@ def main() -> int:
     app.processEvents()
 
     settings = AppSettings.load()
+    _load_device_db(settings)
     config.set_active_product(settings.product)
     logging_config.setup_logging(settings.workspace_path)
     logging_config.get_logger().info("애플리케이션 시작 (제품=%s)", settings.product)

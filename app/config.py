@@ -30,16 +30,36 @@ class ProductConfig:
     name: str
     camtek_pitch_x: float
     camtek_pitch_y: float
-    camtek_col_offset: int
-    camtek_row_base: int
     kla_package_x_count: int
     kla_package_y_count: int
+    camtek_col_offset: int = 2
+    camtek_row_base: int = 7
+    die_map: frozenset = field(default_factory=frozenset)  # 존재하는 (col,row) (비면 사각 전체)
+    source: str = "builtin"  # builtin / db
 
     def kla_zero_x(self) -> int:
         return self.kla_package_x_count // 2
 
     def kla_zero_y(self) -> int:
         return self.kla_package_y_count // 2
+
+
+def register_devices(profiles: dict) -> None:
+    """외부 디바이스 DB(DeviceProfile 사전)를 PRODUCTS 에 병합한다.
+
+    DB 가 제공하지 않는 Camtek INI 변환 상수(col_offset/row_base)는 기본값을 쓴다.
+    """
+    for key, prof in profiles.items():
+        PRODUCTS[key] = ProductConfig(
+            key=key,
+            name=getattr(prof, "name", key),
+            camtek_pitch_x=getattr(prof, "pitch_x", 0.0) or _DEFAULT_CFG.camtek_pitch_x,
+            camtek_pitch_y=getattr(prof, "pitch_y", 0.0) or _DEFAULT_CFG.camtek_pitch_y,
+            kla_package_x_count=prof.x_count,
+            kla_package_y_count=prof.y_count,
+            die_map=prof.die_map,
+            source="db",
+        )
 
 
 PRODUCTS: dict[str, ProductConfig] = {
@@ -146,6 +166,7 @@ class AppSettings:
     compare_layers: list[str] = field(default_factory=list)
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
+    device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(있으면 제품 목록 확장)
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
     auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인
