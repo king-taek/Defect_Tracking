@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,8 @@ from typing import Optional
 from app import config
 from app.models import ParseStatus
 from app.safety import read_only_bytes
+
+_log = logging.getLogger("conder.parsers.kla")
 
 # DefectList 필드 순서(문서 Section 13.2.5.2):
 # DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE ...
@@ -169,6 +172,12 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
 
     col = xindex + config.kla_zero_x()
     row = yindex + config.kla_zero_y()
+    # 음수 die 위치는 비정상(잘못된 XINDEX/YINDEX) — 잘못 매칭되지 않도록 실패 처리.
+    if col < 0 or row < 0:
+        _log.warning(
+            "KLA die 위치가 음수입니다(col=%s,row=%s) — %s", col, row, jpg_filename
+        )
+        return KlaResult(ParseStatus.INVALID_INFO)
     x = round(xrel)
     y = round(parsed.die_pitch_y - yrel)
     return KlaResult(status=ParseStatus.OK, col=col, row=row, x=float(x), y=float(y))

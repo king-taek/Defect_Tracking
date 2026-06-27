@@ -141,6 +141,24 @@ def test_thumbnail_strip_vertical_wheel_scrolls_horizontally(app, tmp_path):
     assert bar.value() >= start  # 세로 휠(아래)로 가로 스크롤 이동
 
 
+def test_match_summary_populated(win):
+    # 매칭 계산 후 사이드바에 요약 텍스트가 채워진다(허용오차 피드백)
+    assert "매칭" in win.top.lbl_match.text()
+
+
+def test_crosshair_toggle(win):
+    win.chk_crosshair.setChecked(False)
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert win.settings.show_crosshair is False
+    # 모든 셀 이미지에 십자선 상태가 전파된다
+    assert all(not c.image._crosshair for c in win.grid._cells.values())
+    win.chk_crosshair.setChecked(True)
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert win.settings.show_crosshair is True
+
+
 def test_failure_summary_text():
     from app.ui.main_window import MainWindow
 

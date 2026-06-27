@@ -118,6 +118,7 @@ class MatchResult:
     nearest_distance: Optional[float] = None  # 그 거리
     die_candidates: int = 0  # 같은 (wafer,die) 의 좌표 OK 비교 record 수
     failed_in_die: int = 0  # 이 비교 layer·같은 wafer 의 좌표 추출 실패 수(근사)
+    ambiguous: bool = False  # 허용오차 내 거의 동률 후보가 둘 이상(어느 것이 맞는지 모호)
 
     @property
     def is_match(self) -> bool:

@@ -63,6 +63,10 @@ def build_fail_index(
     return index
 
 
+# 두 후보의 거리 차가 이 값 미만이면 "동률(모호)"로 본다(µm).
+_AMBIGUOUS_EPSILON = 1.0
+
+
 def find_best_match(
     base: DefectRecord,
     candidates: list[DefectRecord],
@@ -79,6 +83,25 @@ def find_best_match(
             best = cand
             best_dist = dist
     return best, best_dist
+
+
+def is_ambiguous_match(
+    base: DefectRecord,
+    candidates: list[DefectRecord],
+    tolerance: float,
+    best_dist: float | None,
+) -> bool:
+    """허용오차 내에서 최근접과 거의 같은 거리의 후보가 또 있으면 True(모호)."""
+    if best_dist is None:
+        return False
+    near = 0
+    for cand in candidates:
+        dist = base.distance_to(cand)
+        if dist is None or dist > tolerance:
+            continue
+        if abs(dist - best_dist) < _AMBIGUOUS_EPSILON:
+            near += 1
+    return near >= 2
 
 
 def find_nearest(
@@ -126,6 +149,7 @@ def match_base_against_layers(
         nearest_dist: float | None = None
         die_candidates = 0
         failed_in_die = 0
+        ambiguous = False
         if base.ok:
             key = (_norm_wafer(base.wafer_id), base.col, base.row)
             candidates = idx.get(layer, {}).get(key, [])  # type: ignore[arg-type]
@@ -134,6 +158,8 @@ def match_base_against_layers(
             if matched is None:
                 nearest, nearest_dist = find_nearest(base, candidates)
                 failed_in_die = fidx.get(layer, {}).get(_norm_wafer(base.wafer_id), 0)
+            else:
+                ambiguous = is_ambiguous_match(base, candidates, tolerance, dist)
         result.results.append(
             MatchResult(
                 compare_layer=layer,
@@ -144,6 +170,7 @@ def match_base_against_layers(
                 nearest_distance=nearest_dist,
                 die_candidates=die_candidates,
                 failed_in_die=failed_in_die,
+                ambiguous=ambiguous,
             )
         )
     return result

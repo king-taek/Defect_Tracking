@@ -45,6 +45,21 @@ def test_kla_invalid_info_missing_pitch():
     assert res.status == ParseStatus.INVALID_INFO
 
 
+def test_kla_negative_die_index_rejected():
+    """음수 die 위치(XINDEX/YINDEX 가 음수로 col/row<0)는 잘못 매칭되지 않도록 실패."""
+    # XINDEX=-5, YINDEX=-5 → col=-2, row=-2
+    text = (
+        "FileVersion 1 2;\n"
+        "DiePitch 3.7247898000e+004 4.4905301000e+004;\n"
+        "TiffFileName NEG_0_1_2_3.jpg;\n"
+        "DefectList\n"
+        " 1 -1.0 2.0 100.0 200.0 -5 -5 5.2 3.9 20.28 5.2 23 3 1 0 2 2 0 1449 0 1 1 1 0;\n"
+    )
+    parsed = kla_info.parse_info_text(text)
+    res = kla_info.convert_from_parsed(parsed, "NEG_0_1_2_3.jpg")
+    assert res.status == ParseStatus.INVALID_INFO
+
+
 def test_select_info_file_prefers_001():
     files = [
         "00T3UB50XYF5_0_1_7_1.jpg",

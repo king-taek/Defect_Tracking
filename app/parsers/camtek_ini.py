@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,8 @@ from typing import Optional
 from app import config
 from app.models import ParseStatus
 from app.safety import read_only_bytes
+
+_log = logging.getLogger("conder.parsers.ini")
 
 
 @dataclass
@@ -78,7 +81,13 @@ def _to_float(value: Optional[str]) -> Optional[float]:
 
 def _to_int(value: Optional[str]) -> Optional[int]:
     f = _to_float(value)
-    return int(round(f)) if f is not None else None
+    if f is None:
+        return None
+    i = int(round(f))
+    if abs(f - i) > 0.01:
+        # Col/Row 는 정수여야 한다. 비정수면 데이터 이상 가능성 → 경고(반올림은 진행).
+        _log.warning("INI Col/Row 비정수 값 %s → %d 로 반올림", value, i)
+    return i
 
 
 def convert_from_sections(

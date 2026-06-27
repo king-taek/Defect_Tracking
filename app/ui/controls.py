@@ -87,9 +87,18 @@ class SideBar(QFrame):
         self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
         self.spn_tol.setSingleStep(10.0)
         self.spn_tol.setSuffix(" µm")
-        self.spn_tol.setToolTip("같은 die 내 local 좌표 거리 허용값 (작을수록 엄격)")
+        self.spn_tol.setToolTip(
+            "기준과 비교 defect 의 die 내 local 좌표 거리(µm) 허용값.\n"
+            "작을수록 엄격, 클수록 느슨하게 매칭됩니다."
+        )
         self.spn_tol.valueChanged.connect(self.tolerance_changed)
         outer.addWidget(self.spn_tol)
+
+        # 실시간 매칭 요약(허용오차 튜닝 피드백)
+        self.lbl_match = QLabel("")
+        self.lbl_match.setObjectName("dim")
+        self.lbl_match.setWordWrap(True)
+        outer.addWidget(self.lbl_match)
 
         # ── 비교 Layer: 라벨 + 전체/해제
         cmp_head = QHBoxLayout()
@@ -203,6 +212,9 @@ class SideBar(QFrame):
         self.btn_all.setEnabled(bool(layers))
         self.btn_none.setEnabled(bool(layers))
 
+    def set_match_summary(self, text: str) -> None:
+        self.lbl_match.setText(text)
+
     def set_tolerance(self, value: float) -> None:
         self.spn_tol.blockSignals(True)
         self.spn_tol.setValue(value)
@@ -292,7 +304,12 @@ class NavBar(QFrame):
         lay.addWidget(self.lbl_status)
         lay.addStretch()
         lay.addWidget(self.btn_next)
+        self._lay = lay
         self.set_enabled(False)
+
+    def add_widget(self, widget: QWidget) -> None:
+        """탐색 바 오른쪽(다음 버튼 앞)에 보조 위젯을 추가한다."""
+        self._lay.insertWidget(self._lay.count() - 1, widget)
 
     def set_index(self, current: int, total: int) -> None:
         self.lbl_index.setText(f"{current} / {total}")

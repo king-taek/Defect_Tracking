@@ -18,6 +18,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QFrame,
     QLabel,
@@ -152,6 +153,12 @@ class MainWindow(QMainWindow):
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
+        # 보기 옵션: 중앙 십자선 토글(defect 위치 시각 보조)
+        self.chk_crosshair = QCheckBox("중앙 십자선")
+        self.chk_crosshair.setToolTip("defect 는 이미지 중앙에 위치 — 중앙 십자선 표시")
+        self.chk_crosshair.setChecked(self.settings.show_crosshair)
+        self.chk_crosshair.toggled.connect(self._on_crosshair_toggled)
+        self.nav.add_widget(self.chk_crosshair)
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
 
@@ -428,12 +435,33 @@ class MainWindow(QMainWindow):
         self.matches = matcher.match_all(
             self.base_records, compare_layers, rbl, tolerance
         )
+        self._update_match_summary()
+
+    def _update_match_summary(self) -> None:
+        """사이드바에 실시간 매칭 요약을 표시(허용오차 튜닝 피드백)."""
+        if not self.matches:
+            self.top.set_match_summary("")
+            return
+        total_pairs = sum(len(m.results) for m in self.matches)
+        matched_pairs = sum(1 for m in self.matches for r in m.results if r.is_match)
+        bases_matched = sum(
+            1 for m in self.matches if any(r.is_match for r in m.results)
+        )
+        self.top.set_match_summary(
+            f"매칭 {matched_pairs}/{total_pairs} 쌍 · "
+            f"기준 {bases_matched}/{len(self.matches)}장"
+        )
 
     def _rebuild_grid(self) -> None:
         base_layer = self.top.base_layer()
         compare_layers = self.top.compare_layers()
         grid = layout.build_grid([base_layer] + compare_layers)
         self.grid.build_layout(grid, base_layer)
+        self.grid.set_crosshair(self.settings.show_crosshair)
+
+    def _on_crosshair_toggled(self, on: bool) -> None:
+        self.settings.show_crosshair = on
+        self.grid.set_crosshair(on)
 
     def _start_thumbnails(self) -> None:
         if self._thumb_worker is not None:

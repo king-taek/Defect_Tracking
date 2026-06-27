@@ -59,6 +59,25 @@ def test_picks_nearest_candidate():
     out = match_base_against_layers(base, ["PI4"], {"PI4": [far, near]}, tolerance=100.0)
     mr = out.for_layer("PI4")
     assert mr.matched.image_path.name == "near.jpg"
+    assert mr.ambiguous is False
+
+
+def test_ambiguous_when_two_candidates_tie():
+    base = _rec("RDL4", "W1", 4, 5, 1000.0, 2000.0)
+    a = _rec("PI4", "W1", 4, 5, 1050.0, 2000.0, name="a.jpg")  # 거리 50
+    b = _rec("PI4", "W1", 4, 5, 950.0, 2000.0, name="b.jpg")   # 거리 50 (반대편)
+    out = match_base_against_layers(base, ["PI4"], {"PI4": [a, b]}, tolerance=100.0)
+    mr = out.for_layer("PI4")
+    assert mr.is_match
+    assert mr.ambiguous is True
+
+
+def test_not_ambiguous_with_clear_winner():
+    base = _rec("RDL4", "W1", 4, 5, 1000.0, 2000.0)
+    near = _rec("PI4", "W1", 4, 5, 1005.0, 2000.0, name="near.jpg")  # 5
+    far = _rec("PI4", "W1", 4, 5, 1080.0, 2000.0, name="far.jpg")    # 80
+    out = match_base_against_layers(base, ["PI4"], {"PI4": [near, far]}, tolerance=100.0)
+    assert out.for_layer("PI4").ambiguous is False
 
 
 def test_normalize_layer_order_prefix_and_rereview():

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -44,10 +44,34 @@ class FadeImageLabel(QLabel):
         self._loader: Optional[ImageLoader] = None
         self._pending_id = -1
         self._pending_animated = True
+        self._crosshair = False  # 중앙 십자선(defect 는 이미지 중앙에 위치)
 
     def set_loader(self, loader: ImageLoader) -> None:
         self._loader = loader
         loader.loaded.connect(self._on_loaded)
+
+    def set_crosshair(self, on: bool) -> None:
+        if on != self._crosshair:
+            self._crosshair = on
+            self.update()
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        # 이미지가 있을 때만, 화면에 보이는 pixmap 중앙에 옅은 십자선을 덧그린다.
+        pm = self.pixmap()
+        if not self._crosshair or pm is None or pm.isNull():
+            return
+        painter = QPainter(self)
+        pen = QPen(QColor(127, 168, 204, 170))  # theme.BASE_GLOW 계열, 반투명
+        pen.setWidth(1)
+        painter.setPen(pen)
+        cx, cy = self.width() // 2, self.height() // 2
+        gap, arm = 5, 11
+        painter.drawLine(cx - gap - arm, cy, cx - gap, cy)
+        painter.drawLine(cx + gap, cy, cx + gap + arm, cy)
+        painter.drawLine(cx, cy - gap - arm, cx, cy - gap)
+        painter.drawLine(cx, cy + gap, cx, cy + gap + arm)
+        painter.end()
 
     def set_duration(self, ms: int) -> None:  # 호환용 no-op (fade 제거)
         pass
