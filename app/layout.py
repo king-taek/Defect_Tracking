@@ -1,0 +1,84 @@
+"""Layer 폴더명 정규화 및 비교 그리드 배치 (문서 Section 8.2 / 8.4).
+
+폴더명 예: "1. LYA4", "2. LYC3_재리뷰"
+  - 선행 순번 "N. " 제거
+  - 접미 "_재리뷰" 제거 후 is_re_review 플래그
+  - 남은 토큰을 canonical layer 토큰으로 사용 (예: LYA4, LYC3)
+
+비교 화면 그리드(Section 8.4)는 config.DEFAULT_LAYER_GRID 를 기본으로 하되,
+실제 존재하는 layer 만 배치하고 나머지는 발견 순서대로 빈 칸을 채운다(graceful fallback).
+"""
+
+from __future__ import annotations
+
+import re
+
+from app import config
+
+_ORDER_PREFIX_RE = re.compile(r"^\s*\d+\s*[.\-_)]\s*")
+_RE_REVIEW_SUFFIXES = ("_재리뷰", "_재 리뷰", "_rereview", "_re-review")
+
+
+def normalize_layer(folder_name: str) -> tuple[str, bool]:
+    """폴더명 -> (canonical 토큰, 재리뷰 여부)."""
+    name = folder_name.strip()
+    name = _ORDER_PREFIX_RE.sub("", name)
+
+    is_re_review = False
+    lowered = name.lower()
+    for suffix in _RE_REVIEW_SUFFIXES:
+        if lowered.endswith(suffix.lower()):
+            name = name[: -len(suffix)]
+            is_re_review = True
+            break
+
+    canonical = name.strip().strip("._- ")
+    return canonical, is_re_review
+
+
+def _canon_token(s: str) -> str:
+    """배치 매칭용 단순화 토큰 (대문자/영숫자만)."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def build_grid(layers: list[str]) -> list[list[str | None]]:
+    """주어진 layer 목록을 기본 그리드 배치에 채워 2열 그리드를 만든다.
+
+    기본 배치(config.DEFAULT_LAYER_GRID)의 셀과 canonical 토큰이 일치하면 그 자리에 두고,
+    배치에 없는 layer 는 남은 빈 칸/추가 행에 순서대로 채운다.
+    """
+    remaining = list(layers)
+    grid: list[list[str | None]] = []
+
+    # 1차: 기본 배치 위치에 일치하는 layer 부터 채운다.
+    template = config.DEFAULT_LAYER_GRID
+    for row_tpl in template:
+        row: list[str | None] = []
+        for cell in row_tpl:
+            match = None
+            for lyr in remaining:
+                if _canon_token(lyr) == _canon_token(cell):
+                    match = lyr
+                    break
+            if match is not None:
+                remaining.remove(match)
+                row.append(match)
+            else:
+                row.append(None)
+        grid.append(row)
+
+    # 2차: 배치에 없던 layer 들을 빈 칸 → 추가 행 순으로 채운다.
+    def next_remaining() -> str | None:
+        return remaining.pop(0) if remaining else None
+
+    for row in grid:
+        for c in range(len(row)):
+            if row[c] is None and remaining:
+                row[c] = next_remaining()
+
+    while remaining:
+        grid.append([next_remaining(), next_remaining()])
+
+    # 완전히 빈 행 제거
+    grid = [r for r in grid if any(cell is not None for cell in r)]
+    return grid
