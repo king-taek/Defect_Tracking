@@ -101,21 +101,70 @@ QPushButton#mini {{
 /* 스크롤 영역은 기본 흰 배경 대신 투명(뒤 패널이 비치게) */
 QScrollArea {{ background: transparent; border: none; }}
 
-/* ---- 입력 ---- */
+/* ---- 입력(콤보/스핀/라인) ---- */
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
     background-color: {BG_ELEV};
     border: 1px solid {NEON_SOFT};
     border-radius: 8px;
-    padding: 5px 9px;
+    padding: 6px 10px;
+    min-height: 22px;
+    color: {TEXT};
     selection-background-color: {NEON_DIM};
 }}
-QComboBox:hover, QDoubleSpinBox:hover {{ border: 1px solid {NEON}; }}
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {{
+    border: 1px solid {NEON};
+}}
+QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {{
+    border: 1px solid {NEON};
+    background-color: {BG_PANEL};
+}}
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
+    color: {TEXT_DIM};
+    background-color: #161b23;
+}}
+
+/* 콤보 드롭다운 버튼 (화살표 이미지는 apply_theme 에서 주입) */
+QComboBox::drop-down {{ width: 24px; border: none; }}
 QComboBox QAbstractItemView {{
     background-color: {BG_ELEV};
     border: 1px solid {NEON};
+    border-radius: 8px;
+    padding: 4px;
     selection-background-color: {NEON_DIM};
     outline: none;
 }}
+QComboBox QAbstractItemView::item {{
+    min-height: 26px; padding: 3px 8px; border-radius: 6px;
+}}
+QComboBox QAbstractItemView::item:hover {{ background: {NEON_SOFT}; }}
+
+/* 스핀박스 ↑↓ 버튼 + 화살표 */
+QAbstractSpinBox {{ padding-right: 22px; }}
+/* 버튼 없는 입력(허용오차)은 일반 패딩 */
+QDoubleSpinBox#tol {{ padding-right: 10px; }}
+QDoubleSpinBox#tol::up-button, QDoubleSpinBox#tol::down-button {{ width: 0; border: none; }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{
+    subcontrol-origin: border;
+    width: 20px;
+    background-color: {BG_ELEV};
+    border-left: 1px solid {NEON_SOFT};
+}}
+QAbstractSpinBox::up-button {{
+    subcontrol-position: top right;
+    border-top-right-radius: 8px;
+}}
+QAbstractSpinBox::down-button {{
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: 8px;
+    border-top: 1px solid {NEON_SOFT};
+}}
+QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {{
+    background-color: {NEON_SOFT};
+}}
+QAbstractSpinBox::up-button:pressed, QAbstractSpinBox::down-button:pressed {{
+    background-color: {NEON_DIM};
+}}
+/* 스핀박스 화살표 이미지는 apply_theme 에서 주입 */
 
 /* ---- 체크박스(비교 layer 선택) ---- */
 QCheckBox {{ spacing: 6px; padding: 4px; }}
@@ -183,5 +232,49 @@ QToolTip {{
 """
 
 
+def _make_arrow(direction: str, color: str, size: int = 12) -> str:
+    """삼각형 화살표 PNG 를 생성하고 파일 경로(posix)를 반환한다.
+
+    QSS 의 border-삼각형 트릭은 Qt 버전/플랫폼에 따라 깨지므로, 깔끔한 화살표를
+    런타임에 그려 이미지로 주입한다(에셋 파일 불필요).
+    """
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QColor, QPainter, QPixmap, QPolygon
+
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    m = 2  # 여백
+    if direction == "down":
+        pts = [QPoint(m, m + 1), QPoint(size - m, m + 1), QPoint(size // 2, size - m)]
+    else:  # up
+        pts = [QPoint(m, size - m - 1), QPoint(size - m, size - m - 1), QPoint(size // 2, m)]
+    p.drawPolygon(QPolygon(pts))
+    p.end()
+
+    out_dir = Path(tempfile.gettempdir()) / "conder_theme"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe = color.lstrip("#")
+    path = out_dir / f"arrow_{direction}_{safe}_{size}.png"
+    pm.save(str(path), "PNG")
+    return path.as_posix()
+
+
 def apply_theme(app) -> None:
-    app.setStyleSheet(STYLESHEET)
+    # 콤보/스핀 화살표를 런타임 이미지로 주입(테마색 삼각형).
+    # 주의: `QComboBox:hover::down-arrow` 규칙은 Qt 에서 화살표가 두 번 그려지는
+    # QSS 버그를 유발하므로 사용하지 않는다(화살표 색은 고정 TEXT_DIM 으로 충분).
+    down = _make_arrow("down", TEXT_DIM)
+    up = _make_arrow("up", TEXT_DIM)
+    arrow_qss = f"""
+QComboBox::down-arrow {{ image: url("{down}"); width: 12px; height: 12px; }}
+QAbstractSpinBox::down-arrow {{ image: url("{down}"); width: 9px; height: 9px; }}
+QAbstractSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
+"""
+    app.setStyleSheet(STYLESHEET + arrow_qss)

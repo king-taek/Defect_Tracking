@@ -14,6 +14,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -82,6 +83,8 @@ class SideBar(QFrame):
         # ── 허용 오차
         outer.addWidget(self._section_label("허용 오차"))
         self.spn_tol = QDoubleSpinBox()
+        self.spn_tol.setObjectName("tol")
+        self.spn_tol.setButtonSymbols(QAbstractSpinBox.NoButtons)  # ↑↓ 버튼 제거(깔끔한 입력)
         self.spn_tol.setRange(0.0, 100000.0)
         self.spn_tol.setDecimals(1)
         self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
