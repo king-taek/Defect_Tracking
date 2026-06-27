@@ -38,7 +38,17 @@ def main() -> int:
         )
         return 1
 
-    # 의존성 확인 후에 import (누락 시 깔끔한 메시지를 위해 함수 내부에서 import)
+    # 터미널 실행 시: 무거운 라이브러리(PySide6) 로딩 동안 즉시 안내(콘솔).
+    # windowed(.exe) 모드에서는 stderr 가 없을 수 있으므로 안전하게 처리.
+    if sys.stderr is not None:
+        try:
+            print("Conder Compare 시작 중... (라이브러리 로딩, 잠시만 기다려 주세요)",
+                  file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass
+
+    # 의존성 확인 후에 import (누락 시 깔끔한 메시지를 위해 함수 내부에서 import).
+    # 무거운 모듈(MainWindow 트리: openpyxl/PIL 등)은 스플래시를 띄운 뒤 임포트한다.
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication
@@ -46,7 +56,6 @@ def main() -> int:
     from app import config, logging_config
     from app.config import AppSettings
     from app.ui import theme
-    from app.ui.main_window import MainWindow
 
     # 고DPI: 분수 배율을 그대로 통과시켜 다양한 모니터에서 또렷하게(반올림 깨짐 방지).
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -56,12 +65,27 @@ def main() -> int:
     app.setApplicationName("ConderCompare")
     theme.apply_theme(app)
 
+    # Qt 준비 직후 즉시 스플래시 표시 → 무거운 구성 동안 "로딩 중" 피드백을 보여준다.
+    from app.ui.splash import make_splash, show_status
+
+    splash = make_splash()
+    splash.show()
+    show_status(splash, "로딩 중...")
+    app.processEvents()
+
     settings = AppSettings.load()
     config.set_active_product(settings.product)
     logging_config.setup_logging(settings.workspace_path)
     logging_config.get_logger().info("애플리케이션 시작 (제품=%s)", settings.product)
+
+    show_status(splash, "화면 구성 중...")
+    app.processEvents()
+
+    from app.ui.main_window import MainWindow
+
     window = MainWindow(settings)
     window.show()
+    splash.finish(window)
     return app.exec()
 
 

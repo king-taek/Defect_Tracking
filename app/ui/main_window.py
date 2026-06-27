@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
 
 from app import __version__, config, layout, matcher, scanner, updater
 from app.config import AppSettings
-from app.export.excel_report import export_excel
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import OriginalProtectionError, conflicting_source
 from app.scanner import LotIndex
@@ -931,6 +930,8 @@ class MainWindow(QMainWindow):
             return
 
         selected = [self.matches[i] for i in indices]
+        # openpyxl 은 출력 시에만 필요 → 시작 비용을 줄이기 위해 지연 임포트.
+        from app.export.excel_report import export_excel
         try:
             out = export_excel(
                 path,
