@@ -102,6 +102,9 @@ QCheckBox::indicator:checked {{
     border: 1px solid {BASE_GLOW};
 }}
 
+/* ---- 다이얼로그 ---- */
+QDialog {{ background-color: {BG}; }}
+
 /* ---- 리스트(출력 선택) ---- */
 QListWidget {{
     background-color: {BG_ELEV};
@@ -109,7 +112,7 @@ QListWidget {{
     border-radius: 8px;
     outline: none;
 }}
-QListWidget::item {{ padding: 6px; border-radius: 6px; }}
+QListWidget::item {{ padding: 8px; border-radius: 6px; min-height: 30px; }}
 QListWidget::item:hover {{ background: {NEON_SOFT}; }}
 QListWidget::item:selected {{ background: {NEON_DIM}; color: #fff; }}
 

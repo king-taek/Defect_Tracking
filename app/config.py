@@ -86,6 +86,7 @@ class AppSettings:
     tolerance: float = DEFAULT_TOLERANCE
     base_layer: str = ""
     compare_layers: list[str] = field(default_factory=list)
+    window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
 
     # ---- 경로 헬퍼 -------------------------------------------------------
     @property

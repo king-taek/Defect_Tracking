@@ -51,6 +51,7 @@ class FadeImageLabel(QLabel):
         self._placeholder = "이미지 없음"
         self._loader: Optional[ImageLoader] = None
         self._pending_id = -1
+        self._pending_animated = True
 
     def set_loader(self, loader: ImageLoader) -> None:
         self._loader = loader
@@ -89,7 +90,7 @@ class FadeImageLabel(QLabel):
     def _on_loaded(self, request_id: int, image: object) -> None:
         if request_id != self._pending_id:
             return  # 빠른 탐색으로 인한 지난 요청 결과는 무시
-        animated = getattr(self, "_pending_animated", True)
+        animated = self._pending_animated
         if isinstance(image, QImage) and not image.isNull():
             self._apply(QPixmap.fromImage(image), animated)
         else:
@@ -160,6 +161,12 @@ class ClickableThumb(QFrame):
 
     def set_caption(self, text: str) -> None:
         self.caption.setText(text)
+
+    def set_tooltip(self, text: str) -> None:
+        # 자식 위젯은 부모 tooltip 을 상속하지 않으므로 모두 지정한다.
+        self.setToolTip(text)
+        self.img.setToolTip(text)
+        self.caption.setToolTip(text)
 
     def set_selected(self, selected: bool) -> None:
         self._selected = selected

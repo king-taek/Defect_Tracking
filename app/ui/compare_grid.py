@@ -6,11 +6,13 @@ layer별 이미지를 RDL4/PI4 ... 형태로 배치한다. 기준 Layer 이미�
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QLabel,
     QVBoxLayout,
@@ -24,7 +26,12 @@ from app.ui.widgets import FadeImageLabel
 
 
 class LayerCell(QFrame):
-    """단일 layer 이미지 셀 (제목 + 매칭 정보 + 이미지)."""
+    """단일 layer 이미지 셀 (제목 + 매칭 정보 + 이미지).
+
+    이미지가 있을 때 클릭하면 record_clicked 로 현재 DefectRecord 를 알린다(원본 확대 보기).
+    """
+
+    record_clicked = Signal(object)  # DefectRecord
 
     def __init__(
         self,
@@ -36,6 +43,7 @@ class LayerCell(QFrame):
         super().__init__(parent)
         self.layer = layer
         self.is_base = is_base
+        self._record: Optional[DefectRecord] = None
         self.setObjectName("cell")
         self._build()
         if loader is not None:
@@ -87,6 +95,7 @@ class LayerCell(QFrame):
             )
 
     def show_record(self, rec: Optional[DefectRecord], info: str, matched: bool) -> None:
+        self._set_record(rec)
         if rec is not None:
             self.image.show_path(rec.image_path, animated=not self.is_base)
             self.info.setText(info)
@@ -97,14 +106,40 @@ class LayerCell(QFrame):
             self._apply_style(active=matched)
 
     def show_base(self, rec: DefectRecord) -> None:
+        self._set_record(rec)
         self.image.show_path(rec.image_path, animated=True)
         self.info.setText(
             f"wafer {rec.wafer_id}  die({rec.col},{rec.row})  {rec.position_key}"
         )
 
+    def _set_record(self, rec: Optional[DefectRecord]) -> None:
+        self._record = rec
+        if rec is not None:
+            self.setCursor(Qt.PointingHandCursor)
+            tip = (
+                f"{self.layer} · wafer {rec.wafer_id} · die({rec.col},{rec.row})\n"
+                f"pos {rec.position_key}"
+            )
+            if rec.defect_name:
+                tip += f" · {rec.defect_name}"
+            tip += f"\n{rec.image_path}\n\n클릭하면 원본을 크게 봅니다"
+            self.setToolTip(tip)
+            self.image.setToolTip(tip)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+            self.setToolTip("")
+            self.image.setToolTip("")
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton and self._record is not None:
+            self.record_clicked.emit(self._record)
+        super().mousePressEvent(event)
+
 
 class CompareGrid(QWidget):
     """layer 배치 그리드 컨테이너."""
+
+    image_clicked = Signal(object)  # DefectRecord
 
     def __init__(
         self, loader: Optional[ImageLoader] = None, parent: Optional[QWidget] = None
@@ -116,11 +151,12 @@ class CompareGrid(QWidget):
         self._cells: dict[str, LayerCell] = {}
         self._base_layer: str = ""
         self._loader = loader
+        self._fade: Optional[QPropertyAnimation] = None
 
     def build_layout(
         self, grid: list[list[Optional[str]]], base_layer: str
     ) -> None:
-        """layer 배치(grid)에 따라 셀을 재구성한다."""
+        """layer 배치(grid)에 따라 셀을 재구성하고 부드럽게 페이드 인한다."""
         # 기존 제거
         while self._grid.count():
             item = self._grid.takeAt(0)
@@ -138,8 +174,30 @@ class CompareGrid(QWidget):
                 cell = LayerCell(
                     layer, is_base=(layer == base_layer), loader=self._loader
                 )
+                cell.record_clicked.connect(self.image_clicked)
                 self._cells[layer] = cell
                 self._grid.addWidget(cell, r, c)
+
+        self._play_fade_in()
+
+    def _play_fade_in(self) -> None:
+        """그리드 전환 시 전체를 부드럽게 페이드 인 (화면 전환 매끄럽게)."""
+        effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", self)
+        anim.setDuration(240)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+
+        def _clear() -> None:
+            # 더 새로운 페이드가 시작되지 않았을 때만 effect 제거(렌더/클릭 정상화).
+            if self.graphicsEffect() is effect:
+                self.setGraphicsEffect(None)
+
+        anim.finished.connect(_clear)
+        self._fade = anim
+        anim.start()
 
     def update_for_base(
         self, item: BaseDefectMatches, compare_layers: list[str]

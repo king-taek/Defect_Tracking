@@ -1,0 +1,146 @@
+"""오프스크린 UI 회귀 테스트 (Round 3 — 연결성/사용성).
+
+Qt 가 없으면 skip. 모달(QFileDialog/QMessageBox)을 띄우지 않는 내부 메서드만 호출한다.
+합성 데이터를 _on_scan_finished 로 직접 주입하여 스캔 워커/모달을 우회한다.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import QCoreApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from app import scanner  # noqa: E402
+from app.config import AppSettings  # noqa: E402
+from app.models import DefectRecord  # noqa: E402
+from tools.make_sample_data import generate  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def app():
+    application = QApplication.instance() or QApplication([])
+    yield application
+
+
+@pytest.fixture()
+def win(app, tmp_path):
+    from app.ui.main_window import MainWindow
+
+    lot = generate(tmp_path / "src")
+    idx = scanner.scan_lot(lot)
+    w = MainWindow(AppSettings(workspace=str(tmp_path / "ws")))
+    w.lot_index = idx
+    w._on_scan_finished(idx)
+    for _ in range(10):
+        QCoreApplication.processEvents()
+    return w
+
+
+def test_loads_and_builds(win):
+    assert win.top.base_layer() == "RDL4"
+    assert set(win.top.compare_layers()) == {"PI4", "RDL3", "PI3"}
+    assert len(win.matches) == 8
+    assert win.current == 0
+    assert set(win.grid._cells.keys()) == {"RDL4", "PI4", "RDL3", "PI3"}
+
+
+def test_tolerance_change_preserves_index(win):
+    win._goto(3)
+    assert win.current == 3
+    win.top.spn_tol.setValue(250.0)  # tolerance_changed → _rematch(rebuild_grid=False)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert win.current == 3, "허용오차 변경이 현재 인덱스를 리셋하면 안 된다"
+
+
+def test_compare_toggle_preserves_index_and_columns(win):
+    win._goto(4)
+    # PI3 해제 → 그리드 컬럼에서 빠지고, 인덱스는 유지
+    cb = next(c for c in win.top._compare_checks if c.text() == "PI3")
+    cb.setChecked(False)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert win.current == 4
+    assert "PI3" not in win.grid._cells
+    assert "PI4" in win.grid._cells
+
+
+def test_keyboard_like_navigation(win):
+    win._goto(0)
+    win._next()
+    assert win.current == 1
+    win._prev()
+    win._prev()
+    assert win.current == 7  # wrap-around
+    win._goto(len(win.matches) - 1)
+    assert win.current == 7
+
+
+def test_image_click_forwards_record(app):
+    """LayerCell 클릭 → CompareGrid.image_clicked 로 record 가 전달되는지(모달 우회)."""
+    from app.ui.compare_grid import CompareGrid
+
+    grid = CompareGrid()
+    grid.build_layout([["RDL4", "PI4"]], "RDL4")
+    captured = []
+    grid.image_clicked.connect(lambda r: captured.append(r))
+    cell = grid._cells["RDL4"]
+    rec = DefectRecord(
+        image_path=Path("/x/y.jpg"), wafer_id="W1", layer="RDL4", layer_folder="RDL4",
+    )
+    cell._set_record(rec)
+    cell.record_clicked.emit(cell._record)
+    assert captured and isinstance(captured[0], DefectRecord)
+
+
+def test_select_all_none_compare_single_signal(win):
+    calls = []
+    win.top.compare_layers_changed.connect(lambda: calls.append(1))
+    win.top._set_all_compares(False)
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert win.top.compare_layers() == []
+    assert len(calls) == 1, "전체/해제는 한 번의 신호로 처리되어야 한다"
+
+
+def test_stale_scan_ignored(win):
+    before = win.current
+    # 토큰을 올린 뒤 과거 토큰으로 finished 를 주입하면 무시되어야 한다
+    win._scan_token += 1
+    win._on_scan_finished(win.lot_index, token=win._scan_token - 1)
+    assert win.current == before
+
+
+def test_thumbnail_strip_vertical_wheel_scrolls_horizontally(app, tmp_path):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from app.ui.thumbnail_strip import ThumbnailStrip
+
+    strip = ThumbnailStrip()
+    strip.set_items([f"w{i}\n({i},{i})" for i in range(30)])
+    strip.resize(300, 152)
+    strip.show()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    bar = strip.horizontalScrollBar()
+    start = bar.value()
+    ev = QWheelEvent(
+        QPointF(10, 10), QPointF(10, 10), QPoint(0, -120), QPoint(0, -120),
+        Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False,
+    )
+    strip.wheelEvent(ev)
+    assert bar.value() >= start  # 세로 휠(아래)로 가로 스크롤 이동
+
+
+def test_failure_summary_text():
+    from app.ui.main_window import MainWindow
+
+    assert "정상" in MainWindow._failure_summary([])

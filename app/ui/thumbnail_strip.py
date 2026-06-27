@@ -2,6 +2,8 @@
 
 기준 Layer 사진들의 (중앙 10% 확대) 썸네일을 가로로 나열한다.
 클릭 시 해당 사진을 기준 defect 로 설정하고, 현재 선택 썸네일을 강조한다.
+
+가로 휠을 쓰지 않도록 **세로 휠 → 가로 스크롤** 로 매핑한다(사용성).
 """
 
 from __future__ import annotations
@@ -24,7 +26,8 @@ class ThumbnailStrip(QScrollArea):
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setFixedHeight(150)
+        self.setFixedHeight(152)
+        self.setToolTip("세로 휠로 좌우 스크롤 · 클릭하면 기준 사진 변경")
         self._container = QWidget()
         self._layout = QHBoxLayout(self._container)
         self._layout.setContentsMargins(8, 8, 8, 8)
@@ -41,12 +44,16 @@ class ThumbnailStrip(QScrollArea):
         self._thumbs.clear()
         self._current = -1
 
-    def set_items(self, captions: list[str]) -> None:
+    def set_items(
+        self, captions: list[str], tooltips: Optional[list[str]] = None
+    ) -> None:
         """기준 record 개수만큼 썸네일 placeholder 를 만든다."""
         self.clear()
         for i, cap in enumerate(captions):
             thumb = ClickableThumb(i)
             thumb.set_caption(cap)
+            if tooltips and i < len(tooltips):
+                thumb.set_tooltip(tooltips[i])
             thumb.clicked.connect(self.thumb_clicked)
             # stretch 앞에 삽입
             self._layout.insertWidget(self._layout.count() - 1, thumb)
@@ -57,7 +64,7 @@ class ThumbnailStrip(QScrollArea):
             self._thumbs[index].set_image(path)
 
     def set_current(self, index: int) -> None:
-        if index == self._current:
+        if not (0 <= index < len(self._thumbs)):
             return
         for i, t in enumerate(self._thumbs):
             t.set_selected(i == index)
@@ -66,4 +73,16 @@ class ThumbnailStrip(QScrollArea):
 
     def _ensure_visible(self, index: int) -> None:
         if 0 <= index < len(self._thumbs):
-            self.ensureWidgetVisible(self._thumbs[index], 50, 0)
+            self.ensureWidgetVisible(self._thumbs[index], 60, 0)
+
+    def wheelEvent(self, event):  # noqa: N802
+        """세로 휠을 가로 스크롤로 변환 (가로 휠 불필요)."""
+        bar = self.horizontalScrollBar()
+        delta = event.angleDelta().y()
+        if delta == 0:
+            delta = event.angleDelta().x()
+        if delta != 0 and bar.maximum() > 0:
+            bar.setValue(bar.value() - delta)
+            event.accept()
+        else:
+            super().wheelEvent(event)

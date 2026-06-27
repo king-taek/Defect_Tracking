@@ -26,6 +26,12 @@
 - **다크 + 파란 네온 UI**, hover/pressed 시각 변화, 부드러운 전환 (Section 9)
 - **비동기 이미지 로딩 + LRU 캐시** — 네트워크 경로에서도 탐색 시 UI 멈춤 최소화 (Section 10)
 - **진단 표시** — 좌표 추출 실패 건수/사유를 상태 표시줄 tooltip 으로 안내 (Section 11)
+- **원본 확대 뷰어** — 그리드 이미지를 클릭하면 원본 전체 해상도로 보기(맞춤/실제·휠 줌·Esc)
+- **키보드 탐색** — ←/→·PageUp/Down·Home/End, Ctrl+O(폴더)·Ctrl+E(출력)
+- **비차단 알림 배너** — 오류/완료를 모달 없이 매끄럽게 안내(출력 완료 시 "폴더 열기" 액션)
+- **매끄러운 사용성** — 조작이 현재 보던 위치를 리셋하지 않음, 화면 전환 페이드,
+  세로 휠로 썸네일 좌우 스크롤(가로 휠 불필요), 비교 Layer 줄바꿈 + 전체/해제,
+  창 크기·허용오차·선택 기억, 고DPI 선명도, 빠른 폴더 재선택 시 옛 결과 무시
 
 ---
 
@@ -110,7 +116,8 @@ app/
   workers.py            백그라운드 스캔/썸네일
   parsers/              camtek_filename · camtek_ini · kla_info
   export/excel_report.py  Excel 출력
-  ui/                   theme · main_window · thumbnail_strip · compare_grid · controls · export_dialog · widgets · image_loader
+  ui/                   theme · main_window · thumbnail_strip · compare_grid · controls · export_dialog
+                        widgets · image_loader · image_viewer · notifications · flow_layout
 tools/make_sample_data.py  합성 데이터 생성기
 tests/                  pytest
 ```

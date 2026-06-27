@@ -2,6 +2,12 @@
 
 폴더 선택 → 스캔 → 기준/비교 layer 선택 → 매칭 → 탐색/비교 → 결과 출력.
 모든 원본 접근은 read-only, 결과는 output workspace 에만 저장한다.
+
+상태 갱신 원칙(사용성):
+  - 기준 layer 변경/새 LOT  → 전체 재구성(_rebuild_all), 인덱스 0.
+  - 비교 layer 토글         → 그리드 컬럼만 재구성(_rematch, rebuild_grid=True), 현재 인덱스 유지.
+  - 허용 오차 변경          → 재매칭만(_rematch, rebuild_grid=False), 그리드/썸네일 유지, 인덱스 유지.
+오류는 비차단 배너로 안내하여 작업 흐름을 끊지 않는다.
 """
 
 from __future__ import annotations
@@ -9,13 +15,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import Qt, QThreadPool, QUrl
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QProgressBar,
     QScrollArea,
     QVBoxLayout,
@@ -33,6 +39,8 @@ from app.ui.compare_grid import CompareGrid
 from app.ui.controls import NavBar, TopBar
 from app.ui.export_dialog import ExportSelectDialog
 from app.ui.image_loader import ImageLoader
+from app.ui.image_viewer import ImageViewerDialog
+from app.ui.notifications import NotificationBanner
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.workers import ScanWorker, ThumbnailWorker
 
@@ -41,12 +49,11 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: Optional[AppSettings] = None):
         super().__init__()
         self.setWindowTitle("Conder Scan Review Image Compare Viewer")
-        self.resize(1280, 860)
 
         self.settings = settings or AppSettings.load()
         self.settings.ensure_workspace()
         self.thumb_cache = ThumbnailCache(self.settings.cache_path)
-        self.image_loader = ImageLoader()
+        self.image_loader = ImageLoader(max_dim=self._target_image_dim())
         self.pool = QThreadPool.globalInstance()
 
         self.lot_index: Optional[LotIndex] = None
@@ -54,9 +61,46 @@ class MainWindow(QMainWindow):
         self.matches: list[BaseDefectMatches] = []
         self.current = -1
         self._thumb_worker: Optional[ThumbnailWorker] = None
+        self._scan_token = 0  # stale 스캔/썸네일 결과 무시용
+        # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
+        self._active_workers: set = set()
 
+        self._restore_geometry()
         self._build_ui()
-        self._restore_settings()
+        self._install_shortcuts()
+        self._apply_saved_prefs()
+
+    # ----------------------------------------------------- 화면/DPI 보조
+    @staticmethod
+    def _target_image_dim() -> int:
+        """그리드 이미지 로딩 해상도를 화면 크기·DPR 기준으로 산정(고DPI 선명도)."""
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return 700
+        geo = screen.availableGeometry()
+        dpr = screen.devicePixelRatio()
+        # 셀은 화면 절반 폭 이하 → 그 정도 해상도면 충분히 선명
+        return int(max(560, min(1600, (geo.width() // 2) * dpr)))
+
+    def _restore_geometry(self) -> None:
+        screen = QGuiApplication.primaryScreen()
+        if self.settings.window_geometry:
+            try:
+                x, y, w, h = (int(v) for v in self.settings.window_geometry.split(","))
+                self.setGeometry(x, y, w, h)
+                return
+            except (ValueError, TypeError):
+                pass
+        if screen is not None:
+            avail = screen.availableGeometry()
+            w = int(avail.width() * 0.80)
+            h = int(avail.height() * 0.84)
+            self.resize(max(1100, w), max(720, h))
+            self.move(avail.center().x() - self.width() // 2,
+                      avail.center().y() - self.height() // 2)
+        else:
+            self.resize(1280, 860)
+        self.setMinimumSize(1024, 680)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -66,16 +110,20 @@ class MainWindow(QMainWindow):
         main.setContentsMargins(12, 12, 12, 12)
         main.setSpacing(10)
 
+        self.banner = NotificationBanner()
+        main.addWidget(self.banner)
+
         self.top = TopBar()
         self.top.open_folder.connect(self._choose_folder)
-        self.top.base_layer_changed.connect(lambda _: self._recompute())
-        self.top.compare_layers_changed.connect(self._recompute)
-        self.top.tolerance_changed.connect(lambda _: self._recompute())
+        self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
+        self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
+        self.top.tolerance_changed.connect(lambda _: self._rematch(rebuild_grid=False))
         self.top.export_requested.connect(self._export)
         main.addWidget(self.top)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
+        self.progress.setTextVisible(False)
         main.addWidget(self.progress)
 
         self.strip = ThumbnailStrip()
@@ -85,16 +133,20 @@ class MainWindow(QMainWindow):
         # 비교 그리드 (스크롤 가능)
         grid_scroll = QScrollArea()
         grid_scroll.setWidgetResizable(True)
+        grid_scroll.setFrameShape(QFrame.NoFrame)
         grid_host = QFrame()
         grid_host.setObjectName("panel")
         grid_host_layout = QVBoxLayout(grid_host)
         grid_host_layout.setContentsMargins(10, 10, 10, 10)
         self.grid = CompareGrid(loader=self.image_loader)
+        self.grid.image_clicked.connect(self._open_viewer)
         grid_host_layout.addWidget(self.grid)
         self._empty_label = QLabel("LOT 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
         self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setMinimumHeight(200)
         grid_host_layout.addWidget(self._empty_label)
+        grid_host_layout.addStretch()
         grid_scroll.setWidget(grid_host)
         main.addWidget(grid_scroll, 1)
 
@@ -105,13 +157,25 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
 
-    def _restore_settings(self) -> None:
-        if self.settings.last_lot_folder and Path(self.settings.last_lot_folder).exists():
-            self.nav.set_status("이전 LOT 경로를 불러오려면 폴더 선택을 누르세요.")
+    def _install_shortcuts(self) -> None:
+        QShortcut(QKeySequence(Qt.Key_Right), self, activated=self._next)
+        QShortcut(QKeySequence(Qt.Key_Left), self, activated=self._prev)
+        QShortcut(QKeySequence(Qt.Key_PageDown), self, activated=self._next)
+        QShortcut(QKeySequence(Qt.Key_PageUp), self, activated=self._prev)
+        QShortcut(QKeySequence(Qt.Key_Home), self, activated=lambda: self._goto(0))
+        QShortcut(QKeySequence(Qt.Key_End), self,
+                  activated=lambda: self._goto(len(self.matches) - 1))
+        QShortcut(QKeySequence("Ctrl+O"), self, activated=self._choose_folder)
+        QShortcut(QKeySequence("Ctrl+E"), self, activated=self._export)
+
+    def _apply_saved_prefs(self) -> None:
+        if self.settings.tolerance:
+            self.top.set_tolerance(self.settings.tolerance)
 
     # ----------------------------------------------------------- 폴더/스캔
     def _choose_folder(self) -> None:
-        start = self.settings.last_lot_folder or str(Path.home())
+        last = self.settings.last_lot_folder
+        start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
         folder = QFileDialog.getExistingDirectory(self, "LOT 폴더 선택", start)
         if folder:
             self.load_lot(folder)
@@ -122,51 +186,87 @@ class MainWindow(QMainWindow):
             return
 
         self.settings.last_lot_folder = folder
+        self._scan_token += 1
+        token = self._scan_token
+
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)
         self.nav.set_status("스캔 중...")
         self.top.set_lot_name(Path(folder).name)
+        self.setWindowTitle(f"Conder Scan Compare Viewer — {Path(folder).name}")
 
         worker = ScanWorker(folder)
         worker.signals.progress.connect(self._on_scan_progress)
-        worker.signals.finished.connect(self._on_scan_finished)
-        worker.signals.error.connect(self._on_scan_error)
+        worker.signals.finished.connect(lambda idx, t=token: self._on_scan_finished(idx, t))
+        worker.signals.error.connect(lambda msg, t=token: self._on_scan_error(msg, t))
+        self._track_worker(worker, worker.signals.finished, worker.signals.error)
         self.pool.start(worker)
 
+    def _track_worker(self, worker, *terminal_signals) -> None:
+        """워커가 끝날 때까지 참조를 유지(실행 중 GC 로 인한 시그널 삭제 방지)."""
+        self._active_workers.add(worker)
+        for sig in terminal_signals:
+            sig.connect(lambda *_, w=worker: self._active_workers.discard(w))
+
     def _verify_workspace_outside(self, folder: str) -> bool:
-        """캐시/내보내기 작업공간이 선택한 LOT 폴더 내부면 경고하고 차단한다."""
+        """캐시/내보내기 작업공간이 선택한 LOT 폴더 내부면 안내하고 차단한다."""
         for target in (self.settings.cache_path, self.settings.exports_path):
             conflict = conflicting_source(target, [folder])
             if conflict is not None:
-                QMessageBox.critical(
-                    self,
-                    "원본 보호",
-                    "프로그램 작업공간(캐시/결과)이 선택한 원본 LOT 폴더 내부에 있습니다.\n"
-                    "원본 보호 규칙상 원본 폴더 안에는 어떤 파일도 만들 수 없습니다.\n\n"
-                    f"  작업공간 : {target}\n"
-                    f"  원본 폴더 : {conflict}\n\n"
-                    "작업공간을 원본 밖으로 옮긴 뒤 다시 시도하세요.",
+                self.banner.show_message(
+                    "작업공간(캐시/결과)이 원본 LOT 폴더 내부에 있어 차단했습니다. "
+                    "원본 보호를 위해 다른 폴더를 선택하세요.",
+                    "error",
+                    action_text="작업공간 변경",
+                    action=self._change_workspace,
+                    timeout_ms=0,
                 )
                 return False
         return True
 
+    def _change_workspace(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "작업공간(캐시/결과) 폴더 선택", str(Path.home())
+        )
+        if folder:
+            self.settings.workspace = folder
+            self.settings.output_folder = ""
+            self.settings.ensure_workspace()
+            self.thumb_cache = ThumbnailCache(self.settings.cache_path)
+            self.settings.save()
+            self.banner.show_message("작업공간을 변경했습니다.", "success")
+
     def _on_scan_progress(self, msg: str, cur: int, total: int) -> None:
         self.nav.set_status(msg)
 
-    def _on_scan_error(self, message: str) -> None:
+    def _on_scan_error(self, message: str, token: int) -> None:
+        if token != self._scan_token:
+            return
         self.progress.setVisible(False)
-        QMessageBox.critical(self, "스캔 오류", f"폴더 스캔 중 오류가 발생했습니다:\n{message}")
         self.nav.set_status("스캔 오류")
+        self.banner.show_message(f"폴더 스캔 중 오류: {message}", "error", timeout_ms=0)
 
-    def _on_scan_finished(self, index: LotIndex) -> None:
+    def _on_scan_finished(self, index: LotIndex, token: int = -1) -> None:
+        if token != -1 and token != self._scan_token:
+            return  # 오래된(stale) 스캔 결과 무시
         self.progress.setVisible(False)
         self.lot_index = index
         layers = index.layer_canonicals()
         if not layers:
-            QMessageBox.warning(self, "데이터 없음", "선택한 폴더에서 layer 를 찾지 못했습니다.")
+            self.banner.show_message(
+                "선택한 폴더에서 layer 를 찾지 못했습니다. LOT 폴더를 확인하세요.",
+                "warn", timeout_ms=0,
+            )
             self.nav.set_status("layer 없음")
+            self._empty_label.setVisible(True)
+            self.grid.build_layout([], "")
+            self.nav.set_enabled(False)
             return
-        self.top.set_layers(layers)
+
+        # 설정 복원(현재 LOT 에 존재하는 경우에만)
+        saved_base = self.settings.base_layer if self.settings.base_layer in layers else None
+        saved_compares = [l for l in self.settings.compare_layers if l in layers] or None
+        self.top.set_layers(layers, base=saved_base, compares=saved_compares)
         self.settings.save()
 
         ok = sum(1 for r in index.records if r.ok)
@@ -180,7 +280,12 @@ class MainWindow(QMainWindow):
         status += ")"
         self.nav.set_status(status)
         self.nav.set_status_tooltip(self._failure_summary(failed))
-        self._recompute()
+        if failed:
+            self.banner.show_message(
+                f"{len(failed)}개 이미지의 좌표를 추출하지 못했습니다(상태표시줄에 상세).",
+                "warn",
+            )
+        self._rebuild_all()
 
     @staticmethod
     def _failure_summary(failed: list[DefectRecord]) -> str:
@@ -204,42 +309,68 @@ class MainWindow(QMainWindow):
             lines.append(f"    … 외 {len(failed) - 8}개")
         return "\n".join(lines)
 
-    # -------------------------------------------------------------- 매칭
-    def _recompute(self) -> None:
+    # ------------------------------------------------------- 재계산(분리)
+    def _rebuild_all(self) -> None:
+        """새 LOT·기준 layer 변경: base 목록·썸네일·그리드 전체 재구성, 인덱스 0."""
         if self.lot_index is None:
             return
         base_layer = self.top.base_layer()
-        compare_layers = self.top.compare_layers()
-        tolerance = self.top.tolerance()
         if not base_layer:
             return
+        self._save_prefs()
 
         self.base_records = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
-        rbl = self.lot_index.records_by_layer()
-        self.matches = matcher.match_all(
-            self.base_records, compare_layers, rbl, tolerance
-        )
+        self._compute_matches()
 
-        # 그리드 배치 재구성 (기준 + 비교 layer)
-        grid = layout.build_grid([base_layer] + compare_layers)
-        self._empty_label.setVisible(not self.base_records)
-        self.grid.build_layout(grid, base_layer)
-
-        # 썸네일 스트립
-        captions = [
-            f"{r.wafer_id}\n({r.col},{r.row})" for r in self.base_records
-        ]
-        self.strip.set_items(captions)
+        # 썸네일 스트립(기준 layer 에만 의존 → 여기서만 재구성)
+        captions, tooltips = [], []
+        for r in self.base_records:
+            captions.append(f"{r.wafer_id}\n({r.col},{r.row})")
+            tt = f"wafer {r.wafer_id} · die({r.col},{r.row}) · pos {r.position_key}"
+            if r.defect_name:
+                tt += f" · {r.defect_name}"
+            tooltips.append(tt)
+        self.strip.set_items(captions, tooltips)
         self._start_thumbnails()
 
+        self._rebuild_grid()
+        self._empty_label.setVisible(not self.base_records)
         self.nav.set_enabled(bool(self.base_records))
         if self.base_records:
             self._goto(0)
         else:
             self.nav.set_index(0, 0)
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
+
+    def _rematch(self, rebuild_grid: bool) -> None:
+        """비교 토글/허용오차 변경: 재매칭. 현재 인덱스는 유지(범위 clamp)."""
+        if self.lot_index is None or not self.base_records:
+            return
+        self._save_prefs()
+        self._compute_matches()
+        if rebuild_grid:
+            self._rebuild_grid()
+        if self.matches:
+            self.current = max(0, min(self.current, len(self.matches) - 1))
+            self._goto(self.current)
+        else:
+            self.nav.set_index(0, 0)
+
+    def _compute_matches(self) -> None:
+        compare_layers = self.top.compare_layers()
+        tolerance = self.top.tolerance()
+        rbl = self.lot_index.records_by_layer()
+        self.matches = matcher.match_all(
+            self.base_records, compare_layers, rbl, tolerance
+        )
+
+    def _rebuild_grid(self) -> None:
+        base_layer = self.top.base_layer()
+        compare_layers = self.top.compare_layers()
+        grid = layout.build_grid([base_layer] + compare_layers)
+        self.grid.build_layout(grid, base_layer)
 
     def _start_thumbnails(self) -> None:
         if self._thumb_worker is not None:
@@ -248,9 +379,19 @@ class MainWindow(QMainWindow):
         if not items:
             return
         worker = ThumbnailWorker(self.thumb_cache, items)
-        worker.signals.ready.connect(self.strip.set_thumbnail)
+        token = self._scan_token
+        worker.signals.ready.connect(
+            lambda i, p, t=token: self.strip.set_thumbnail(i, p)
+            if t == self._scan_token else None
+        )
+        self._track_worker(worker, worker.signals.done)
         self._thumb_worker = worker
         self.pool.start(worker)
+
+    def _save_prefs(self) -> None:
+        self.settings.tolerance = self.top.tolerance()
+        self.settings.base_layer = self.top.base_layer()
+        self.settings.compare_layers = self.top.compare_layers()
 
     # ------------------------------------------------------------ 탐색
     def _goto(self, index: int) -> None:
@@ -270,17 +411,22 @@ class MainWindow(QMainWindow):
         if self.matches:
             self._goto((self.current + 1) % len(self.matches))
 
+    def _open_viewer(self, record: object) -> None:
+        if isinstance(record, DefectRecord):
+            dlg = ImageViewerDialog(record, self)
+            dlg.exec()
+
     # ------------------------------------------------------------ 출력
     def _export(self) -> None:
         if not self.matches:
-            QMessageBox.information(self, "출력", "먼저 LOT 폴더를 불러오세요.")
+            self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
             return
-        dlg = ExportSelectDialog(self.matches, self.current, self)
+        dlg = ExportSelectDialog(self.matches, self.current, self.thumb_cache, self)
         if not dlg.exec():
             return
         indices = dlg.selected_indices()
         if not indices:
-            QMessageBox.information(self, "출력", "선택된 기준 사진이 없습니다.")
+            self.banner.show_message("선택된 기준 사진이 없습니다.", "info")
             return
 
         default_dir = str(self.settings.exports_path)
@@ -306,15 +452,33 @@ class MainWindow(QMainWindow):
                 source_roots=[self.lot_index.lot_path],
             )
         except OriginalProtectionError as exc:
-            QMessageBox.critical(self, "원본 보호", str(exc))
+            # 차단은 명확히 알려야 하므로 액션 가능한 배너로 안내
+            self.banner.show_message(str(exc).split("\n")[0], "error", timeout_ms=0)
             return
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "출력 오류", f"Excel 출력 중 오류:\n{exc}")
+            self.banner.show_message(f"Excel 출력 중 오류: {exc}", "error", timeout_ms=0)
             return
 
         if self.settings.output_folder == "":
             self.settings.output_folder = str(Path(out).parent)
-            self.settings.save()
-        QMessageBox.information(
-            self, "출력 완료", f"결과를 저장했습니다:\n{out}"
+        self.settings.save()
+        self.banner.show_message(
+            f"결과를 저장했습니다: {Path(out).name}",
+            "success",
+            action_text="폴더 열기",
+            action=lambda p=out: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(Path(p).parent))
+            ),
+            timeout_ms=7000,
         )
+
+    # ------------------------------------------------------------ 종료
+    def closeEvent(self, event):  # noqa: N802
+        geo = self.geometry()
+        self.settings.window_geometry = f"{geo.x()},{geo.y()},{geo.width()},{geo.height()}"
+        self._save_prefs()
+        try:
+            self.settings.save()
+        except OSError:
+            pass
+        super().closeEvent(event)

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -23,21 +24,24 @@ from PySide6.QtWidgets import (
 )
 
 from app.models import BaseDefectMatches
+from app.thumbnails import ThumbnailCache
 
 
 class ExportSelectDialog(QDialog):
-    """출력할 기준 사진들을 다중 선택하는 다이얼로그."""
+    """출력할 기준 사진들을 다중 선택하는 다이얼로그(썸네일 미리보기 포함)."""
 
     def __init__(
         self,
         items: list[BaseDefectMatches],
         current_index: int = -1,
+        thumb_cache: Optional[ThumbnailCache] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("결과 출력 — 기준 사진 선택")
-        self.setMinimumWidth(520)
+        self.setMinimumSize(560, 520)
         self._items = items
+        self._thumb_cache = thumb_cache
         self._build(current_index)
 
     def _build(self, current_index: int) -> None:
@@ -54,6 +58,8 @@ class ExportSelectDialog(QDialog):
 
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list.setIconSize(QSize(56, 56))
+        self.list.setSpacing(2)
         for i, item in enumerate(self._items):
             base = item.base
             n_match = sum(1 for r in item.results if r.is_match)
@@ -64,6 +70,10 @@ class ExportSelectDialog(QDialog):
             )
             li = QListWidgetItem(text)
             li.setData(Qt.UserRole, i)
+            if self._thumb_cache is not None:
+                thumb = self._thumb_cache.get_center_thumbnail(base.image_path)
+                if thumb is not None:
+                    li.setIcon(QIcon(str(thumb)))
             self.list.addItem(li)
         lay.addWidget(self.list)
 
