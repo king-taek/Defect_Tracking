@@ -141,6 +141,33 @@ def test_thumbnail_strip_vertical_wheel_scrolls_horizontally(app, tmp_path):
     assert bar.value() >= start  # 세로 휠(아래)로 가로 스크롤 이동
 
 
+def test_match_index_cache_reused(win):
+    rbl = win.lot_index.records_by_layer()
+    layers = win.top.compare_layers()
+    idx1, fidx1 = win._get_match_indices(layers, rbl)
+    idx2, fidx2 = win._get_match_indices(layers, rbl)
+    assert idx1 is idx2 and fidx1 is fidx2  # 동일 시그니처 → 재사용
+    other = layers[:-1] if len(layers) > 1 else layers + ["__x__"]
+    idx3, _ = win._get_match_indices(other, rbl)
+    assert idx3 is not idx1  # 비교 layer 집합 변경 → 재구성
+
+
+def test_image_loader_prefetch_warms_cache(app, tmp_path):
+    from PySide6.QtCore import QThreadPool
+    from app.ui.image_loader import ImageLoader
+    from tools.make_sample_data import generate
+
+    lot = generate(tmp_path / "src")
+    jpgs = [str(p) for p in lot.rglob("*.jpg")][:3]
+    assert jpgs
+    loader = ImageLoader()
+    loader.prefetch(jpgs)
+    QThreadPool.globalInstance().waitForDone(5000)
+    for _ in range(10):
+        QCoreApplication.processEvents()
+    assert any(p in loader._cache for p in jpgs)
+
+
 def test_match_summary_populated(win):
     # 매칭 계산 후 사이드바에 요약 텍스트가 채워진다(허용오차 피드백)
     assert "매칭" in win.top.lbl_match.text()

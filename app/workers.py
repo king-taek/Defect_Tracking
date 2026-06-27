@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
@@ -14,6 +16,9 @@ from app import scanner
 from app.scanner import LotIndex
 
 _log = logging.getLogger("conder.workers")
+
+# 썸네일 생성 병렬 워커 수(이미지 디코드+I/O 혼합).
+_THUMB_WORKERS = max(2, min(8, (os.cpu_count() or 4)))
 
 
 class ScanSignals(QObject):
@@ -63,10 +68,23 @@ class ThumbnailWorker(QRunnable):
 
     @Slot()
     def run(self) -> None:
-        for index, path in self.items:
+        def _make(item: tuple[int, Path]):
+            index, path = item
             if self._cancelled:
-                break
-            thumb = self.cache.get_center_thumbnail(path)
-            if thumb is not None:
-                self.signals.ready.emit(index, str(thumb))
+                return None
+            try:
+                thumb = self.cache.get_center_thumbnail(path)
+            except Exception:  # noqa: BLE001 - 개별 실패는 건너뛴다
+                _log.exception("썸네일 생성 실패: %s", path)
+                return None
+            return (index, thumb)
+
+        if self.items:
+            workers = min(_THUMB_WORKERS, len(self.items))
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                for result in ex.map(_make, self.items):
+                    if self._cancelled:
+                        break
+                    if result is not None and result[1] is not None:
+                        self.signals.ready.emit(result[0], str(result[1]))
         self.signals.done.emit()

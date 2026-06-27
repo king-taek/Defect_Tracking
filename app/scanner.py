@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -26,6 +28,9 @@ ProgressCb = Optional[Callable[[str, int, int], None]]
 
 _INI_HINT = "colorimagegrabinginfo"
 _log = logging.getLogger("conder.scanner")
+
+# wafer 스캔 병렬 워커 수(네트워크 I/O 바운드 → CPU 수보다 넉넉히).
+_SCAN_WORKERS = max(4, min(16, (os.cpu_count() or 4) * 2))
 
 # 디렉터리/파일 나열 중 접근 오류를 누적(스캔 1회 단위). 병렬 스캔(Phase 3) 대비 lock 사용.
 _scan_errors: list[str] = []
@@ -265,14 +270,33 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
         )
     _assign_displays(index.layers)
 
-    # 2차: 각 layer 폴더의 wafer 를 스캔(record.layer 는 display 이름 사용).
-    for li, info in enumerate(index.layers):
-        if progress:
-            progress(f"layer 스캔: {info.folder_name}", li, total)
+    # 2차: (layer, wafer) 작업 목록을 만들고 wafer 단위로 병렬 스캔한다.
+    # 네트워크 경로에서 디렉터리/info 파일 I/O latency 가 지배적이므로 병렬화가 효과적.
+    # 결과는 입력 순서(layer 순 → wafer 정렬)대로 모아 직렬 스캔과 동일한 결정적 순서 유지.
+    tasks: list[tuple[LayerInfo, Path]] = []
+    for info in index.layers:
         for wafer_dir in _list_dirs(info.path):
-            index.records.extend(
-                _scan_wafer_folder(wafer_dir, info.display, info.folder_name)
-            )
+            tasks.append((info, wafer_dir))
+    wafer_total = len(tasks) or 1
+
+    def _scan_task(task: tuple[LayerInfo, Path]) -> list[DefectRecord]:
+        info, wafer_dir = task
+        try:
+            return _scan_wafer_folder(wafer_dir, info.display, info.folder_name)
+        except Exception as exc:  # noqa: BLE001 - 한 wafer 실패가 전체 스캔을 막지 않게
+            _record_scan_error(wafer_dir, exc if isinstance(exc, OSError) else OSError(str(exc)))
+            return []
+
+    if tasks:
+        workers = min(_SCAN_WORKERS, len(tasks))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for done, recs in enumerate(ex.map(_scan_task, tasks), start=1):
+                index.records.extend(recs)
+                if progress:
+                    info, wafer_dir = tasks[done - 1]
+                    progress(
+                        f"스캔: {info.folder_name}/{wafer_dir.name}", done, wafer_total
+                    )
 
     with _scan_errors_lock:
         index.scan_errors = list(_scan_errors)

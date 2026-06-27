@@ -59,6 +59,23 @@ def test_scan_lot_clean_has_no_errors(tmp_path):
     assert hasattr(idx, "scan_errors")
 
 
+def test_parallel_scan_is_deterministic(tmp_path):
+    from tools.make_sample_data import generate
+
+    lot = generate(tmp_path / "src")
+    a = scanner.scan_lot(lot)
+    b = scanner.scan_lot(lot)
+    # 병렬 스캔이어도 record 순서/내용이 결정적이어야 한다.
+    seq_a = [(r.layer, r.wafer_id, r.image_path.name) for r in a.records]
+    seq_b = [(r.layer, r.wafer_id, r.image_path.name) for r in b.records]
+    assert seq_a == seq_b
+    # layer 는 폴더 순서, 그 안에서 (wafer, 파일명) 정렬이 유지된다.
+    for i in range(1, len(seq_a)):
+        # 같은 (layer, wafer) 그룹 내에서는 파일명이 비내림차순
+        if seq_a[i][:2] == seq_a[i - 1][:2]:
+            assert seq_a[i][2] >= seq_a[i - 1][2]
+
+
 def test_setup_logging_idempotent(tmp_path):
     from app import logging_config
 

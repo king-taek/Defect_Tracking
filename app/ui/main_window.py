@@ -67,6 +67,10 @@ class MainWindow(QMainWindow):
         self.current = -1
         self._thumb_worker: Optional[ThumbnailWorker] = None
         self._scan_token = 0  # stale 스캔/썸네일 결과 무시용
+        # 매칭 인덱스 캐시(비교 layer 집합이 같으면 허용오차만 바뀔 때 재사용)
+        self._match_sig: object = None
+        self._match_idx = None
+        self._match_fail = None
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
 
@@ -432,10 +436,24 @@ class MainWindow(QMainWindow):
         compare_layers = self.top.compare_layers()
         tolerance = self.top.tolerance()
         rbl = self.lot_index.records_by_layer()
-        self.matches = matcher.match_all(
-            self.base_records, compare_layers, rbl, tolerance
-        )
+        idx, fidx = self._get_match_indices(compare_layers, rbl)
+        # 인덱스를 재사용하여 허용오차만 변경 시 재인덱싱 비용을 없앤다.
+        self.matches = [
+            matcher.match_base_against_layers(
+                base, compare_layers, rbl, tolerance, index=idx, fail_index=fidx
+            )
+            for base in self.base_records
+        ]
         self._update_match_summary()
+
+    def _get_match_indices(self, compare_layers, rbl):
+        """(lot, 비교 layer 집합) 기준으로 die/실패 인덱스를 캐시·재사용한다."""
+        sig = (id(self.lot_index), tuple(compare_layers))
+        if sig != self._match_sig:
+            self._match_idx = matcher.build_die_index(rbl, compare_layers)
+            self._match_fail = matcher.build_fail_index(rbl, compare_layers)
+            self._match_sig = sig
+        return self._match_idx, self._match_fail
 
     def _update_match_summary(self) -> None:
         """사이드바에 실시간 매칭 요약을 표시(허용오차 튜닝 피드백)."""
@@ -493,6 +511,20 @@ class MainWindow(QMainWindow):
         self.grid.update_for_base(item, self.top.compare_layers())
         self.strip.set_current(index)
         self.nav.set_index(index + 1, len(self.matches))
+        self._prefetch_neighbors(index)
+
+    def _prefetch_neighbors(self, index: int) -> None:
+        """인접 기준의 이미지(기준+매칭 비교)를 미리 로드해 탐색 체감을 높인다."""
+        paths: list[str] = []
+        for j in (index + 1, index - 1, index + 2):
+            if 0 <= j < len(self.matches):
+                m = self.matches[j]
+                paths.append(str(m.base.image_path))
+                for r in m.results:
+                    if r.is_match and r.matched is not None:
+                        paths.append(str(r.matched.image_path))
+        if paths:
+            self.image_loader.prefetch(paths)
 
     def _prev(self) -> None:
         if self.matches:

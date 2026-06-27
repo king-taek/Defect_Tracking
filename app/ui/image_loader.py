@@ -57,7 +57,7 @@ class ImageLoader(QObject):
     def __init__(
         self,
         max_dim: int = 600,
-        cache_size: int = 48,
+        cache_size: int = 128,
         parent: Optional[QObject] = None,
     ):
         super().__init__(parent)
@@ -81,6 +81,27 @@ class ImageLoader(QObject):
         task.signals.done.connect(self._on_done)
         self._pool.start(task)
         return rid
+
+    def prefetch(self, paths: list[str]) -> None:
+        """탐색 체감 향상을 위해 인접 이미지를 미리 디코드해 캐시에 채운다.
+
+        이미 캐시에 있으면 건너뛴다. 결과는 캐시에만 적재되고 loaded 시그널 소비자는
+        request_id 로 자신과 무관한 결과를 무시하므로 UI 에 영향이 없다.
+        """
+        for path in paths:
+            if not path or path in self._cache:
+                continue
+            task = _LoadTask(-1, path, self._max_dim)
+            task.signals.done.connect(self._on_prefetched)
+            self._pool.start(task)
+
+    @Slot(int, str, object)
+    def _on_prefetched(self, rid: int, path: str, image: object) -> None:
+        if isinstance(image, QImage) and not image.isNull():
+            self._cache[path] = image
+            self._cache.move_to_end(path)
+            while len(self._cache) > self._cache_size:
+                self._cache.popitem(last=False)
 
     @Slot(int, str, object)
     def _on_done(self, rid: int, path: str, image: object) -> None:
