@@ -18,28 +18,73 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# 좌표 변환 상수 (문서 Section 13 기준, DEVA Live)
+# 제품 프로파일 (좌표 변환 상수 묶음) — 제품별 확장은 PRODUCTS 에 추가만 하면 된다.
 # ---------------------------------------------------------------------------
 
-# Camtek stage 좌표 보정에 쓰는 die pitch (Section 13.3.5)
-CAMTEK_PITCH_X = 37247.7
-CAMTEK_PITCH_Y = 44905.4
 
-# Camtek die 위치 변환 규칙 (Section 13.3.6): col = Col - COL_OFFSET, row = ROW_BASE - Row
-CAMTEK_COL_OFFSET = 2
-CAMTEK_ROW_BASE = 7
+@dataclass(frozen=True)
+class ProductConfig:
+    """제품별 좌표 변환/패키지 상수 묶음 (문서 Section 13)."""
 
-# KLA package size (Section 13.2.6). zeroX/zeroY는 정수 나눗셈으로 산출.
-KLA_PACKAGE_X_COUNT = 7
-KLA_PACKAGE_Y_COUNT = 6
+    key: str
+    name: str
+    camtek_pitch_x: float
+    camtek_pitch_y: float
+    camtek_col_offset: int
+    camtek_row_base: int
+    kla_package_x_count: int
+    kla_package_y_count: int
+
+    def kla_zero_x(self) -> int:
+        return self.kla_package_x_count // 2
+
+    def kla_zero_y(self) -> int:
+        return self.kla_package_y_count // 2
+
+
+PRODUCTS: dict[str, ProductConfig] = {
+    "DEVAINT": ProductConfig(
+        key="DEVAINT",
+        name="DEVA Live",
+        camtek_pitch_x=37247.7,
+        camtek_pitch_y=44905.4,
+        camtek_col_offset=2,
+        camtek_row_base=7,
+        kla_package_x_count=7,
+        kla_package_y_count=6,
+    ),
+}
+DEFAULT_PRODUCT = "DEVAINT"
+_active_product = DEFAULT_PRODUCT
+
+
+def active_product() -> ProductConfig:
+    return PRODUCTS.get(_active_product, PRODUCTS[DEFAULT_PRODUCT])
+
+
+def set_active_product(key: str) -> None:
+    """활성 제품 프로파일을 바꾼다(다음 스캔부터 좌표 변환에 적용)."""
+    global _active_product
+    if key in PRODUCTS:
+        _active_product = key
+
+
+# ---- 하위호환 상수 (기본 제품 값) — 샘플데이터/기존 테스트가 참조 ----
+_DEFAULT_CFG = PRODUCTS[DEFAULT_PRODUCT]
+CAMTEK_PITCH_X = _DEFAULT_CFG.camtek_pitch_x
+CAMTEK_PITCH_Y = _DEFAULT_CFG.camtek_pitch_y
+CAMTEK_COL_OFFSET = _DEFAULT_CFG.camtek_col_offset
+CAMTEK_ROW_BASE = _DEFAULT_CFG.camtek_row_base
+KLA_PACKAGE_X_COUNT = _DEFAULT_CFG.kla_package_x_count
+KLA_PACKAGE_Y_COUNT = _DEFAULT_CFG.kla_package_y_count
 
 
 def kla_zero_x() -> int:
-    return KLA_PACKAGE_X_COUNT // 2
+    return active_product().kla_zero_x()
 
 
 def kla_zero_y() -> int:
-    return KLA_PACKAGE_Y_COUNT // 2
+    return active_product().kla_zero_y()
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +145,7 @@ class AppSettings:
     base_layer: str = ""
     compare_layers: list[str] = field(default_factory=list)
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
+    product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
     show_crosshair: bool = True  # 그리드 이미지 중앙 십자선 표시

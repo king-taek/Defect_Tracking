@@ -239,6 +239,44 @@ def test_crosshair_toggle(win):
     assert win.settings.show_crosshair is True
 
 
+def test_wafer_map_updates(win):
+    item = win.matches[0]
+    win._update_wafer_map(item)
+    assert win.wafer_map._cols >= 1 and win.wafer_map._rows >= 1
+    assert (item.base.col, item.base.row) in win.wafer_map._states
+
+
+def test_jump_to_die(win):
+    win._goto(2)
+    cur_wafer = win.matches[win.current].base.wafer_id
+    target = next(
+        i for i, m in enumerate(win.matches) if m.base.wafer_id == cur_wafer
+    )
+    tb = win.matches[target].base
+    win._jump_to_die(tb.col, tb.row)
+    got = win.matches[win.current].base
+    assert got.wafer_id == cur_wafer
+    assert (got.col, got.row) == (tb.col, tb.row)
+
+
+def test_overlay_dialog_constructs(win):
+    from app.ui.compare_overlay import OverlayCompareDialog
+
+    item = win.matches[0]
+    pairs = [
+        (r.compare_layer, r.matched)
+        for r in item.results
+        if r.is_match and r.matched is not None
+    ]
+    assert pairs
+    dlg = OverlayCompareDialog(item.base, "LYA4", pairs)
+    dlg._render()
+    dlg._set_blink(True)
+    dlg._on_blink_tick()
+    dlg._set_blink(False)
+    dlg._zoom(1.25)  # 크래시 없어야 함
+
+
 def test_failure_summary_text():
     from app.ui.main_window import MainWindow
 

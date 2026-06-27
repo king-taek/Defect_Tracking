@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QMainWindow,
@@ -50,6 +51,8 @@ from app.ui.image_viewer import ImageViewerDialog
 from app.ui.notifications import NotificationBanner
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
+from app.ui.wafer_map import WaferMapWidget
+from app.ui.compare_overlay import OverlayCompareDialog
 from app.workers import ScanWorker, ThumbnailWorker
 
 
@@ -165,7 +168,15 @@ class MainWindow(QMainWindow):
         band_layout.setSpacing(6)
         self.strip = ThumbnailStrip()
         self.strip.thumb_clicked.connect(self._goto)
-        band_layout.addWidget(self.strip)
+        # 썸네일 + 웨이퍼 맵을 한 줄에(맵은 현재 wafer 의 die 현황)
+        strip_row = QHBoxLayout()
+        strip_row.setContentsMargins(0, 0, 0, 0)
+        strip_row.setSpacing(8)
+        strip_row.addWidget(self.strip, 1)
+        self.wafer_map = WaferMapWidget()
+        self.wafer_map.die_clicked.connect(self._jump_to_die)
+        strip_row.addWidget(self.wafer_map, 0, Qt.AlignVCenter)
+        band_layout.addLayout(strip_row)
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
@@ -186,6 +197,13 @@ class MainWindow(QMainWindow):
         self.chk_crosshair.setChecked(self.settings.show_crosshair)
         self.chk_crosshair.toggled.connect(self._on_crosshair_toggled)
         self.nav.add_widget(self.chk_crosshair)
+        # 겹쳐 보기(블링크) — 기준 vs 비교 layer 위치/크기 변화 감지
+        from PySide6.QtWidgets import QPushButton
+        self.btn_overlay = QPushButton("⧉ 겹쳐보기")
+        self.btn_overlay.setObjectName("mini")
+        self.btn_overlay.setToolTip("기준과 비교 layer 를 겹쳐 보며 블링크/오버레이 (O)")
+        self.btn_overlay.clicked.connect(self._open_overlay)
+        self.nav.add_widget(self.btn_overlay)
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
 
@@ -245,6 +263,7 @@ class MainWindow(QMainWindow):
                   activated=lambda: self.top._set_all_compares(False))
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
         QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
+        QShortcut(QKeySequence(Qt.Key_O), self, activated=self._open_overlay)
 
     def _apply_saved_prefs(self) -> None:
         if self.settings.tolerance:
@@ -468,6 +487,7 @@ class MainWindow(QMainWindow):
         else:
             self.nav.set_index(0, 0)
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
+            self.wafer_map.clear()
         self._refresh_strip_marks()
 
     def _rematch(self, rebuild_grid: bool) -> None:
@@ -565,6 +585,7 @@ class MainWindow(QMainWindow):
         self.strip.set_current(index)
         self.nav.set_index(index + 1, len(self.matches))
         self._prefetch_neighbors(index)
+        self._update_wafer_map(item)
 
     def _prefetch_neighbors(self, index: int) -> None:
         """인접 기준의 이미지(기준+매칭 비교)를 미리 로드해 탐색 체감을 높인다."""
@@ -698,6 +719,53 @@ class MainWindow(QMainWindow):
             dlg = ImageViewerDialog(record, self)
             dlg.exec()
 
+    # ---- 웨이퍼 맵 / 겹쳐 보기 ----
+    def _update_wafer_map(self, item) -> None:
+        """현재 wafer 의 die 격자를 매칭 상태로 갱신한다."""
+        wafer = item.base.wafer_id
+        states: dict[tuple[int, int], str] = {}
+        max_col = max_row = 0
+        for m in self.matches:
+            b = m.base
+            if b.wafer_id != wafer or b.col is None or b.row is None:
+                continue
+            if b.col < 0 or b.row < 0:
+                continue
+            states[(b.col, b.row)] = self._match_status(m)
+            max_col = max(max_col, b.col)
+            max_row = max(max_row, b.row)
+        prod = config.active_product()
+        cols = max(prod.kla_package_x_count, max_col + 1)
+        rows = max(prod.kla_package_y_count, max_row + 1)
+        current = (item.base.col, item.base.row)
+        self.wafer_map.set_data(cols, rows, states, current)
+
+    def _jump_to_die(self, col: int, row: int) -> None:
+        if not self.matches:
+            return
+        wafer = self.matches[self.current].base.wafer_id
+        for i, m in enumerate(self.matches):
+            b = m.base
+            if b.wafer_id == wafer and b.col == col and b.row == row:
+                self._goto(i)
+                return
+
+    def _open_overlay(self) -> None:
+        if not self.matches or not (0 <= self.current < len(self.matches)):
+            self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
+            return
+        item = self.matches[self.current]
+        pairs = [
+            (r.compare_layer, r.matched)
+            for r in item.results
+            if r.is_match and r.matched is not None
+        ]
+        if not pairs:
+            self.banner.show_message("이 기준에는 겹쳐 볼 매칭 비교 사진이 없습니다.", "info")
+            return
+        dlg = OverlayCompareDialog(item.base, self.top.base_layer(), pairs, self)
+        dlg.exec()
+
     # ------------------------------------------------------------ 설정
     def _open_settings(self) -> None:
         current_lot = str(self.lot_index.lot_path) if self.lot_index else None
@@ -719,6 +787,7 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         s = dlg.updated_settings()
+        config.set_active_product(s.product)
         # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
         if s.workspace != old_workspace or s.output_folder != old_output:
             s.ensure_workspace()

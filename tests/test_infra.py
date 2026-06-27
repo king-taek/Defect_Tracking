@@ -96,6 +96,29 @@ def test_session_store_roundtrip(tmp_path):
     assert key not in again.marks
 
 
+def test_product_profiles_default_and_switch():
+    from app import config
+    from app.config import ProductConfig
+
+    assert config.active_product().key == config.DEFAULT_PRODUCT
+    assert config.kla_zero_x() == config.active_product().kla_package_x_count // 2
+    # 하위호환 상수는 기본 제품 값과 일치해야 한다(샘플데이터/기존 테스트).
+    assert config.CAMTEK_COL_OFFSET == config.active_product().camtek_col_offset
+
+    config.PRODUCTS["TESTPROD"] = ProductConfig(
+        key="TESTPROD", name="Test", camtek_pitch_x=1.0, camtek_pitch_y=2.0,
+        camtek_col_offset=0, camtek_row_base=5, kla_package_x_count=9,
+        kla_package_y_count=9,
+    )
+    try:
+        config.set_active_product("TESTPROD")
+        assert config.active_product().name == "Test"
+        assert config.kla_zero_x() == 4
+    finally:
+        config.set_active_product(config.DEFAULT_PRODUCT)
+        config.PRODUCTS.pop("TESTPROD", None)
+
+
 def test_setup_logging_idempotent(tmp_path):
     from app import logging_config
 

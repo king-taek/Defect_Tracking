@@ -11,6 +11,7 @@ from typing import Optional
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -76,6 +77,17 @@ class SettingsDialog(QDialog):
         self.spn_tol.setSuffix(" µm")
         self.spn_tol.setValue(self._settings.tolerance or config.DEFAULT_TOLERANCE)
         form.addRow("기본 허용 오차", self.spn_tol)
+
+        # 제품 프로파일(좌표 변환 상수). 변경은 다음 스캔부터 적용.
+        self.cmb_product = QComboBox()
+        for key, prod in config.PRODUCTS.items():
+            self.cmb_product.addItem(f"{prod.name} ({key})", key)
+        cur = self._settings.product
+        idx = self.cmb_product.findData(cur)
+        if idx >= 0:
+            self.cmb_product.setCurrentIndex(idx)
+        self.cmb_product.setToolTip("제품별 좌표 변환 상수 — 변경 후 다시 스캔(F5)하세요")
+        form.addRow("제품 프로파일", self.cmb_product)
 
         self.chk_update = QCheckBox("시작할 때 업데이트 확인")
         self.chk_update.setChecked(self._settings.auto_update_check)
@@ -182,4 +194,5 @@ class SettingsDialog(QDialog):
         self._settings.output_folder = self.ed_output.text().strip()
         self._settings.tolerance = self.spn_tol.value()
         self._settings.auto_update_check = self.chk_update.isChecked()
+        self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
         return self._settings
