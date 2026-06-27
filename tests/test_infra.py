@@ -96,6 +96,22 @@ def test_session_store_roundtrip(tmp_path):
     assert key not in again.marks
 
 
+def test_classify_selection_levels(tmp_path):
+    # DEVICE/MAT/LAYER/WAFER/a.jpg  — 각 레벨 선택 시 분류
+    img = tmp_path / "DEVICE" / "MAT" / "LAYER" / "WAFER" / "a.jpg"
+    img.parent.mkdir(parents=True)
+    img.write_bytes(b"\xff\xd8\xff\xd9")
+    mat = tmp_path / "DEVICE" / "MAT"
+
+    assert scanner.classify_selection(mat) == ("material", mat)
+    assert scanner.classify_selection(mat / "LAYER") == ("layer", mat)
+    assert scanner.classify_selection(mat / "LAYER" / "WAFER") == ("wafer", mat)
+    kind, _ = scanner.classify_selection(tmp_path / "DEVICE")
+    assert kind == "too_high"
+    (tmp_path / "EMPTY").mkdir()
+    assert scanner.classify_selection(tmp_path / "EMPTY") == ("unknown", None)
+
+
 def test_product_profiles_default_and_switch():
     from app import config
     from app.config import ProductConfig

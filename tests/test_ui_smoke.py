@@ -226,19 +226,6 @@ def test_session_mark_toggle_via_window(win):
     assert win.session.is_marked(str(base.image_path)) is False
 
 
-def test_crosshair_toggle(win):
-    win.chk_crosshair.setChecked(False)
-    for _ in range(3):
-        QCoreApplication.processEvents()
-    assert win.settings.show_crosshair is False
-    # 모든 셀 이미지에 십자선 상태가 전파된다
-    assert all(not c.image._crosshair for c in win.grid._cells.values())
-    win.chk_crosshair.setChecked(True)
-    for _ in range(3):
-        QCoreApplication.processEvents()
-    assert win.settings.show_crosshair is True
-
-
 def test_wafer_map_updates(win):
     item = win.matches[0]
     win._update_wafer_map(item)
@@ -257,6 +244,38 @@ def test_jump_to_die(win):
     got = win.matches[win.current].base
     assert got.wafer_id == cur_wafer
     assert (got.col, got.row) == (tb.col, tb.row)
+
+
+def test_overlay_autocrop_trims_black(app):
+    from PySide6.QtGui import QImage, qRgb
+    from app.ui.compare_overlay import _autocrop
+
+    img = QImage(40, 40, QImage.Format_RGB32)
+    img.fill(0)  # 전체 검정
+    for y in range(10, 30):
+        for x in range(10, 30):
+            img.setPixel(x, y, qRgb(255, 255, 255))  # 중앙 20px 흰색
+    out = _autocrop(img)
+    assert out.width() < 40 and out.height() < 40  # 검은 여백 제거됨
+    assert out.width() >= 16 and out.height() >= 16
+
+
+def test_help_dialog_constructs(app):
+    from app.ui.help_dialog import ShortcutsDialog
+
+    dlg = ShortcutsDialog()
+    assert dlg.windowTitle() == "단축키 도움말"
+
+
+def test_open_folder_classifies(win, tmp_path, monkeypatch):
+    # layer 폴더를 고르면 자재 폴더로 자동 보정해 load_lot 호출
+    img = tmp_path / "MAT" / "LAYER" / "WAFER" / "a.jpg"
+    img.parent.mkdir(parents=True)
+    img.write_bytes(b"\xff\xd8\xff\xd9")
+    called = {}
+    monkeypatch.setattr(win, "load_lot", lambda f: called.setdefault("folder", f))
+    win._open_folder(str(tmp_path / "MAT" / "LAYER"))
+    assert called.get("folder") == str(tmp_path / "MAT")
 
 
 def test_overlay_dialog_constructs(win):

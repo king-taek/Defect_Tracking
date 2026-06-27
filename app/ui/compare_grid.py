@@ -190,13 +190,6 @@ class CompareGrid(QWidget):
         self._cells: dict[str, LayerCell] = {}
         self._base_layer: str = ""
         self._loader = loader
-        self._crosshair = False
-
-    def set_crosshair(self, on: bool) -> None:
-        """모든 셀 이미지에 중앙 십자선 표시 여부를 적용한다."""
-        self._crosshair = on
-        for cell in self._cells.values():
-            cell.image.set_crosshair(on)
 
     def build_layout(
         self, grid: list[list[Optional[str]]], base_layer: str
@@ -222,7 +215,6 @@ class CompareGrid(QWidget):
                 cell.record_clicked.connect(self.image_clicked)
                 cell.mark_requested.connect(self.mark_requested)
                 cell.note_requested.connect(self.note_requested)
-                cell.image.set_crosshair(self._crosshair)
                 self._cells[layer] = cell
                 self._grid.addWidget(cell, r, c)
 

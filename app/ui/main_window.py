@@ -18,7 +18,6 @@ from typing import Optional
 from PySide6.QtCore import Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -29,13 +28,14 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from app import __version__, config, layout, matcher, updater
+from app import __version__, config, layout, matcher, scanner, updater
 from app.config import AppSettings
 from app.export.excel_report import export_excel
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
@@ -46,6 +46,7 @@ from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
 from app.ui.controls import NavBar, SideBar
 from app.ui.export_dialog import ExportSelectDialog
+from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui.notifications import NotificationBanner
@@ -180,7 +181,7 @@ class MainWindow(QMainWindow):
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
-        # 보기 필터: 전체 / 미매칭 있는 것만 / 완전 매칭만 (트리아지)
+        # 보기 필터: 전체 / 미매칭 있는 것만 / 완전 매칭만 (triage)
         self.cmb_filter = QComboBox()
         self.cmb_filter.addItem("전체", "all")
         self.cmb_filter.addItem("미매칭 있음", "unmatched")
@@ -191,19 +192,18 @@ class MainWindow(QMainWindow):
         self.lbl_view = QLabel("")
         self.lbl_view.setObjectName("dim")
         self.nav.add_widget(self.lbl_view)
-        # 보기 옵션: 중앙 십자선 토글(defect 위치 시각 보조)
-        self.chk_crosshair = QCheckBox("중앙 십자선")
-        self.chk_crosshair.setToolTip("defect 는 이미지 중앙에 위치 — 중앙 십자선 표시")
-        self.chk_crosshair.setChecked(self.settings.show_crosshair)
-        self.chk_crosshair.toggled.connect(self._on_crosshair_toggled)
-        self.nav.add_widget(self.chk_crosshair)
         # 겹쳐 보기(블링크) — 기준 vs 비교 layer 위치/크기 변화 감지
-        from PySide6.QtWidgets import QPushButton
         self.btn_overlay = QPushButton("⧉ 겹쳐보기")
         self.btn_overlay.setObjectName("mini")
         self.btn_overlay.setToolTip("기준과 비교 layer 를 겹쳐 보며 블링크/오버레이 (O)")
         self.btn_overlay.clicked.connect(self._open_overlay)
         self.nav.add_widget(self.btn_overlay)
+        # 단축키 도움말
+        self.btn_help = QPushButton("?")
+        self.btn_help.setObjectName("mini")
+        self.btn_help.setToolTip("단축키 도움말 (F1)")
+        self.btn_help.clicked.connect(self._open_help)
+        self.nav.add_widget(self.btn_help)
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
 
@@ -264,6 +264,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
         QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
         QShortcut(QKeySequence(Qt.Key_O), self, activated=self._open_overlay)
+        QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
 
     def _apply_saved_prefs(self) -> None:
         if self.settings.tolerance:
@@ -275,6 +276,32 @@ class MainWindow(QMainWindow):
         start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
         folder = QFileDialog.getExistingDirectory(self, "자재 폴더 선택", start)
         if folder:
+            self._open_folder(folder)
+
+    def _open_folder(self, folder: str) -> None:
+        """선택 폴더의 구조 레벨을 판별해 자재 폴더로 보정하거나 재선택을 안내한다.
+
+        모든 안내는 비차단 배너로(팝업 없음). 원본 read-only.
+        """
+        kind, material = scanner.classify_selection(folder)
+        if kind == "material":
+            self.load_lot(folder)
+        elif kind in ("layer", "wafer") and material is not None:
+            label = "layer" if kind == "layer" else "wafer"
+            self.banner.show_message(
+                f"{label} 폴더가 선택되었으니 자재 폴더로 자동 이동하여 탐색합니다.",
+                "info",
+            )
+            self.load_lot(str(material))
+        elif kind == "too_high":
+            self.banner.show_message(
+                "상위(device) 폴더가 선택되었습니다. 자재 폴더를 선택해 주세요.",
+                "warn",
+                action_text="자재 폴더 선택",
+                action=self._choose_folder,
+                timeout_ms=0,
+            )
+        else:  # unknown — 그대로 시도(스캔에서 layer 없음 경고로 처리)
             self.load_lot(folder)
 
     def _rescan(self) -> None:
@@ -290,7 +317,7 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         for folder in recents:
-            menu.addAction(folder, lambda f=folder: self.load_lot(f))
+            menu.addAction(folder, lambda f=folder: self._open_folder(f))
         menu.exec(self.top.btn_open.mapToGlobal(self.top.btn_open.rect().bottomLeft()))
 
     def _push_recent(self, folder: str) -> None:
@@ -548,11 +575,6 @@ class MainWindow(QMainWindow):
         compare_layers = self.top.compare_layers()
         grid = layout.build_grid([base_layer] + compare_layers)
         self.grid.build_layout(grid, base_layer)
-        self.grid.set_crosshair(self.settings.show_crosshair)
-
-    def _on_crosshair_toggled(self, on: bool) -> None:
-        self.settings.show_crosshair = on
-        self.grid.set_crosshair(on)
 
     def _start_thumbnails(self) -> None:
         if self._thumb_worker is not None:
@@ -718,6 +740,9 @@ class MainWindow(QMainWindow):
         if isinstance(record, DefectRecord):
             dlg = ImageViewerDialog(record, self)
             dlg.exec()
+
+    def _open_help(self) -> None:
+        ShortcutsDialog(self).exec()
 
     # ---- 웨이퍼 맵 / 겹쳐 보기 ----
     def _update_wafer_map(self, item) -> None:
