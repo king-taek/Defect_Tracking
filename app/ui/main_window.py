@@ -79,7 +79,9 @@ class MainWindow(QMainWindow):
         self._match_idx = None
         self._match_fail = None
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
-        self._filter = "all"  # 보기 필터: all / unmatched / full
+        # 보기 필터: matched(기본, 매칭 0인 후보 제외) / all / unmatched / full
+        self._filter = "matched"
+        self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
@@ -181,12 +183,16 @@ class MainWindow(QMainWindow):
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
-        # 보기 필터: 전체 / 미매칭 있는 것만 / 완전 매칭만 (triage)
+        # 보기 필터: 매칭만(기본) / 전체 / 미매칭 있는 것만 / 완전 매칭만 (triage)
         self.cmb_filter = QComboBox()
+        self.cmb_filter.addItem("매칭만", "matched")
         self.cmb_filter.addItem("전체", "all")
         self.cmb_filter.addItem("미매칭 있음", "unmatched")
         self.cmb_filter.addItem("완전 매칭", "full")
-        self.cmb_filter.setToolTip("탐색 대상 기준 사진을 매칭 상태로 거른다")
+        self.cmb_filter.setToolTip(
+            "탐색 대상 기준 사진을 매칭 상태로 거른다.\n"
+            "'매칭만'은 어떤 비교 layer 와도 매칭되지 않은 기준 사진을 후보에서 제외한다."
+        )
         self.cmb_filter.currentIndexChanged.connect(self._on_filter_changed)
         self.nav.add_widget(self.cmb_filter)
         self.lbl_view = QLabel("")
@@ -514,7 +520,8 @@ class MainWindow(QMainWindow):
         self._empty_label.setVisible(not self.base_records)
         self.nav.set_enabled(bool(self.base_records))
         if self.base_records:
-            self._goto(0)
+            view = self._view_indices()
+            self._goto(view[0] if view else 0)
         else:
             self.nav.set_index(0, 0)
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
@@ -546,6 +553,7 @@ class MainWindow(QMainWindow):
             self.base_records, compare_layers, rbl, tolerance,
             index=idx, fail_index=fidx,
         )
+        self._view_cache = None  # 매칭이 바뀌면 필터 결과 캐시 무효화
         self._update_match_summary()
 
     def _get_match_indices(self, compare_layers, rbl):
@@ -619,7 +627,12 @@ class MainWindow(QMainWindow):
         item = self.matches[index]
         self.grid.update_for_base(item, self.top.compare_layers())
         self.strip.set_current(index)
-        self.nav.set_index(index + 1, len(self.matches))
+        # 탐색 번호는 현재 보기(필터 후보) 기준으로 표시(제외된 후보는 세지 않음)
+        view = self._view_indices()
+        if index in view:
+            self.nav.set_index(view.index(index) + 1, len(view))
+        else:
+            self.nav.set_index(index + 1, len(self.matches))
         self._prefetch_neighbors(index)
         self._update_wafer_map(item)
 
@@ -653,6 +666,8 @@ class MainWindow(QMainWindow):
         if self._filter == "all":
             return True
         status = self._match_status(item)
+        if self._filter == "matched":
+            return status != "none"
         if self._filter == "unmatched":
             return status != "full"
         if self._filter == "full":
@@ -660,7 +675,14 @@ class MainWindow(QMainWindow):
         return True
 
     def _view_indices(self) -> list[int]:
-        return [i for i, m in enumerate(self.matches) if self._passes_filter(m)]
+        if self._view_cache is None:
+            idxs = [i for i, m in enumerate(self.matches) if self._passes_filter(m)]
+            # 기본 '매칭만' 필터가 모든 후보를 제외하면(예: 비교 layer 미선택) 빈 화면
+            # 대신 전체를 보인다(혼란 방지). 사용자가 고른 명시 필터는 그대로 둔다.
+            if not idxs and self.matches and self._filter == "matched":
+                idxs = list(range(len(self.matches)))
+            self._view_cache = idxs
+        return self._view_cache
 
     def _step(self, delta: int) -> None:
         if not self.matches:
@@ -688,31 +710,48 @@ class MainWindow(QMainWindow):
             self._goto(view[-1] if last else view[0])
 
     def _jump_unmatched(self) -> None:
-        """현재 다음에 위치한 '미매칭 포함' 기준으로 점프(트리아지)."""
+        """현재 다음에 위치한 '미매칭 포함' 기준으로 점프(트리아지).
+
+        현재 보기(필터)에 포함된 후보 중에서만 점프한다(제외된 후보는 건너뜀).
+        """
         if not self.matches:
             return
-        n = len(self.matches)
-        for off in range(1, n + 1):
-            i = (self.current + off) % n
-            if self._match_status(self.matches[i]) != "full":
+        view = self._view_indices()
+        targets = [i for i in view if self._match_status(self.matches[i]) != "full"]
+        if not targets:
+            self.banner.show_message("미매칭이 있는 기준 사진이 없습니다.", "success")
+            return
+        for i in targets:
+            if i > self.current:
                 self._goto(i)
                 return
-        self.banner.show_message("미매칭이 있는 기준 사진이 없습니다.", "success")
+        self._goto(targets[0])  # 끝까지 없으면 처음으로 순환
 
     def _on_filter_changed(self) -> None:
         self._filter = self.cmb_filter.currentData() or "all"
-        self._refresh_view_count()
+        self._view_cache = None
         if not self.matches:
+            self._refresh_view_count()
             return
-        # 현재 항목이 필터에서 벗어나면 첫 대상으로 이동
-        if self.current not in self._view_indices():
+        view = self._view_indices()
+        self.strip.set_visible_set(view)
+        self._refresh_view_count()
+        # 현재 항목이 필터에서 벗어나면 첫 대상으로 이동, 아니면 번호만 갱신
+        if self.current not in view:
             self._step(1)
+        else:
+            self._goto(self.current)
 
     def _refresh_view_count(self) -> None:
         if self._filter == "all" or not self.matches:
             self.lbl_view.setText("")
             return
-        self.lbl_view.setText(f"({len(self._view_indices())}개)")
+        n_view = len(self._view_indices())
+        excluded = len(self.matches) - n_view
+        if self._filter == "matched" and excluded > 0:
+            self.lbl_view.setText(f"({n_view}개 · 제외 {excluded})")
+        else:
+            self.lbl_view.setText(f"({n_view}개)")
 
     def _refresh_strip_marks(self) -> None:
         """썸네일에 매칭 상태 점 + 세션 마킹 별을 반영한다."""
@@ -723,6 +762,8 @@ class MainWindow(QMainWindow):
         if self.session is not None:
             for i, m in enumerate(self.matches):
                 self.strip.set_marked(i, self.session.is_marked(str(m.base.image_path)))
+        # 매칭 0인 기준 사진은 후보(썸네일)에서도 제외해 보이도록 반영
+        self.strip.set_visible_set(self._view_indices())
         self._refresh_view_count()
 
     # ---- 세션 마킹/메모 ----
