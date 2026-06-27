@@ -148,7 +148,6 @@ class AppSettings:
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
-    show_crosshair: bool = True  # 그리드 이미지 중앙 십자선 표시
     auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인
     update_token: str = ""  # (선택) 비공개 저장소용 GitHub 토큰. public 이면 빈값.
 

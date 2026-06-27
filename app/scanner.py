@@ -104,6 +104,63 @@ def _is_image(name: str) -> bool:
     return Path(name).suffix.lower() in config.IMAGE_EXTENSIONS
 
 
+def _dir_has_image(path: Path) -> bool:
+    try:
+        with os.scandir(path) as it:
+            for e in it:
+                if e.is_file() and _is_image(e.name):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _image_depth(root: Path, max_depth: int = 4, breadth: int = 24) -> Optional[int]:
+    """root 아래에서 이미지 파일을 직접 담은 디렉터리가 처음 나타나는 깊이를 반환.
+
+    레벨별 BFS(레벨당 폴더 수 breadth 로 제한)로 가볍게 탐색한다(네트워크 경로 대비).
+    못 찾으면 None.
+    """
+    level = [root]
+    for depth in range(0, max_depth + 1):
+        for d in level[:breadth]:
+            if _dir_has_image(d):
+                return depth
+        nxt: list[Path] = []
+        for d in level[:breadth]:
+            try:
+                with os.scandir(d) as it:
+                    nxt.extend(Path(e.path) for e in it if e.is_dir())
+            except OSError:
+                continue
+        if not nxt:
+            break
+        level = nxt
+    return None
+
+
+def classify_selection(path: str | Path) -> tuple[str, Optional[Path]]:
+    """선택한 폴더가 자재 구조(자재/layer/wafer/이미지)에서 어느 레벨인지 판별.
+
+    Returns:
+        (kind, material_path) — kind 는
+          'material'(정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 자재로 보정 가능) /
+          'too_high'(device 등 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
+        material_path 는 layer/wafer/material 일 때 추정 자재 폴더, 그 외 None.
+    """
+    p = Path(path)
+    depth = _image_depth(p)
+    if depth is None:
+        return ("unknown", None)
+    if depth == 2:
+        return ("material", p)
+    if depth == 1:
+        return ("layer", p.parent)
+    if depth == 0:
+        return ("wafer", p.parent.parent)
+    return ("too_high", None)  # depth >= 3
+
+
 def _merge_ini_sections(ini_paths: list[Path]) -> dict[str, dict[str, str]]:
     """폴더 내 모든 ColorImageGrabingInfo.ini section 을 하나로 합친다."""
     merged: dict[str, dict[str, str]] = {}
