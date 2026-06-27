@@ -51,6 +51,9 @@ class DefectRecord:
     y: Optional[float] = None
     defect_name: str = ""
     note: str = ""  # 파싱 관련 부가 정보
+    dx_size: Optional[float] = None  # defect 크기 X (파일명에 있을 때)
+    dy_size: Optional[float] = None  # defect 크기 Y
+    d_area: Optional[float] = None  # defect 면적
 
     @property
     def ok(self) -> bool:

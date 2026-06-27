@@ -43,6 +43,19 @@ def test_layout_b_section1334_example():
     assert round(res.y) == 1988
 
 
+def test_layout_c_aoi_tool_schema_integer_xy_with_sizes():
+    """실제 AOI 변환 스키마: col_row_Name_x_y_DXSize_DYSize_DArea (x/y 정수)."""
+    name = (
+        "KLA_204_00S6T133XYD1_3_4_Over Sized Bump_4629_5351_5.2_3.9_20.28.jpg"
+    )
+    res = parse_camtek_filename(name)
+    assert res.status == ParseStatus.OK
+    assert (res.col, res.row) == (3, 4)
+    assert round(res.x) == 4629 and round(res.y) == 5351  # 크기값(5.2,3.9)을 오인하지 않음
+    assert res.defect_name == "Over Sized Bump"
+    assert res.dx_size == 5.2 and res.dy_size == 3.9 and res.d_area == 20.28
+
+
 def test_no_coordinates_returns_not_found():
     """KLA 스타일 파일명(좌표 없음)은 NOT_FOUND -> 다른 경로로 처리."""
     res = parse_camtek_filename("00T3UB50XYF5_0_1_7_1.jpg")

@@ -198,6 +198,9 @@ def _build_record_for_image(
             x=fn.x,
             y=fn.y,
             defect_name=fn.defect_name,
+            dx_size=fn.dx_size,
+            dy_size=fn.dy_size,
+            d_area=fn.d_area,
         )
 
     # 2) ColorImageGrabingInfo.ini
