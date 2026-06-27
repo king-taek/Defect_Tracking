@@ -37,6 +37,7 @@ class WaferMapWidget(QWidget):
         self._rows = 0
         self._states: dict[tuple[int, int], str] = {}
         self._current: Optional[tuple[int, int]] = None
+        self._valid: Optional[frozenset] = None  # 존재하는 die (None 이면 전체 사각)
         self.setToolTip("웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동")
         self.setMinimumSize(40, 40)
 
@@ -46,11 +47,13 @@ class WaferMapWidget(QWidget):
         rows: int,
         states: dict[tuple[int, int], str],
         current: Optional[tuple[int, int]] = None,
+        valid: Optional[frozenset] = None,
     ) -> None:
         self._cols = max(0, cols)
         self._rows = max(0, rows)
         self._states = states
         self._current = current
+        self._valid = valid if valid else None
         self.setFixedSize(
             max(40, self._cols * (_CELL + _GAP) + _GAP),
             max(40, self._rows * (_CELL + _GAP) + _GAP),
@@ -74,6 +77,9 @@ class WaferMapWidget(QWidget):
         border = QColor(theme.NEON_SOFT)
         for row in range(self._rows):
             for col in range(self._cols):
+                # 디바이스 die 배치(valid)가 주어지면 존재하는 die 만 그린다(실제 모양).
+                if self._valid is not None and (col, row) not in self._valid:
+                    continue
                 rect = self._cell_rect(col, row)
                 status = self._states.get((col, row))
                 color = QColor(_STATE_COLORS.get(status, "")) if status else empty

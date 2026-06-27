@@ -78,16 +78,22 @@ class SettingsDialog(QDialog):
         self.spn_tol.setValue(self._settings.tolerance or config.DEFAULT_TOLERANCE)
         form.addRow("기본 허용 오차", self.spn_tol)
 
+        # 디바이스 DB 파일(AOIDeviceDB.xlsx) — 있으면 제품 목록을 확장한다.
+        self.ed_device_db = QLineEdit(self._settings.device_db_path)
+        self.ed_device_db.setPlaceholderText("(선택) AOIDeviceDB.xlsx 경로")
+        form.addRow(
+            "디바이스 DB", self._with_browse(self.ed_device_db, self._pick_device_db)
+        )
+
         # 제품 프로파일(좌표 변환 상수). 변경은 다음 스캔부터 적용.
         self.cmb_product = QComboBox()
-        for key, prod in config.PRODUCTS.items():
-            self.cmb_product.addItem(f"{prod.name} ({key})", key)
-        cur = self._settings.product
-        idx = self.cmb_product.findData(cur)
-        if idx >= 0:
-            self.cmb_product.setCurrentIndex(idx)
+        self._reload_products(select=self._settings.product)
         self.cmb_product.setToolTip("제품별 좌표 변환 상수 — 변경 후 다시 스캔(F5)하세요")
         form.addRow("제품 프로파일", self.cmb_product)
+
+        # 시작 시 DB 경로가 있으면 미리 로드해 제품 목록을 채운다.
+        if self._settings.device_db_path:
+            self._load_db(self._settings.device_db_path, select=self._settings.product)
 
         self.chk_update = QCheckBox("시작할 때 업데이트 확인")
         self.chk_update.setChecked(self._settings.auto_update_check)
@@ -143,6 +149,47 @@ class SettingsDialog(QDialog):
         lay.addWidget(btn)
         return host
 
+    def _reload_products(self, select: str | None = None) -> None:
+        """config.PRODUCTS 로 제품 콤보를 다시 채운다."""
+        self.cmb_product.blockSignals(True)
+        self.cmb_product.clear()
+        for key, prod in config.PRODUCTS.items():
+            self.cmb_product.addItem(f"{prod.name} ({key})", key)
+        if select:
+            idx = self.cmb_product.findData(select)
+            if idx >= 0:
+                self.cmb_product.setCurrentIndex(idx)
+        self.cmb_product.blockSignals(False)
+
+    def _load_db(self, path: str, select: str | None = None) -> None:
+        from pathlib import Path
+
+        if not path or not Path(path).exists():
+            return
+        try:
+            from app.device_db import load_device_db
+
+            profiles = load_device_db(path)
+            config.register_devices(profiles)
+            self._reload_products(select=select or self.cmb_product.currentData())
+            if hasattr(self, "lbl_err"):
+                self.lbl_err.setStyleSheet("color:#6ec59a;")
+                self.lbl_err.setText(f"디바이스 {len(profiles)}개 로드됨")
+                self.lbl_err.setVisible(True)
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"디바이스 DB 로드 실패: {exc}")
+
+    def _pick_device_db(self) -> None:
+        from pathlib import Path
+
+        start = self.ed_device_db.text() or self.ed_workspace.text() or str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "디바이스 DB(AOIDeviceDB.xlsx) 선택", start, "Excel 파일 (*.xlsx)"
+        )
+        if path:
+            self.ed_device_db.setText(path)
+            self._load_db(path)
+
     def _pick_workspace(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self, "작업공간 폴더 선택", self.ed_workspace.text() or str(Path.home())
@@ -195,4 +242,5 @@ class SettingsDialog(QDialog):
         self._settings.tolerance = self.spn_tol.value()
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
+        self._settings.device_db_path = self.ed_device_db.text().strip()
         return self._settings
