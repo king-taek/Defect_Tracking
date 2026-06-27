@@ -13,25 +13,40 @@
 
 ## 주요 기능
 
-- **LOT 폴더 선택** → layer / wafer 구조 자동 인식 (Section 8.1~8.2)
+- **자재(LOT) 폴더 선택** → layer / wafer 구조 자동 인식. 상위(device)·하위(layer/wafer)
+  폴더를 골라도 자동으로 자재 폴더로 보정하거나 재선택을 안내(비차단 배너).
 - **좌표 자동 추출/변환** (`col_row_x_y`) — 세 가지 출처 모두 지원
-  - Camtek 파일명에 포함된 좌표 직접 추출
+  - Camtek 파일명 직접 추출 — 실제 AOI 스키마(`…_col_row_Name_x_y_DXSize_DYSize_DArea`,
+    정수 x/y + 결함 크기/면적)까지 견고하게 처리
   - `ColorImageGrabingInfo.ini` 기반 Camtek 좌표 산출
   - KLA `.001` info 파일(TiffFileName/DefectList) 기반 변환
-- **기준/비교 Layer 선택 + 허용 오차 설정** 후 같은 die·좌표 매칭 (Section 8.3)
-- **LYA4/LYB4 … 그리드 배치**, 기준 Layer 강조 (Section 8.4)
-- **상단 썸네일 스트립** — 사진 중앙 10% 확대, 클릭 시 기준 전환 (Section 8.6)
-- **이전/다음 탐색**, 기준 변경 시 비교 이미지 빠른 Fade 갱신 (Section 8.5)
-- **Excel 결과 출력** — 이미지·wafer 정보·매칭 결과 포함 (Section 8.7)
-- **다크 + 파란 네온 UI**, hover/pressed 시각 변화, 부드러운 전환 (Section 9)
-- **비동기 이미지 로딩 + LRU 캐시** — 네트워크 경로에서도 탐색 시 UI 멈춤 최소화 (Section 10)
-- **진단 표시** — 좌표 추출 실패 건수/사유를 상태 표시줄 tooltip 으로 안내 (Section 11)
-- **원본 확대 뷰어** — 그리드 이미지를 클릭하면 원본 전체 해상도로 보기(맞춤/실제·휠 줌·Esc)
-- **키보드 탐색** — ←/→·PageUp/Down·Home/End, Ctrl+O(폴더)·Ctrl+E(출력)
-- **비차단 알림 배너** — 오류/완료를 모달 없이 매끄럽게 안내(출력 완료 시 "폴더 열기" 액션)
-- **매끄러운 사용성** — 조작이 현재 보던 위치를 리셋하지 않음, 화면 전환 페이드,
-  세로 휠로 썸네일 좌우 스크롤(가로 휠 불필요), 비교 Layer 줄바꿈 + 전체/해제,
-  창 크기·허용오차·선택 기억, 고DPI 선명도, 빠른 폴더 재선택 시 옛 결과 무시
+- **좌측 사이드바**에서 자재 폴더·기준 Layer·비교 Layer·허용 오차를 한 곳에서 선택.
+  기준으로 고른 layer 는 비교에서 자동 제외되며 체크 상태는 보존된다.
+- **비교 매칭(개선됨)** — 같은 wafer·die(±1 허용)·좌표 거리 매칭에 더해, **layer 간
+  전역 정합오차(median offset)를 자동 추정·보정**한다(두 스캔 사이 계통적 위치 이동이
+  허용오차를 넘어도 매칭). 추정된 정합오차는 사이드바 요약 tooltip 으로 표시.
+- **실시간 매칭 요약** + 매칭 실패 사유 진단(같은 die 사진 없음 / 좌표 추출 실패 / 허용오차
+  초과·최근접 거리 / 동률 후보).
+- **디바이스 DB 일반화** — 외부 `AOIDeviceDB.xlsx`(시트=디바이스)를 읽어 제품별 package
+  count·die pitch·die 배치를 자동 구성. **DEVA 외 모든 디바이스 지원**(설정에서 DB·디바이스
+  선택). 미지정 시 내장 DEVA 으로 폴백.
+- **웨이퍼 맵 네비게이터** — 현재 wafer 의 die 격자를 매칭 상태로 색칠(디바이스 DB 가 있으면
+  실제 디바이스 모양으로), die 클릭 시 해당 기준으로 이동.
+- **리뷰어 도구** — 매칭/미매칭 필터·미매칭 점프(U), 세션 마킹/메모(별·메모, Excel 반영),
+  썸네일 상태 점, 우클릭 메뉴(경로 복사·파일/폴더 열기), 최근 폴더.
+- **겹쳐 보기/블링크** — 기준+비교 layer 합성, 검은 여백 자동 크롭·중앙 정렬·배율/이동
+  미세조정·블링크(Space)로 층간 위치/크기 변화 감지.
+- **상단 썸네일 스트립** — 사진 중앙 10% 확대, 부드러운 가로 스크롤, 클릭 시 기준 전환.
+- **Excel 결과 출력** — 이미지·wafer 정보·매칭 결과·메모 포함.
+- **원본 확대 뷰어** — 그리드 이미지 클릭 시 원본 전체 해상도(맞춤/실제·휠 줌·Esc).
+- **키보드 단축키** — ←/→·PageUp/Down·Home/End, U(미매칭)·M(마킹)·O(겹쳐보기)·
+  Ctrl+A/D(비교 전체/해제)·Ctrl+O(폴더)·Ctrl+E(출력)·F5(재스캔)·**F1(도움말)**.
+- **성능** — wafer 병렬 스캔·썸네일 병렬화·인접 이미지 프리페치·매칭 인덱스 캐시,
+  비동기 이미지 로딩 + LRU 캐시(네트워크 경로 탐색 시 UI 멈춤 최소화).
+- **관측성/안정성** — 파일 로깅(`workspace/logs/conder.log`), 설정 원자적 저장,
+  스캔 접근오류(권한/네트워크) 비차단 안내, 시작 시 스플래시(로딩 표시).
+- **부드러운 다크 UI** — 저채도 슬레이트 테마, 비차단 알림 배너, 창 크기·허용오차·선택 기억,
+  고DPI 선명도, 빠른 폴더 재선택 시 옛 결과 무시.
 
 ---
 
@@ -102,7 +117,9 @@ python build_exe.py        # -> dist/ConderCompare.exe
 | KLA | `XINDEX + 3` | `YINDEX + 3` | `Round(XREL)` | `Round(DiePitchY - YREL)` |
 | Camtek INI | `Col - 2` | `7 - Row` | `X - Col×37247.7` | `Y - Row×44905.4` |
 
-상수(pitch, package count, 그리드 배치)는 `app/config.py` 에서 제품별로 조정할 수 있습니다.
+상수(pitch, package count, 그리드 배치)는 `app/config.py` 의 제품 프로파일에서 조정하거나,
+외부 **`AOIDeviceDB.xlsx`** (시트 1개 = 디바이스 1개; `Package Info` X/Y/X1/Y1 + `Map`)를
+설정에서 지정해 디바이스별로 자동 구성할 수 있습니다(DEVA 외 전제품).
 
 ---
 
@@ -120,22 +137,26 @@ pytest -q
 ## 구조
 
 ```
-main.py                 진입점 (의존성 가드)
+main.py                 진입점 (의존성 가드 + 스플래시 + 디바이스 DB 로드)
 bootstrap.py            의존성 점검·자동 설치
 app/
-  config.py             상수 + 사용자 설정 + 업데이트 대상
+  config.py             상수 + 제품 프로파일(ProductConfig/PRODUCTS) + 사용자 설정
+  device_db.py          외부 AOIDeviceDB.xlsx 로더(디바이스별 package/pitch/die map)
+  logging_config.py     파일/콘솔 로깅
+  session.py            세션 마킹/메모(작업공간 JSON)
   updater.py            자동 업데이트(git/ZIP, 테스트가능)
   safety.py             원본 보호 게이트 (2중 보호)
   models.py             도메인 모델
-  scanner.py            LOT 폴더 스캔 + 좌표 출처 판별
-  matcher.py            die·좌표 tolerance 매칭
+  scanner.py            폴더 스캔 + 좌표 출처 판별 + 폴더 레벨 분류(classify_selection)
+  matcher.py            die(±1)·좌표 매칭 + layer 간 정합오차(median) 보정
   layout.py             layer 정규화 + 그리드 배치
   thumbnails.py         중앙 10% 썸네일 캐시
-  workers.py            백그라운드 스캔/썸네일
+  workers.py            백그라운드 스캔/썸네일(병렬)
   parsers/              camtek_filename · camtek_ini · kla_info
-  export/excel_report.py  Excel 출력
-  ui/                   theme · main_window · thumbnail_strip · compare_grid · controls · export_dialog
-                        widgets · image_loader · image_viewer · notifications · flow_layout · settings_dialog
+  export/excel_report.py  Excel 출력(메모 포함)
+  ui/                   theme · main_window · thumbnail_strip · compare_grid · controls
+                        widgets · image_loader · image_viewer · notifications · settings_dialog
+                        wafer_map · compare_overlay · help_dialog · splash · flow_layout
 tools/make_sample_data.py  합성 데이터 생성기
 tests/                  pytest
 ```

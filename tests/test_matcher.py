@@ -117,6 +117,42 @@ def test_median_offset_corrects_selection():
     assert mr.is_match and mr.matched.image_path.name == "ca.jpg"
 
 
+def test_large_systematic_offset_auto_corrected():
+    """허용오차보다 큰 일정 shift(+150)도 4쌍이 일관되면 자동 보정해 매칭한다."""
+    bases = [
+        _rec("LYA4", "W1", 1, 1, 1000.0, 0.0),
+        _rec("LYA4", "W1", 3, 3, 1000.0, 0.0),
+        _rec("LYA4", "W1", 5, 5, 1000.0, 0.0),
+        _rec("LYA4", "W1", 1, 5, 1000.0, 0.0),
+    ]
+    cmps = [
+        _rec("LYB4", "W1", 1, 1, 1150.0, 0.0, name="a.jpg"),
+        _rec("LYB4", "W1", 3, 3, 1150.0, 0.0, name="b.jpg"),
+        _rec("LYB4", "W1", 5, 5, 1150.0, 0.0, name="c.jpg"),
+        _rec("LYB4", "W1", 1, 5, 1150.0, 0.0, name="d.jpg"),
+    ]
+    matches, offsets = match_all_with_offsets(bases, ["LYB4"], {"LYB4": cmps}, tolerance=100.0)
+    assert offsets["LYB4"].count == 4 and round(offsets["LYB4"].dx) == -150
+    assert all(m.for_layer("LYB4").is_match for m in matches)
+
+
+def test_inconsistent_offsets_not_applied():
+    """표본이 흩어지면(MAD>tolerance) 보정하지 않아 큰 거리는 매칭되지 않는다."""
+    bases = [
+        _rec("LYA4", "W1", 1, 1, 1000.0, 0.0),
+        _rec("LYA4", "W1", 3, 3, 1000.0, 0.0),
+        _rec("LYA4", "W1", 5, 5, 1000.0, 0.0),
+    ]
+    cmps = [
+        _rec("LYB4", "W1", 1, 1, 1150.0, 0.0),
+        _rec("LYB4", "W1", 3, 3, 1600.0, 0.0),
+        _rec("LYB4", "W1", 5, 5, 800.0, 0.0),
+    ]
+    matches, offsets = match_all_with_offsets(bases, ["LYB4"], {"LYB4": cmps}, tolerance=100.0)
+    assert offsets["LYB4"].count == 0
+    assert not any(m.for_layer("LYB4").is_match for m in matches)
+
+
 def test_normalize_layer_order_prefix_and_rereview():
     assert layout.normalize_layer("1. LYA4") == ("LYA4", False)
     assert layout.normalize_layer("2. LYC3_재리뷰") == ("LYC3", True)
