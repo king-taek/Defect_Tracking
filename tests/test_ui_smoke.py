@@ -36,7 +36,8 @@ def win(app, tmp_path):
 
     lot = generate(tmp_path / "src")
     idx = scanner.scan_lot(lot)
-    w = MainWindow(AppSettings(workspace=str(tmp_path / "ws")))
+    # 테스트에서 시작 시 네트워크 업데이트 확인을 끈다(헤르메틱).
+    w = MainWindow(AppSettings(workspace=str(tmp_path / "ws"), auto_update_check=False))
     w.lot_index = idx
     w._on_scan_finished(idx)
     for _ in range(10):
@@ -144,3 +145,59 @@ def test_failure_summary_text():
     from app.ui.main_window import MainWindow
 
     assert "정상" in MainWindow._failure_summary([])
+
+
+def test_safe_filename():
+    from app.ui.main_window import MainWindow
+
+    assert MainWindow._safe_filename('TB500.226 (WLW)') == "TB500.226 (WLW)"
+    assert MainWindow._safe_filename('a/b:c*?') == "a_b_c__"
+    assert MainWindow._safe_filename("trail. ") == "trail"
+    assert MainWindow._safe_filename("") == "compare"
+
+
+def test_topbar_has_settings_update_buttons(win):
+    assert win.top.btn_settings is not None
+    assert win.top.btn_update is not None
+    # 가용 표시 토글이 예외 없이 동작
+    win.top.set_update_available(True)
+    assert "업데이트 있음" in win.top.btn_update.text()
+    win.top.set_update_available(False)
+    assert win.top.btn_update.text() == "⟳  업데이트"
+
+
+def test_update_check_available_sets_flag(win, monkeypatch):
+    """업데이트 확인이 available 이면 버튼 강조 + 사용자가 'Yes' 시 적용 호출(모달 우회)."""
+    from PySide6.QtWidgets import QMessageBox
+    from app import updater
+
+    st = updater.UpdateStatus(available=True, local="a", remote="b", method="zip")
+    called = {}
+    monkeypatch.setattr(win, "_do_update", lambda s: called.setdefault("do", s))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    win._on_update_checked(st, manual=True)
+    assert "업데이트 있음" in win.top.btn_update.text()
+    assert called.get("do") is st
+
+
+def test_update_check_uptodate_manual_banner(win):
+    from app import updater
+
+    st = updater.UpdateStatus(available=False, local="a", remote="a", method="zip")
+    win._on_update_checked(st, manual=True)  # 모달 없음(available=False)
+    assert win.top.btn_update.text() == "⟳  업데이트"
+
+
+def test_settings_dialog_constructs(app, tmp_path):
+    from app.config import AppSettings
+    from app.ui.settings_dialog import SettingsDialog
+
+    s = AppSettings(workspace=str(tmp_path / "ws"))
+    dlg = SettingsDialog(s, current_lot=None)
+    dlg.ed_workspace.setText(str(tmp_path / "ws2"))
+    dlg.spn_tol.setValue(150.0)
+    dlg.chk_update.setChecked(False)
+    out = dlg.updated_settings()
+    assert out.tolerance == 150.0
+    assert out.auto_update_check is False
+    assert out.workspace == str(tmp_path / "ws2")

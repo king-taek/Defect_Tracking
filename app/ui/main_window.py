@@ -22,13 +22,14 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from app import layout, matcher
+from app import __version__, config, layout, matcher, updater
 from app.config import AppSettings
 from app.export.excel_report import export_excel
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
@@ -41,6 +42,7 @@ from app.ui.export_dialog import ExportSelectDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui.notifications import NotificationBanner
+from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.workers import ScanWorker, ThumbnailWorker
 
@@ -48,7 +50,8 @@ from app.workers import ScanWorker, ThumbnailWorker
 class MainWindow(QMainWindow):
     def __init__(self, settings: Optional[AppSettings] = None):
         super().__init__()
-        self.setWindowTitle("Conder Scan Review Image Compare Viewer")
+        self._base_title = f"{config.APP_NAME}  ·  v{__version__}"
+        self.setWindowTitle(self._base_title)
 
         self.settings = settings or AppSettings.load()
         self.settings.ensure_workspace()
@@ -65,10 +68,14 @@ class MainWindow(QMainWindow):
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
 
+        self._update_status: Optional[updater.UpdateStatus] = None
+        self._updating = False
+
         self._restore_geometry()
         self._build_ui()
         self._install_shortcuts()
         self._apply_saved_prefs()
+        self._maybe_check_update()
 
     # ----------------------------------------------------- 화면/DPI 보조
     @staticmethod
@@ -119,6 +126,8 @@ class MainWindow(QMainWindow):
         self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
         self.top.tolerance_changed.connect(lambda _: self._rematch(rebuild_grid=False))
         self.top.export_requested.connect(self._export)
+        self.top.settings_requested.connect(self._open_settings)
+        self.top.update_requested.connect(self._manual_update)
         main.addWidget(self.top)
 
         self.progress = QProgressBar()
@@ -167,6 +176,7 @@ class MainWindow(QMainWindow):
                   activated=lambda: self._goto(len(self.matches) - 1))
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self._choose_folder)
         QShortcut(QKeySequence("Ctrl+E"), self, activated=self._export)
+        QShortcut(QKeySequence(Qt.Key_F5), self, activated=self._rescan)
 
     def _apply_saved_prefs(self) -> None:
         if self.settings.tolerance:
@@ -179,6 +189,12 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "LOT 폴더 선택", start)
         if folder:
             self.load_lot(folder)
+
+    def _rescan(self) -> None:
+        """현재 LOT 폴더를 다시 스캔한다(F5). 데이터가 갱신됐을 때 사용."""
+        last = self.settings.last_lot_folder
+        if last and Path(last).exists():
+            self.load_lot(last)
 
     def load_lot(self, folder: str) -> None:
         # 2차 원본 보호(Section 1.1): 캐시/결과 작업공간이 이 LOT 내부면 차단한다.
@@ -193,7 +209,7 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 0)
         self.nav.set_status("스캔 중...")
         self.top.set_lot_name(Path(folder).name)
-        self.setWindowTitle(f"Conder Scan Compare Viewer — {Path(folder).name}")
+        self.setWindowTitle(f"{self._base_title}  —  {Path(folder).name}")
 
         worker = ScanWorker(folder)
         worker.signals.progress.connect(self._on_scan_progress)
@@ -416,6 +432,109 @@ class MainWindow(QMainWindow):
             dlg = ImageViewerDialog(record, self)
             dlg.exec()
 
+    # ------------------------------------------------------------ 설정
+    def _open_settings(self) -> None:
+        current_lot = str(self.lot_index.lot_path) if self.lot_index else None
+        old_workspace = self.settings.workspace
+        old_output = self.settings.output_folder
+        dlg = SettingsDialog(self.settings, current_lot, self)
+        if not dlg.exec():
+            return
+        s = dlg.updated_settings()
+        # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
+        if s.workspace != old_workspace or s.output_folder != old_output:
+            s.ensure_workspace()
+            self.thumb_cache = ThumbnailCache(s.cache_path)
+        # 기본 허용오차를 스핀박스에도 반영(현재 매칭은 사용자가 바꾼 값 유지).
+        try:
+            s.save()
+        except OSError as exc:
+            self.banner.show_message(f"설정 저장 실패: {exc}", "error", timeout_ms=0)
+            return
+        self.banner.show_message("설정을 저장했습니다.", "success")
+
+    # ------------------------------------------------------------ 업데이트
+    def _maybe_check_update(self) -> None:
+        if not self.settings.auto_update_check:
+            return
+        self._start_update_check(manual=False)
+
+    def _manual_update(self) -> None:
+        if self._updating:
+            return
+        self.nav.set_status("업데이트 확인 중...")
+        self._start_update_check(manual=True)
+
+    def _start_update_check(self, manual: bool) -> None:
+        worker = updater.UpdateCheckWorker(token=self.settings.update_token)
+        worker.signals.done.connect(lambda st, m=manual: self._on_update_checked(st, m))
+        self._track_worker(worker, worker.signals.done)
+        self.pool.start(worker)
+
+    def _on_update_checked(self, status, manual: bool) -> None:
+        self._update_status = status
+        if status.available:
+            self.top.set_update_available(True)
+            answer = QMessageBox.question(
+                self,
+                "업데이트",
+                "새 버전이 있습니다. 지금 업데이트할까요?\n"
+                "업데이트 후 프로그램이 종료되며, 다시 시작하면 적용됩니다.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                self._do_update(status)
+            elif not manual:
+                self.banner.show_message(
+                    "상단 '업데이트' 버튼으로 언제든 업데이트할 수 있습니다.", "info"
+                )
+        else:
+            self.top.set_update_available(False)
+            if manual:
+                if status.error:
+                    self.banner.show_message(
+                        f"업데이트 확인 실패: {status.error}", "warn", timeout_ms=6000
+                    )
+                else:
+                    self.banner.show_message("이미 최신 버전입니다.", "success")
+
+    def _do_update(self, status) -> None:
+        self._updating = True
+        self.top.set_update_busy(True)
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self.nav.set_status("업데이트 준비 중...")
+
+        worker = updater.UpdateApplyWorker(status, token=self.settings.update_token)
+        worker.signals.progress.connect(self.nav.set_status)
+        worker.signals.finished.connect(self._on_update_finished)
+        self._track_worker(worker, worker.signals.finished)
+        self.pool.start(worker)
+
+    def _on_update_finished(self, ok: bool, message: str) -> None:
+        self._updating = False
+        self.progress.setVisible(False)
+        self.top.set_update_busy(False)
+        if ok:
+            QMessageBox.information(
+                self,
+                "업데이트 완료",
+                f"{message}\n\n프로그램을 종료합니다. 다시 시작해 주세요.",
+            )
+            self.close()
+        else:
+            self.nav.set_status("업데이트 실패")
+            self.banner.show_message(f"업데이트 실패: {message}", "error", timeout_ms=0)
+
+    @staticmethod
+    def _safe_filename(name: str) -> str:
+        """Windows 금지문자/끝 공백·점 제거."""
+        for ch in '<>:"/\\|?*':
+            name = name.replace(ch, "_")
+        name = name.rstrip(" .")
+        return name or "compare"
+
     # ------------------------------------------------------------ 출력
     def _export(self) -> None:
         if not self.matches:
@@ -431,7 +550,7 @@ class MainWindow(QMainWindow):
 
         default_dir = str(self.settings.exports_path)
         Path(default_dir).mkdir(parents=True, exist_ok=True)
-        default_name = f"{self.lot_index.lot_name}_compare.xlsx"
+        default_name = self._safe_filename(f"{self.lot_index.lot_name}_compare") + ".xlsx"
         path, _ = QFileDialog.getSaveFileName(
             self, "Excel 저장 위치", str(Path(default_dir) / default_name),
             "Excel 파일 (*.xlsx)",

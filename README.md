@@ -38,9 +38,12 @@
 ## 실행 (소스)
 
 ```bash
-pip install -r requirements.txt
+python bootstrap.py     # 필요한 라이브러리 자동 점검/설치
 python main.py
 ```
+
+`bootstrap.py` 는 PySide6·Pillow·openpyxl 누락 여부를 확인하고 없으면 자동 설치합니다
+(`python bootstrap.py --check` 는 점검만). 라이브러리가 없으면 `main.py` 도 친절한 안내를 출력합니다.
 
 대상 환경은 Windows(네트워크 경로 `\\k5cifsn2\...`)입니다.
 
@@ -55,6 +58,19 @@ python -m tools.make_sample_data ./_sample  # 지정 폴더에 생성
 ```
 
 생성된 `... / 204. TB500INT.226 (WLW)` 폴더를 프로그램에서 LOT 폴더로 선택하세요.
+
+---
+
+## 자동 업데이트
+
+상단 **업데이트** 버튼으로 최신 메인 브랜치를 가져와 적용합니다. 프로그램을 켜면 백그라운드로
+업데이트 여부를 확인하고, 새 버전이 있으면 물어본 뒤(동의 시) 업데이트하고 "다시 시작하세요"
+안내 후 종료합니다(설정에서 끌 수 있음).
+
+- 설치 형태 자동 감지: `git` 체크아웃이면 `git fetch + reset --hard origin/main`,
+  아니면 GitHub ZIP 을 받아 설치 폴더에 덮어씁니다(사용자 작업공간은 건드리지 않음).
+- 대상 저장소는 `app/config.py` 의 `UPDATE_OWNER/REPO/BRANCH` 로 설정합니다.
+- 실행파일(.exe) 버전은 자동 업데이트 대상이 아니며 새 빌드로 교체합니다.
 
 ---
 
@@ -104,9 +120,11 @@ pytest -q
 ## 구조
 
 ```
-main.py                 진입점
+main.py                 진입점 (의존성 가드)
+bootstrap.py            의존성 점검·자동 설치
 app/
-  config.py             상수 + 사용자 설정
+  config.py             상수 + 사용자 설정 + 업데이트 대상
+  updater.py            자동 업데이트(git/ZIP, 테스트가능)
   safety.py             원본 보호 게이트 (2중 보호)
   models.py             도메인 모델
   scanner.py            LOT 폴더 스캔 + 좌표 출처 판별
@@ -117,7 +135,7 @@ app/
   parsers/              camtek_filename · camtek_ini · kla_info
   export/excel_report.py  Excel 출력
   ui/                   theme · main_window · thumbnail_strip · compare_grid · controls · export_dialog
-                        widgets · image_loader · image_viewer · notifications · flow_layout
+                        widgets · image_loader · image_viewer · notifications · flow_layout · settings_dialog
 tools/make_sample_data.py  합성 데이터 생성기
 tests/                  pytest
 ```

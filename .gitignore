@@ -15,3 +15,6 @@ dist/
 ConderCompare/
 sample_source/
 *.xlsx
+
+# ZIP 업데이트가 설치본마다 기록하는 버전 파일(git 설치본은 미사용)
+version.json

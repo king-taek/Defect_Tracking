@@ -42,6 +42,18 @@ def kla_zero_y() -> int:
 
 
 # ---------------------------------------------------------------------------
+# 애플리케이션 / 자동 업데이트
+# ---------------------------------------------------------------------------
+
+APP_NAME = "Conder Scan Compare Viewer"
+
+# 자동 업데이트 대상 저장소(메인 브랜치를 가져와 적용)
+UPDATE_OWNER = "king-taek"
+UPDATE_REPO = "defect_tracking"
+UPDATE_BRANCH = "main"
+
+
+# ---------------------------------------------------------------------------
 # 매칭 / UI 기본값
 # ---------------------------------------------------------------------------
 
@@ -87,6 +99,8 @@ class AppSettings:
     base_layer: str = ""
     compare_layers: list[str] = field(default_factory=list)
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
+    auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인
+    update_token: str = ""  # (선택) 비공개 저장소용 GitHub 토큰. public 이면 빈값.
 
     # ---- 경로 헬퍼 -------------------------------------------------------
     @property

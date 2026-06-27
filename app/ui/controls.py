@@ -37,6 +37,8 @@ class TopBar(QFrame):
     compare_layers_changed = Signal()
     tolerance_changed = Signal(float)
     export_requested = Signal()
+    settings_requested = Signal()
+    update_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -49,20 +51,33 @@ class TopBar(QFrame):
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(8)
 
-        # 1행: 폴더 / LOT / 출력
+        # 1행: 폴더 / LOT / 설정 / 업데이트 / 출력
         row1 = QHBoxLayout()
         self.btn_open = QPushButton("📁  LOT 폴더 선택")
+        self.btn_open.setToolTip("리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O)")
         self.btn_open.clicked.connect(self.open_folder)
         self.lbl_lot = QLabel("선택된 LOT 없음")
         self.lbl_lot.setObjectName("lotName")
+
+        self.btn_settings = QPushButton("⚙  설정")
+        self.btn_settings.setToolTip("작업공간·출력 폴더·기본값 변경")
+        self.btn_settings.clicked.connect(self.settings_requested)
+
+        self.btn_update = QPushButton("⟳  업데이트")
+        self.btn_update.setToolTip("최신 버전(메인 브랜치)으로 업데이트")
+        self.btn_update.clicked.connect(self.update_requested)
+
         self.btn_export = QPushButton("결과 출력하기")
         self.btn_export.setObjectName("primary")
+        self.btn_export.setToolTip("선택한 기준 사진의 비교 결과를 Excel 로 출력 (Ctrl+E)")
         self.btn_export.clicked.connect(self.export_requested)
         self.btn_export.setEnabled(False)
 
         row1.addWidget(self.btn_open)
         row1.addSpacing(8)
         row1.addWidget(self.lbl_lot, 1)
+        row1.addWidget(self.btn_settings)
+        row1.addWidget(self.btn_update)
         row1.addWidget(self.btn_export)
         outer.addLayout(row1)
 
@@ -171,6 +186,19 @@ class TopBar(QFrame):
         self.spn_tol.blockSignals(True)
         self.spn_tol.setValue(value)
         self.spn_tol.blockSignals(False)
+
+    def set_update_available(self, available: bool) -> None:
+        """업데이트 가용 시 버튼을 강조(네온)한다."""
+        self.btn_update.setObjectName("primary" if available else "")
+        self.btn_update.setText("⟳  업데이트 있음" if available else "⟳  업데이트")
+        # 동적 objectName 변경 후 스타일 재적용
+        self.btn_update.style().unpolish(self.btn_update)
+        self.btn_update.style().polish(self.btn_update)
+
+    def set_update_busy(self, busy: bool) -> None:
+        self.btn_update.setEnabled(not busy)
+        self.btn_settings.setEnabled(not busy)
+        self.btn_open.setEnabled(not busy)
 
     def _set_all_compares(self, checked: bool) -> None:
         """비교 layer 전체 선택/해제 — 한 번의 신호로 처리."""
