@@ -47,10 +47,12 @@ def win(app, tmp_path):
 
 def test_loads_and_builds(win):
     assert win.top.base_layer() == "LYA4"
-    assert set(win.top.compare_layers()) == {"LYB4", "LYA3", "LYB3"}
+    # 기본 비교 선택은 '_재리뷰' layer 우선(샘플의 LYA4/LYB4 가 재리뷰).
+    # 기준 LYA4 를 제외하면 비교는 LYB4 하나.
+    assert set(win.top.compare_layers()) == {"LYB4"}
     assert len(win.matches) == 8
     assert win.current == 0
-    assert set(win.grid._cells.keys()) == {"LYA4", "LYB4", "LYA3", "LYB3"}
+    assert set(win.grid._cells.keys()) == {"LYA4", "LYB4"}
 
 
 def test_tolerance_change_preserves_index(win):
@@ -60,6 +62,18 @@ def test_tolerance_change_preserves_index(win):
     for _ in range(5):
         QCoreApplication.processEvents()
     assert win.current == 3, "허용오차 변경이 현재 인덱스를 리셋하면 안 된다"
+
+
+def test_set_layers_rereview_default(app):
+    from app.ui.controls import SideBar
+
+    sb = SideBar()
+    # 재리뷰(LYA4,LYB4)만 기본 체크, 기준 LYA3 제외 → 비교 = {LYA4, LYB4}
+    sb.set_layers(["LYA4", "LYB4", "LYA3", "LYB3"], base="LYA3", rereview={"LYA4", "LYB4"})
+    assert set(sb.compare_layers()) == {"LYA4", "LYB4"}
+    # 재리뷰가 없으면 전부 체크(기준 제외)
+    sb.set_layers(["A", "B", "C"], base="A", rereview=set())
+    assert set(sb.compare_layers()) == {"B", "C"}
 
 
 def test_base_layer_checkbox_preserved(win):

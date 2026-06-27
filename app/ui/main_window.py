@@ -423,7 +423,11 @@ class MainWindow(QMainWindow):
         # 설정 복원(현재 LOT 에 존재하는 경우에만)
         saved_base = self.settings.base_layer if self.settings.base_layer in layers else None
         saved_compares = [l for l in self.settings.compare_layers if l in layers] or None
-        self.top.set_layers(layers, base=saved_base, compares=saved_compares)
+        # 저장된 선택이 없을 때 기본 체크: '_재리뷰' layer 우선
+        rereview = {l.display or l.canonical for l in index.layers if l.is_re_review}
+        self.top.set_layers(
+            layers, base=saved_base, compares=saved_compares, rereview=rereview
+        )
         self.settings.save()
 
         ok = sum(1 for r in index.records if r.ok)

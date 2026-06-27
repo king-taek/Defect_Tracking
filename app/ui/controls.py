@@ -167,6 +167,7 @@ class SideBar(QFrame):
         layers: list[str],
         base: Optional[str] = None,
         compares: Optional[list[str]] = None,
+        rereview: Optional[set] = None,
     ) -> None:
         """layer 목록으로 기준 콤보 + 비교 체크박스를 채운다.
 
@@ -195,12 +196,16 @@ class SideBar(QFrame):
         if chosen_base:
             self.cmb_base.setCurrentText(chosen_base)
 
-        # 비교 선택: 복원 시 저장된 비교 + 기준(체크 유지용), 없으면 전부 체크.
+        # 비교 선택 기본값:
+        #  - 저장된 선택(compares)이 있으면 그것(+체크 유지용 기준)을 복원
+        #  - 없으면 '_재리뷰' layer 우선 체크(rereview), 재리뷰가 없으면 전부 체크
         # 기준 layer 는 비교에서 자동 제외되지만(아래 compare_layers) 체크 상태는 유지한다.
         if compares is not None:
             compare_set = set(compares)
             if chosen_base:
                 compare_set.add(chosen_base)
+        elif rereview:
+            compare_set = set(rereview)
         else:
             compare_set = set(layers)
         for cb in self._compare_checks:
