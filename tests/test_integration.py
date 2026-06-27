@@ -79,6 +79,27 @@ def test_export_and_source_untouched(lot, tmp_path):
     assert _snapshot(lot) == before
 
 
+def test_export_with_notes(lot, tmp_path):
+    idx = scanner.scan_lot(lot)
+    rbl = idx.records_by_layer()
+    base = [r for r in idx.records_for_layer("RDL4") if r.ok]
+    results = matcher.match_all(base, ["PI4"], rbl, config.DEFAULT_TOLERANCE)
+    cache = ThumbnailCache(tmp_path / "ws" / "cache")
+    notes = {str(results[0].base.image_path): "재리뷰 요청"}
+    out = export_excel(
+        tmp_path / "ws" / "exports" / "n.xlsx",
+        lot_name=idx.lot_name,
+        base_layer="RDL4",
+        compare_layers=["PI4"],
+        tolerance=config.DEFAULT_TOLERANCE,
+        selected=results[:2],
+        thumb_cache=cache,
+        source_roots=[lot],
+        notes=notes,
+    )
+    assert out.exists() and out.stat().st_size > 0
+
+
 def test_export_into_source_blocked(lot, tmp_path):
     idx = scanner.scan_lot(lot)
     rbl = idx.records_by_layer()

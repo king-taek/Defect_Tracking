@@ -76,6 +76,26 @@ def test_parallel_scan_is_deterministic(tmp_path):
             assert seq_a[i][2] >= seq_a[i - 1][2]
 
 
+def test_session_store_roundtrip(tmp_path):
+    from app.session import SessionStore
+
+    s = SessionStore.load(tmp_path / "ws", "204. TB500 (WLW)")
+    key = "/src/RDL4/W1/img.jpg"
+    assert s.is_marked(key) is False
+    assert s.toggle_mark(key) is True
+    s.set_note(key, "재확인 필요")
+    s.save()
+
+    again = SessionStore.load(tmp_path / "ws", "204. TB500 (WLW)")
+    assert again.is_marked(key) is True
+    assert again.note(key) == "재확인 필요"
+    assert again.notes_map() == {key: "재확인 필요"}
+    # 마킹 해제 + 메모 삭제 시 항목이 정리된다
+    again.toggle_mark(key)
+    again.set_note(key, "")
+    assert key not in again.marks
+
+
 def test_setup_logging_idempotent(tmp_path):
     from app import logging_config
 

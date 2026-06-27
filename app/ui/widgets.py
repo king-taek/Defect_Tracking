@@ -153,6 +153,16 @@ class ClickableThumb(QFrame):
         self.img.setStyleSheet(
             f"background:{theme.BG}; border-radius:6px; color:{theme.TEXT_DIM};"
         )
+        # 매칭 상태 점(부분=주황, 미매칭=빨강, 완전매칭=숨김) — 트리아지 표식
+        self.dot = QLabel(self.img)
+        self.dot.setFixedSize(10, 10)
+        self.dot.move(70, 4)
+        self.dot.hide()
+        # 세션 마킹 별 표식(원본 미수정, 워크스페이스에만 저장)
+        self.star = QLabel("★", self.img)
+        self.star.setStyleSheet(f"color:{theme.WARN}; font-size:12px; background:transparent;")
+        self.star.move(4, 2)
+        self.star.hide()
         self.caption = QLabel("")
         self.caption.setObjectName("dim")
         self.caption.setAlignment(Qt.AlignCenter)
@@ -172,6 +182,20 @@ class ClickableThumb(QFrame):
 
     def set_caption(self, text: str) -> None:
         self.caption.setText(text)
+
+    def set_status(self, status: str) -> None:
+        """매칭 상태 점 표시: 'partial'(주황) / 'none'(빨강) / 'full'(숨김)."""
+        color = {"partial": theme.WARN, "none": theme.NOMATCH}.get(status)
+        if color is None:
+            self.dot.hide()
+            return
+        self.dot.setStyleSheet(
+            f"background:{color}; border:1px solid {theme.BG}; border-radius:5px;"
+        )
+        self.dot.show()
+
+    def set_marked(self, marked: bool) -> None:
+        self.star.setVisible(marked)
 
     def set_tooltip(self, text: str) -> None:
         # 자식 위젯은 부모 tooltip 을 상속하지 않으므로 모두 지정한다.

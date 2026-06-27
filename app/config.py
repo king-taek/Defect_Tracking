@@ -99,6 +99,7 @@ class AppSettings:
     tolerance: float = DEFAULT_TOLERANCE
     base_layer: str = ""
     compare_layers: list[str] = field(default_factory=list)
+    recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
     show_crosshair: bool = True  # 그리드 이미지 중앙 십자선 표시

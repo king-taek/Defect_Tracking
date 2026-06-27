@@ -173,6 +173,59 @@ def test_match_summary_populated(win):
     assert "매칭" in win.top.lbl_match.text()
 
 
+def test_match_status_classification():
+    from app.ui.main_window import MainWindow
+    from app.models import BaseDefectMatches, DefectRecord, MatchResult
+
+    base = DefectRecord(image_path=Path("/b.jpg"), wafer_id="W1", layer="RDL4",
+                        layer_folder="RDL4")
+
+    def _item(flags):
+        it = BaseDefectMatches(base=base)
+        for f in flags:
+            it.results.append(MatchResult(
+                compare_layer="X", base=base,
+                matched=(base if f else None),
+            ))
+        return it
+
+    assert MainWindow._match_status(_item([True, True])) == "full"
+    assert MainWindow._match_status(_item([True, False])) == "partial"
+    assert MainWindow._match_status(_item([False, False])) == "none"
+
+
+def test_filter_traversal_skips(win):
+    # 허용오차 0 → 전부 미매칭(none). '완전 매칭' 필터면 대상 없음.
+    win.top.spn_tol.setValue(0.0)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    statuses = {win._match_status(m) for m in win.matches}
+    assert statuses == {"none"}
+    assert win._view_indices() != []  # 'all'
+    win._filter = "full"
+    assert win._view_indices() == []  # 완전매칭 없음
+    win._filter = "unmatched"
+    assert len(win._view_indices()) == len(win.matches)
+
+
+def test_recent_folders_push(win, tmp_path):
+    win._push_recent("/a/lot1")
+    win._push_recent("/a/lot2")
+    win._push_recent("/a/lot1")  # 중복은 앞으로 이동
+    assert win.settings.recent_folders[0] == "/a/lot1"
+    assert win.settings.recent_folders.count("/a/lot1") == 1
+    assert len(win.settings.recent_folders) <= 5
+
+
+def test_session_mark_toggle_via_window(win):
+    assert win.session is not None
+    base = win.matches[0].base
+    win._toggle_mark(base)
+    assert win.session.is_marked(str(base.image_path)) is True
+    win._toggle_mark(base)
+    assert win.session.is_marked(str(base.image_path)) is False
+
+
 def test_crosshair_toggle(win):
     win.chk_crosshair.setChecked(False)
     for _ in range(3):

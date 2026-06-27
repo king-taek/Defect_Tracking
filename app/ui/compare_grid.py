@@ -9,11 +9,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from pathlib import Path as _Path
+
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QLabel,
+    QMenu,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -32,6 +36,8 @@ class LayerCell(QFrame):
     """
 
     record_clicked = Signal(object)  # DefectRecord
+    mark_requested = Signal(object)  # 기준 record 마킹 토글
+    note_requested = Signal(object)  # 기준 record 메모 편집
 
     def __init__(
         self,
@@ -143,11 +149,36 @@ class LayerCell(QFrame):
             self.record_clicked.emit(self._record)
         super().mousePressEvent(event)
 
+    def contextMenuEvent(self, event):  # noqa: N802
+        if self._record is None:
+            return
+        rec = self._record
+        path = str(rec.image_path)
+        menu = QMenu(self)
+        menu.addAction("경로 복사", lambda: QGuiApplication.clipboard().setText(path))
+        menu.addAction(
+            "파일 열기",
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)),
+        )
+        menu.addAction(
+            "폴더 열기",
+            lambda: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(_Path(path).parent))
+            ),
+        )
+        if self.is_base:
+            menu.addSeparator()
+            menu.addAction("마킹 토글 (M)", lambda: self.mark_requested.emit(rec))
+            menu.addAction("메모…", lambda: self.note_requested.emit(rec))
+        menu.exec(event.globalPos())
+
 
 class CompareGrid(QWidget):
     """layer 배치 그리드 컨테이너."""
 
     image_clicked = Signal(object)  # DefectRecord
+    mark_requested = Signal(object)  # 기준 record 마킹 토글
+    note_requested = Signal(object)  # 기준 record 메모 편집
 
     def __init__(
         self, loader: Optional[ImageLoader] = None, parent: Optional[QWidget] = None
@@ -189,6 +220,8 @@ class CompareGrid(QWidget):
                     layer, is_base=(layer == base_layer), loader=self._loader
                 )
                 cell.record_clicked.connect(self.image_clicked)
+                cell.mark_requested.connect(self.mark_requested)
+                cell.note_requested.connect(self.note_requested)
                 cell.image.set_crosshair(self._crosshair)
                 self._cells[layer] = cell
                 self._grid.addWidget(cell, r, c)

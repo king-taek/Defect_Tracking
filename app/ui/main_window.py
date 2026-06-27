@@ -19,10 +19,13 @@ from PySide6.QtCore import Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
+    QInputDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QScrollArea,
@@ -37,6 +40,7 @@ from app.export.excel_report import export_excel
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import OriginalProtectionError, conflicting_source
 from app.scanner import LotIndex
+from app.session import SessionStore
 from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
 from app.ui.controls import NavBar, SideBar
@@ -71,6 +75,8 @@ class MainWindow(QMainWindow):
         self._match_sig: object = None
         self._match_idx = None
         self._match_fail = None
+        self._filter = "all"  # 보기 필터: all / unmatched / full
+        self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
 
@@ -138,6 +144,12 @@ class MainWindow(QMainWindow):
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
+        # 자재 폴더 버튼: 우클릭 시 최근 폴더 메뉴
+        self.top.btn_open.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.top.btn_open.customContextMenuRequested.connect(self._show_recent_menu)
+        self.top.btn_open.setToolTip(
+            "리뷰가 진행된 자재(LOT) 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
+        )
         self.splitter.addWidget(self.top)
 
         # ── 우측: 짧은 상단(썸네일 + 탐색) + 큰 비교 그리드
@@ -157,6 +169,17 @@ class MainWindow(QMainWindow):
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
+        # 보기 필터: 전체 / 미매칭 있는 것만 / 완전 매칭만 (트리아지)
+        self.cmb_filter = QComboBox()
+        self.cmb_filter.addItem("전체", "all")
+        self.cmb_filter.addItem("미매칭 있음", "unmatched")
+        self.cmb_filter.addItem("완전 매칭", "full")
+        self.cmb_filter.setToolTip("탐색 대상 기준 사진을 매칭 상태로 거른다")
+        self.cmb_filter.currentIndexChanged.connect(self._on_filter_changed)
+        self.nav.add_widget(self.cmb_filter)
+        self.lbl_view = QLabel("")
+        self.lbl_view.setObjectName("dim")
+        self.nav.add_widget(self.lbl_view)
         # 보기 옵션: 중앙 십자선 토글(defect 위치 시각 보조)
         self.chk_crosshair = QCheckBox("중앙 십자선")
         self.chk_crosshair.setToolTip("defect 는 이미지 중앙에 위치 — 중앙 십자선 표시")
@@ -181,6 +204,8 @@ class MainWindow(QMainWindow):
         grid_host_layout.setContentsMargins(12, 12, 12, 12)
         self.grid = CompareGrid(loader=self.image_loader)
         self.grid.image_clicked.connect(self._open_viewer)
+        self.grid.mark_requested.connect(self._toggle_mark)
+        self.grid.note_requested.connect(self._edit_note)
         grid_host_layout.addWidget(self.grid)
         self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
@@ -206,12 +231,20 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Left), self, activated=self._prev)
         QShortcut(QKeySequence(Qt.Key_PageDown), self, activated=self._next)
         QShortcut(QKeySequence(Qt.Key_PageUp), self, activated=self._prev)
-        QShortcut(QKeySequence(Qt.Key_Home), self, activated=lambda: self._goto(0))
+        QShortcut(QKeySequence(Qt.Key_Home), self,
+                  activated=lambda: self._goto_view_edge(False))
         QShortcut(QKeySequence(Qt.Key_End), self,
-                  activated=lambda: self._goto(len(self.matches) - 1))
+                  activated=lambda: self._goto_view_edge(True))
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self._choose_folder)
         QShortcut(QKeySequence("Ctrl+E"), self, activated=self._export)
         QShortcut(QKeySequence(Qt.Key_F5), self, activated=self._rescan)
+        # 비교 layer 전체/해제, 다음 미매칭 점프
+        QShortcut(QKeySequence("Ctrl+A"), self,
+                  activated=lambda: self.top._set_all_compares(True))
+        QShortcut(QKeySequence("Ctrl+D"), self,
+                  activated=lambda: self.top._set_all_compares(False))
+        QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
+        QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
 
     def _apply_saved_prefs(self) -> None:
         if self.settings.tolerance:
@@ -231,12 +264,28 @@ class MainWindow(QMainWindow):
         if last and Path(last).exists():
             self.load_lot(last)
 
+    def _show_recent_menu(self) -> None:
+        recents = [f for f in self.settings.recent_folders if Path(f).exists()]
+        if not recents:
+            self.banner.show_message("최근 연 자재 폴더가 없습니다.", "info")
+            return
+        menu = QMenu(self)
+        for folder in recents:
+            menu.addAction(folder, lambda f=folder: self.load_lot(f))
+        menu.exec(self.top.btn_open.mapToGlobal(self.top.btn_open.rect().bottomLeft()))
+
+    def _push_recent(self, folder: str) -> None:
+        recents = [f for f in self.settings.recent_folders if f != folder]
+        recents.insert(0, folder)
+        self.settings.recent_folders = recents[:5]
+
     def load_lot(self, folder: str) -> None:
         # 2차 원본 보호(Section 1.1): 캐시/결과 작업공간이 이 LOT 내부면 차단한다.
         if not self._verify_workspace_outside(folder):
             return
 
         self.settings.last_lot_folder = folder
+        self._push_recent(folder)
         self._scan_token += 1
         token = self._scan_token
 
@@ -311,6 +360,8 @@ class MainWindow(QMainWindow):
             return  # 오래된(stale) 스캔 결과 무시
         self.progress.setVisible(False)
         self.lot_index = index
+        # 세션 마킹/메모 로드(작업공간, 원본 밖)
+        self.session = SessionStore.load(self.settings.workspace_path, index.lot_name)
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(
@@ -417,6 +468,7 @@ class MainWindow(QMainWindow):
         else:
             self.nav.set_index(0, 0)
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
+        self._refresh_strip_marks()
 
     def _rematch(self, rebuild_grid: bool) -> None:
         """비교 토글/허용오차 변경: 재매칭. 현재 인덱스는 유지(범위 clamp)."""
@@ -431,6 +483,7 @@ class MainWindow(QMainWindow):
             self._goto(self.current)
         else:
             self.nav.set_index(0, 0)
+        self._refresh_strip_marks()
 
     def _compute_matches(self) -> None:
         compare_layers = self.top.compare_layers()
@@ -526,13 +579,119 @@ class MainWindow(QMainWindow):
         if paths:
             self.image_loader.prefetch(paths)
 
+    @staticmethod
+    def _match_status(item) -> str:
+        """기준 1개의 매칭 상태: full(전부) / partial(일부) / none(전무)."""
+        results = item.results
+        if not results:
+            return "none"
+        matched = sum(1 for r in results if r.is_match)
+        if matched == 0:
+            return "none"
+        if matched == len(results):
+            return "full"
+        return "partial"
+
+    def _passes_filter(self, item) -> bool:
+        if self._filter == "all":
+            return True
+        status = self._match_status(item)
+        if self._filter == "unmatched":
+            return status != "full"
+        if self._filter == "full":
+            return status == "full"
+        return True
+
+    def _view_indices(self) -> list[int]:
+        return [i for i, m in enumerate(self.matches) if self._passes_filter(m)]
+
+    def _step(self, delta: int) -> None:
+        if not self.matches:
+            return
+        view = self._view_indices()
+        if not view:
+            self.banner.show_message("필터에 해당하는 기준 사진이 없습니다.", "info")
+            return
+        if self.current in view:
+            pos = view.index(self.current)
+            nxt = view[(pos + delta) % len(view)]
+        else:
+            nxt = view[0]
+        self._goto(nxt)
+
     def _prev(self) -> None:
-        if self.matches:
-            self._goto((self.current - 1) % len(self.matches))
+        self._step(-1)
 
     def _next(self) -> None:
-        if self.matches:
-            self._goto((self.current + 1) % len(self.matches))
+        self._step(1)
+
+    def _goto_view_edge(self, last: bool) -> None:
+        view = self._view_indices()
+        if view:
+            self._goto(view[-1] if last else view[0])
+
+    def _jump_unmatched(self) -> None:
+        """현재 다음에 위치한 '미매칭 포함' 기준으로 점프(트리아지)."""
+        if not self.matches:
+            return
+        n = len(self.matches)
+        for off in range(1, n + 1):
+            i = (self.current + off) % n
+            if self._match_status(self.matches[i]) != "full":
+                self._goto(i)
+                return
+        self.banner.show_message("미매칭이 있는 기준 사진이 없습니다.", "success")
+
+    def _on_filter_changed(self) -> None:
+        self._filter = self.cmb_filter.currentData() or "all"
+        self._refresh_view_count()
+        if not self.matches:
+            return
+        # 현재 항목이 필터에서 벗어나면 첫 대상으로 이동
+        if self.current not in self._view_indices():
+            self._step(1)
+
+    def _refresh_view_count(self) -> None:
+        if self._filter == "all" or not self.matches:
+            self.lbl_view.setText("")
+            return
+        self.lbl_view.setText(f"({len(self._view_indices())}개)")
+
+    def _refresh_strip_marks(self) -> None:
+        """썸네일에 매칭 상태 점 + 세션 마킹 별을 반영한다."""
+        if not self.matches:
+            return
+        statuses = [self._match_status(m) for m in self.matches]
+        self.strip.set_status_marks(statuses)
+        if self.session is not None:
+            for i, m in enumerate(self.matches):
+                self.strip.set_marked(i, self.session.is_marked(str(m.base.image_path)))
+        self._refresh_view_count()
+
+    # ---- 세션 마킹/메모 ----
+    def _toggle_mark(self, record) -> None:
+        if self.session is None or record is None:
+            return
+        marked = self.session.toggle_mark(str(record.image_path))
+        for i, m in enumerate(self.matches):
+            if m.base.image_path == record.image_path:
+                self.strip.set_marked(i, marked)
+        self.banner.show_message("마킹함." if marked else "마킹 해제.", "info", timeout_ms=1500)
+
+    def _toggle_mark_current(self) -> None:
+        if self.matches and 0 <= self.current < len(self.matches):
+            self._toggle_mark(self.matches[self.current].base)
+
+    def _edit_note(self, record) -> None:
+        if self.session is None or record is None:
+            return
+        key = str(record.image_path)
+        text, ok = QInputDialog.getText(
+            self, "메모", "이 기준 사진에 대한 메모:", text=self.session.note(key)
+        )
+        if ok:
+            self.session.set_note(key, text.strip())
+            self.banner.show_message("메모를 저장했습니다.", "success", timeout_ms=1500)
 
     def _open_viewer(self, record: object) -> None:
         if isinstance(record, DefectRecord):
@@ -688,6 +847,7 @@ class MainWindow(QMainWindow):
                 selected=selected,
                 thumb_cache=self.thumb_cache,
                 source_roots=[self.lot_index.lot_path],
+                notes=self.session.notes_map() if self.session else None,
             )
         except OriginalProtectionError as exc:
             # 차단은 명확히 알려야 하므로 액션 가능한 배너로 안내
@@ -723,4 +883,6 @@ class MainWindow(QMainWindow):
             self.settings.save()
         except OSError:
             pass
+        if self.session is not None:
+            self.session.save()
         super().closeEvent(event)
