@@ -195,12 +195,16 @@ class SideBar(QFrame):
         if chosen_base:
             self.cmb_base.setCurrentText(chosen_base)
 
-        # 비교 선택(복원 우선, 없으면 기준 외 전체)
-        compare_set = (
-            set(compares) if compares is not None else {l for l in layers if l != chosen_base}
-        )
+        # 비교 선택: 복원 시 저장된 비교 + 기준(체크 유지용), 없으면 전부 체크.
+        # 기준 layer 는 비교에서 자동 제외되지만(아래 compare_layers) 체크 상태는 유지한다.
+        if compares is not None:
+            compare_set = set(compares)
+            if chosen_base:
+                compare_set.add(chosen_base)
+        else:
+            compare_set = set(layers)
         for cb in self._compare_checks:
-            cb.setChecked(cb.text() != chosen_base and cb.text() in compare_set)
+            cb.setChecked(cb.text() in compare_set)
 
         self._sync_compare_enabled(chosen_base)
 
@@ -250,21 +254,24 @@ class SideBar(QFrame):
         self.base_layer_changed.emit(base)
 
     def _sync_compare_enabled(self, base: str) -> None:
-        """기준으로 선택된 layer 는 비교에서 비활성/해제한다."""
+        """기준 layer 의 체크박스는 비활성(토글 불가)하되 체크 상태는 보존한다.
+
+        실제 비교에서는 compare_layers() 가 기준 layer 를 자동 제외한다. 기준을 바꾸면
+        이전 기준 layer 는 다시 활성화되고, 보존된 체크 상태로 비교에 복귀한다.
+        """
         for cb in self._compare_checks:
-            if cb.text() == base:
-                cb.blockSignals(True)
-                cb.setChecked(False)
-                cb.setEnabled(False)
-                cb.blockSignals(False)
-            else:
-                cb.setEnabled(True)
+            cb.setEnabled(cb.text() != base)
 
     def base_layer(self) -> str:
         return self.cmb_base.currentText()
 
     def compare_layers(self) -> list[str]:
-        return [cb.text() for cb in self._compare_checks if cb.isChecked()]
+        """체크된 layer 중 기준 layer 를 제외한 목록(기준은 비교 대상에서 자동 제외)."""
+        base = self.base_layer()
+        return [
+            cb.text() for cb in self._compare_checks
+            if cb.isChecked() and cb.text() != base
+        ]
 
     def tolerance(self) -> float:
         return self.spn_tol.value()

@@ -62,6 +62,21 @@ def test_tolerance_change_preserves_index(win):
     assert win.current == 3, "허용오차 변경이 현재 인덱스를 리셋하면 안 된다"
 
 
+def test_base_layer_checkbox_preserved(win):
+    """기준으로 고른 layer 는 비교 목록에서 체크 유지(비활성)되고, 비교에서만 제외된다."""
+    top = win.top
+    rd = next(c for c in top._compare_checks if c.text() == "RDL4")
+    assert rd.isChecked() and not rd.isEnabled()  # 체크 유지 + 비활성
+    assert "RDL4" not in top.compare_layers()
+    # 기준을 PI4 로 바꾸면 RDL4 는 활성+체크 → 비교 복귀, PI4 는 제외
+    top.cmb_base.setCurrentText("PI4")
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert rd.isEnabled() and rd.isChecked()
+    cmps = top.compare_layers()
+    assert "RDL4" in cmps and "PI4" not in cmps
+
+
 def test_compare_toggle_preserves_index_and_columns(win):
     win._goto(4)
     # PI3 해제 → 그리드 컬럼에서 빠지고, 인덱스는 유지

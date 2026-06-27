@@ -63,6 +63,15 @@ def _gather_candidates(
     return out
 
 
+# 정합오차를 신뢰하려면 최소 이만큼의 1:1 표본이 있어야 한다(단일 쌍 오적용 방지).
+_MIN_OFFSET_SAMPLES = 3
+
+
+def _mad(values: list[float], center: float) -> float:
+    """median absolute deviation — 표본 일관성(흩어짐) 측정."""
+    return statistics.median([abs(v - center) for v in values]) if values else 0.0
+
+
 def compute_layer_offsets(
     base_records: list[DefectRecord],
     compare_layers: list[str],
@@ -70,9 +79,12 @@ def compute_layer_offsets(
     tolerance: float,
     die_tol: int = DEFAULT_DIE_TOL,
 ) -> dict[str, LayerOffset]:
-    """비교 layer 별 전역 정합오차(중앙값 dx,dy)를 1:1 매칭 쌍으로 추정한다.
+    """비교 layer 별 전역 정합오차(중앙값 dx,dy)를 die-단일 매칭 쌍으로 추정한다.
 
-    1:1 매칭(허용오차 내 후보가 정확히 1개)인 경우만 표본으로 사용해 모호함을 배제한다.
+    die 주변(±die_tol)에 후보가 **정확히 1개**인 경우만 표본으로 사용한다(모호 배제).
+    거리 게이트를 두지 않으므로 **허용오차보다 큰 계통적 shift 도 추정**할 수 있다.
+    단, 오적용을 막기 위해 (1) 표본 수 ≥ _MIN_OFFSET_SAMPLES, (2) 표본이 일관(MAD ≤
+    tolerance)할 때만 적용한다. 그 외에는 보정 없음(LayerOffset()).
     """
     offsets: dict[str, LayerOffset] = {}
     for layer in compare_layers:
@@ -82,19 +94,17 @@ def compute_layer_offsets(
         for base in base_records:
             if not base.ok:
                 continue
-            within = [
-                c for c in _gather_candidates(base, bucket, die_tol)
-                if c.ok and math.hypot(base.x - c.x, base.y - c.y) <= tolerance  # type: ignore[operator]
-            ]
-            if len(within) == 1:
-                dxs.append(base.x - within[0].x)  # type: ignore[operator]
-                dys.append(base.y - within[0].y)  # type: ignore[operator]
-        if dxs:
-            offsets[layer] = LayerOffset(
-                statistics.median(dxs), statistics.median(dys), len(dxs)
-            )
-        else:
-            offsets[layer] = LayerOffset()
+            cands = [c for c in _gather_candidates(base, bucket, die_tol) if c.ok]
+            if len(cands) == 1:
+                dxs.append(base.x - cands[0].x)  # type: ignore[operator]
+                dys.append(base.y - cands[0].y)  # type: ignore[operator]
+        if len(dxs) >= _MIN_OFFSET_SAMPLES:
+            mdx = statistics.median(dxs)
+            mdy = statistics.median(dys)
+            if _mad(dxs, mdx) <= tolerance and _mad(dys, mdy) <= tolerance:
+                offsets[layer] = LayerOffset(mdx, mdy, len(dxs))
+                continue
+        offsets[layer] = LayerOffset()
     return offsets
 
 
