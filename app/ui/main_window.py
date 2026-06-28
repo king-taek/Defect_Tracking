@@ -284,7 +284,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
 
     def _apply_saved_prefs(self) -> None:
-        if self.settings.tolerance:
+        # 0.0(정확 일치)도 유효한 사용자 설정이므로 falsy 검사로 떨어뜨리지 않는다.
+        if self.settings.tolerance is not None:
             self.top.set_tolerance(self.settings.tolerance)
 
     # ----------------------------------------------------------- 폴더/스캔
@@ -444,6 +445,8 @@ class MainWindow(QMainWindow):
             return  # 오래된(stale) 스캔 결과 무시
         self.progress.setVisible(False)
         self.lot_index = index
+        # 새 LOT: 웨이퍼 맵 정합 캐시를 비운다(id(lot_index) 재사용으로 인한 stale 방지).
+        self._align_cache.clear()
         # 세션 마킹/메모 로드(작업공간, 원본 밖)
         self.session = SessionStore.load(self.settings.workspace_path, index.lot_name)
         layers = index.layer_canonicals()
@@ -537,7 +540,13 @@ class MainWindow(QMainWindow):
         return "\n".join(lines)
 
     def _nomatch_entries(self) -> list:
-        """매칭 전무(none) 기준의 (index, BaseDefectMatches) 목록."""
+        """매칭 전무(none) 기준의 (index, BaseDefectMatches) 목록.
+
+        비교 layer 가 하나도 없으면 '매칭 없음'은 의미가 없으므로 빈 목록을 반환한다
+        (모든 기준이 results 없이 none 으로 분류되는 오해를 방지).
+        """
+        if not self.top.compare_layers():
+            return []
         return [
             (i, m) for i, m in enumerate(self.matches)
             if self._match_status(m) == "none"
@@ -1025,6 +1034,8 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
         config.set_active_product(s.product)
+        # 제품/DB 가 바뀌면 die_map 이 달라지므로 웨이퍼 맵 정합 캐시를 무효화한다.
+        self._align_cache.clear()
         # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
         if s.workspace != old_workspace or s.output_folder != old_output:
             s.ensure_workspace()
