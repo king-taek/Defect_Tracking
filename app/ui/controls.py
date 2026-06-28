@@ -30,6 +30,32 @@ from PySide6.QtWidgets import (
 from app import config
 
 
+class NoScrollDoubleSpinBox(QDoubleSpinBox):
+    """마우스 휠로 값이 바뀌지 않는 스핀박스.
+
+    사이드바를 세로 스크롤하다 허용오차가 실수로 바뀌는 것을 막는다. 포커스가 있을 때
+    키보드/직접 입력은 정상 동작한다.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)  # 휠이 아니라 클릭/탭으로만 포커스
+
+    def wheelEvent(self, event):  # noqa: N802
+        event.ignore()  # 휠은 항상 무시(부모 스크롤로 전달)
+
+
+class NoScrollComboBox(QComboBox):
+    """마우스 휠로 항목이 바뀌지 않는 콤보박스(실수 변경 방지)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def wheelEvent(self, event):  # noqa: N802
+        event.ignore()
+
+
 class SideBar(QFrame):
     """좌측 세로 컨트롤 사이드바.
 
@@ -75,14 +101,14 @@ class SideBar(QFrame):
 
         # ── 기준 Layer
         outer.addWidget(self._section_label("기준 LAYER"))
-        self.cmb_base = QComboBox()
+        self.cmb_base = NoScrollComboBox()
         self.cmb_base.setMinimumWidth(150)
         self.cmb_base.currentTextChanged.connect(self._on_base_changed)
         outer.addWidget(self.cmb_base)
 
         # ── 허용 오차
         outer.addWidget(self._section_label("허용 오차"))
-        self.spn_tol = QDoubleSpinBox()
+        self.spn_tol = NoScrollDoubleSpinBox()
         self.spn_tol.setObjectName("tol")
         self.spn_tol.setButtonSymbols(QAbstractSpinBox.NoButtons)  # ↑↓ 버튼 제거(깔끔한 입력)
         self.spn_tol.setRange(0.0, 100000.0)

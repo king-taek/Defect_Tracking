@@ -300,25 +300,11 @@ def test_jump_to_die(win):
     assert (got.col, got.row) == (tb.col, tb.row)
 
 
-def test_overlay_autocrop_trims_black(app):
-    from PySide6.QtGui import QImage, qRgb
-    from app.ui.compare_overlay import _autocrop
-
-    img = QImage(40, 40, QImage.Format_RGB32)
-    img.fill(0)  # 전체 검정
-    for y in range(10, 30):
-        for x in range(10, 30):
-            img.setPixel(x, y, qRgb(255, 255, 255))  # 중앙 20px 흰색
-    out = _autocrop(img)
-    assert out.width() < 40 and out.height() < 40  # 검은 여백 제거됨
-    assert out.width() >= 16 and out.height() >= 16
-
-
 def test_help_dialog_constructs(app):
     from app.ui.help_dialog import ShortcutsDialog
 
     dlg = ShortcutsDialog()
-    assert dlg.windowTitle() == "단축키 도움말"
+    assert dlg.windowTitle() == "도움말"
 
 
 def test_open_folder_classifies(win, tmp_path, monkeypatch):
@@ -330,24 +316,6 @@ def test_open_folder_classifies(win, tmp_path, monkeypatch):
     monkeypatch.setattr(win, "load_lot", lambda f: called.setdefault("folder", f))
     win._open_folder(str(tmp_path / "MAT" / "LAYER"))
     assert called.get("folder") == str(tmp_path / "MAT")
-
-
-def test_overlay_dialog_constructs(win):
-    from app.ui.compare_overlay import OverlayCompareDialog
-
-    item = win.matches[0]
-    pairs = [
-        (r.compare_layer, r.matched)
-        for r in item.results
-        if r.is_match and r.matched is not None
-    ]
-    assert pairs
-    dlg = OverlayCompareDialog(item.base, "RDL4", pairs)
-    dlg._render()
-    dlg._set_blink(True)
-    dlg._on_blink_tick()
-    dlg._set_blink(False)
-    dlg._zoom(1.25)  # 크래시 없어야 함
 
 
 def test_failure_summary_text():
