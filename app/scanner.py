@@ -25,6 +25,7 @@ from app.models import DefectRecord, LayerInfo, ParseStatus, Source
 from app.parsers import camtek_filename, camtek_ini, kla_info
 
 ProgressCb = Optional[Callable[[str, int, int], None]]
+CancelCb = Optional[Callable[[], bool]]  # True 면 스캔을 협조적으로 중단
 
 _INI_HINT = "colorimagegrabinginfo"
 _log = logging.getLogger("conder.scanner")
@@ -331,8 +332,15 @@ def _assign_displays(infos: list[LayerInfo]) -> None:
         inf.display = name
 
 
-def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
-    """LOT 폴더를 스캔해 LotIndex 를 만든다. 원본은 읽기 전용으로만 접근."""
+def scan_lot(
+    lot_path: str | Path,
+    progress: ProgressCb = None,
+    cancel_check: CancelCb = None,
+) -> LotIndex:
+    """LOT 폴더를 스캔해 LotIndex 를 만든다. 원본은 읽기 전용으로만 접근.
+
+    cancel_check 가 True 를 반환하면 wafer 처리 루프를 협조적으로 중단한다(부분 결과 반환).
+    """
     lot = Path(lot_path)
     index = LotIndex(lot_name=lot.name, lot_path=lot)
 
@@ -368,6 +376,8 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
     wafer_total = len(tasks) or 1
 
     def _scan_task(task: tuple[LayerInfo, Path]) -> list[DefectRecord]:
+        if cancel_check and cancel_check():  # 이미 제출된 작업도 빠르게 빠져나간다
+            return []
         info, wafer_dir = task
         try:
             return _scan_wafer_folder(wafer_dir, info.display, info.folder_name)
@@ -379,6 +389,9 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
         workers = min(_SCAN_WORKERS, len(tasks))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for done, recs in enumerate(ex.map(_scan_task, tasks), start=1):
+                if cancel_check and cancel_check():
+                    _log.info("스캔 중단 요청 — %d/%d wafer 에서 멈춤", done, wafer_total)
+                    break
                 index.records.extend(recs)
                 if progress:
                     info, wafer_dir = tasks[done - 1]

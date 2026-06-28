@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self.matches: list[BaseDefectMatches] = []
         self.current = -1
         self._thumb_worker: Optional[ThumbnailWorker] = None
+        self._scan_worker: Optional[ScanWorker] = None  # 진행 중 스캔(중단용)
         self._scan_token = 0  # stale 스캔/썸네일 결과 무시용
         # 매칭 인덱스 캐시(비교 layer 집합이 같으면 허용오차만 바뀔 때 재사용)
         self._match_sig: object = None
@@ -126,6 +127,17 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1280, 860)
         self.setMinimumSize(1024, 680)
+
+    def show_initial(self) -> None:
+        """초기 표시 — 기본 최대화(설정). 최대화를 끈 적이 있으면 저장된 창 크기로 연다.
+
+        _restore_geometry 가 normal 상태의 창 크기/위치를 미리 설정해 두므로, 최대화를
+        해제하면 그 크기로 복원된다.
+        """
+        if self.settings.window_maximized:
+            self.showMaximized()
+        else:
+            self.show()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -225,10 +237,21 @@ class MainWindow(QMainWindow):
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
 
+        # 진행바 + 중단 버튼(스캔 중에만 표시)
+        progress_row = QHBoxLayout()
+        progress_row.setContentsMargins(0, 0, 0, 0)
+        progress_row.setSpacing(8)
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         self.progress.setTextVisible(False)
-        right_layout.addWidget(self.progress)
+        progress_row.addWidget(self.progress, 1)
+        self.btn_stop = QPushButton("■ 중단")
+        self.btn_stop.setObjectName("mini")
+        self.btn_stop.setToolTip("진행 중인 스캔을 중단합니다.")
+        self.btn_stop.clicked.connect(self._stop_scan)
+        self.btn_stop.setVisible(False)
+        progress_row.addWidget(self.btn_stop, 0)
+        right_layout.addLayout(progress_row)
 
         # 비교 그리드 (스크롤 가능) — 큰 메인 영역
         grid_scroll = QScrollArea()
@@ -375,6 +398,7 @@ class MainWindow(QMainWindow):
         token = self._scan_token
 
         self.progress.setVisible(True)
+        self.btn_stop.setVisible(True)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setTextVisible(True)
@@ -384,6 +408,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{self._base_title}  —  {Path(folder).name}")
 
         worker = ScanWorker(folder)
+        self._scan_worker = worker
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.finished.connect(lambda idx, t=token: self._on_scan_finished(idx, t))
         worker.signals.error.connect(lambda msg, t=token: self._on_scan_error(msg, t))
@@ -395,6 +420,17 @@ class MainWindow(QMainWindow):
         self._active_workers.add(worker)
         for sig in terminal_signals:
             sig.connect(lambda *_, w=worker: self._active_workers.discard(w))
+
+    def _stop_scan(self) -> None:
+        """진행 중인 스캔을 중단한다(협조적 취소 + stale 토큰으로 결과 폐기)."""
+        if self._scan_worker is not None:
+            self._scan_worker.cancel()
+            self._scan_worker = None
+        self._scan_token += 1  # 늦게 도착하는 finished/progress 결과를 무시
+        self.progress.setVisible(False)
+        self.btn_stop.setVisible(False)
+        self.nav.set_status("스캔 중단됨")
+        self.banner.show_message("스캔을 중단했습니다.", "info")
 
     def _verify_workspace_outside(self, folder: str) -> bool:
         """캐시/내보내기 작업공간이 선택한 LOT 폴더 내부면 안내하고 차단한다."""
@@ -437,6 +473,8 @@ class MainWindow(QMainWindow):
         if token != self._scan_token:
             return
         self.progress.setVisible(False)
+        self.btn_stop.setVisible(False)
+        self._scan_worker = None
         self.nav.set_status("스캔 오류")
         self.banner.show_message(f"폴더 스캔 중 오류: {message}", "error", timeout_ms=0)
 
@@ -444,6 +482,8 @@ class MainWindow(QMainWindow):
         if token != -1 and token != self._scan_token:
             return  # 오래된(stale) 스캔 결과 무시
         self.progress.setVisible(False)
+        self.btn_stop.setVisible(False)
+        self._scan_worker = None
         self.lot_index = index
         # 새 LOT: 웨이퍼 맵 정합 캐시를 비운다(id(lot_index) 재사용으로 인한 stale 방지).
         self._align_cache.clear()
@@ -1191,7 +1231,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ 종료
     def closeEvent(self, event):  # noqa: N802
-        geo = self.geometry()
+        # 최대화 상태를 기억하고, 창 크기는 normal(복원) 기하로 저장한다.
+        self.settings.window_maximized = self.isMaximized()
+        geo = self.normalGeometry()
         self.settings.window_geometry = f"{geo.x()},{geo.y()},{geo.width()},{geo.height()}"
         try:
             self.settings.sidebar_width = self.splitter.sizes()[0]

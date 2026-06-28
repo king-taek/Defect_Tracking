@@ -34,6 +34,11 @@ class ScanWorker(QRunnable):
         super().__init__()
         self.lot_path = lot_path
         self.signals = ScanSignals()
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """협조적 취소 — 다음 wafer 처리 지점에서 스캔 루프가 멈춘다."""
+        self._cancelled = True
 
     @Slot()
     def run(self) -> None:
@@ -41,7 +46,11 @@ class ScanWorker(QRunnable):
             def cb(msg: str, cur: int, total: int) -> None:
                 self.signals.progress.emit(msg, cur, total)
 
-            index: LotIndex = scanner.scan_lot(self.lot_path, progress=cb)
+            index: LotIndex = scanner.scan_lot(
+                self.lot_path, progress=cb, cancel_check=lambda: self._cancelled
+            )
+            if self._cancelled:
+                return  # 중단된 결과는 UI 로 보내지 않는다(토큰 게이트와 이중 안전)
             self.signals.finished.emit(index)
         except Exception as exc:  # noqa: BLE001 - 워커는 모든 예외를 UI 로 전달
             _log.exception("스캔 워커 실패: %s", self.lot_path)

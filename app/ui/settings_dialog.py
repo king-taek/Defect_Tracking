@@ -120,6 +120,12 @@ class SettingsDialog(QDialog):
         upd_lay.addWidget(self.lbl_update, 1)
         form.addRow("업데이트", upd_host)
 
+        # 진단 로그(parse_failures.md 등)가 있는 폴더 열기 — 위치를 못 찾는 문제 해소.
+        self.btn_logs = QPushButton("로그 폴더 열기")
+        self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")
+        self.btn_logs.clicked.connect(self._open_logs)
+        form.addRow("진단/로그", self.btn_logs)
+
         # 단축키·도움말 보기(상단 밴드에서 이동) — 보기 필터/상태 범례 포함.
         self.btn_help = QPushButton("단축키 · 도움말 보기")
         self.btn_help.clicked.connect(self._open_help)
@@ -147,6 +153,19 @@ class SettingsDialog(QDialog):
     def _open_help(self) -> None:
         from app.ui.help_dialog import ShortcutsDialog
         ShortcutsDialog(self).exec()
+
+    def _open_logs(self) -> None:
+        """진단/로그 폴더(workspace/logs)를 파일 탐색기로 연다."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        base = self.ed_workspace.text().strip() or self._settings.workspace
+        logs = Path(base) / "logs"
+        try:
+            logs.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(logs)))
 
     def _with_browse(self, line: QLineEdit, handler) -> QWidget:
         host = QWidget()

@@ -196,7 +196,8 @@ class AppSettings:
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(있으면 제품 목록 확장)
-    window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억
+    window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
+    window_maximized: bool = True  # 시작 시 최대화(기본). 사용자가 해제하면 False 로 저장
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
     auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인
     update_token: str = ""  # (선택) 비공개 저장소용 GitHub 토큰. public 이면 빈값.
