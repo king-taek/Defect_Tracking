@@ -41,6 +41,7 @@ class KlaResult:
     row: Optional[int] = None
     x: Optional[float] = None
     y: Optional[float] = None
+    reason: str = ""  # 진단용: 실패 사유(성공이면 빈 문자열)
 
 
 def select_info_file(filenames: list[str]) -> Optional[str]:
@@ -161,9 +162,18 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
                 fields = v
                 break
     if fields is None:
-        return KlaResult(ParseStatus.NOT_FOUND)
+        sample = ", ".join(list(parsed.defects)[:3])
+        return KlaResult(
+            ParseStatus.NOT_FOUND,
+            reason=(
+                f"info 에 TiffFileName '{key}' 매칭 실패"
+                f"(보유 {len(parsed.defects)}개{', 예: ' + sample if sample else ''})"
+            ),
+        )
     if parsed.die_pitch_y is None:
-        return KlaResult(ParseStatus.INVALID_INFO)
+        return KlaResult(
+            ParseStatus.INVALID_INFO, reason="info header 에 DiePitchY 없음"
+        )
 
     xrel = fields[_XREL_IDX]
     yrel = fields[_YREL_IDX]
@@ -177,7 +187,10 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
         _log.warning(
             "KLA die 위치가 음수입니다(col=%s,row=%s) — %s", col, row, jpg_filename
         )
-        return KlaResult(ParseStatus.INVALID_INFO)
+        return KlaResult(
+            ParseStatus.INVALID_INFO,
+            reason=f"die 위치 음수(col={col},row={row}) — XINDEX/YINDEX 비정상",
+        )
     x = round(xrel)
     y = round(parsed.die_pitch_y - yrel)
     return KlaResult(status=ParseStatus.OK, col=col, row=row, x=float(x), y=float(y))
@@ -187,6 +200,8 @@ def convert_kla(info_path: str | Path, jpg_filename: str) -> KlaResult:
     """KLA info 파일을 읽어 jpg 에 해당하는 col_row_x_y 위치 정보를 계산."""
     try:
         parsed = load_info(info_path)
-    except OSError:
-        return KlaResult(ParseStatus.INFO_FILE_NOT_FOUND)
+    except OSError as exc:
+        return KlaResult(
+            ParseStatus.INFO_FILE_NOT_FOUND, reason=f"info 파일 열기 실패: {exc}"
+        )
     return convert_from_parsed(parsed, jpg_filename)

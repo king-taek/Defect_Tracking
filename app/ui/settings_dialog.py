@@ -86,7 +86,8 @@ class SettingsDialog(QDialog):
         )
 
         # 제품 프로파일(좌표 변환 상수). 변경은 다음 스캔부터 적용.
-        self.cmb_product = QComboBox()
+        from app.ui.controls import NoScrollComboBox
+        self.cmb_product = NoScrollComboBox()
         self._reload_products(select=self._settings.product)
         self.cmb_product.setToolTip("제품별 좌표 변환 상수 — 변경 후 다시 스캔(F5)하세요")
         form.addRow("제품 프로파일", self.cmb_product)
@@ -119,6 +120,11 @@ class SettingsDialog(QDialog):
         upd_lay.addWidget(self.lbl_update, 1)
         form.addRow("업데이트", upd_host)
 
+        # 단축키·도움말 보기(상단 밴드에서 이동) — 보기 필터/상태 범례 포함.
+        self.btn_help = QPushButton("단축키 · 도움말 보기")
+        self.btn_help.clicked.connect(self._open_help)
+        form.addRow("도움말", self.btn_help)
+
         outer.addLayout(form)
 
         self.lbl_err = QLabel("")
@@ -137,6 +143,10 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
+
+    def _open_help(self) -> None:
+        from app.ui.help_dialog import ShortcutsDialog
+        ShortcutsDialog(self).exec()
 
     def _with_browse(self, line: QLineEdit, handler) -> QWidget:
         host = QWidget()

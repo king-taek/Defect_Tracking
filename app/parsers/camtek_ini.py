@@ -32,6 +32,7 @@ class CamtekIniResult:
     row: Optional[int] = None
     x: Optional[float] = None
     y: Optional[float] = None
+    reason: str = ""  # 진단용: 실패 사유(성공이면 빈 문자열)
 
 
 def _parse_ini_sections(text: str) -> dict[str, dict[str, str]]:
@@ -102,7 +103,10 @@ def convert_from_sections(
         if section is not None:
             break
     if section is None:
-        return CamtekIniResult(ParseStatus.NOT_FOUND)
+        return CamtekIniResult(
+            ParseStatus.NOT_FOUND,
+            reason=f"INI 에 이미지 '{original_name}' section 없음(section {len(sections)}개)",
+        )
 
     # X/Y 우선, 없으면 FaultX/FaultY (Section 13.3.3)
     x_raw = _to_float(section.get("x"))
@@ -115,7 +119,14 @@ def convert_from_sections(
     row_ini = _to_int(section.get("row"))
 
     if x_raw is None or y_raw is None or col_ini is None or row_ini is None:
-        return CamtekIniResult(ParseStatus.INVALID_INFO)
+        missing = [
+            n for n, v in (("x/faultx", x_raw), ("y/faulty", y_raw),
+                           ("col", col_ini), ("row", row_ini)) if v is None
+        ]
+        return CamtekIniResult(
+            ParseStatus.INVALID_INFO,
+            reason=f"INI section 필드 누락: {', '.join(missing)}",
+        )
 
     prod = config.active_product()
     col = col_ini - prod.camtek_col_offset
@@ -130,6 +141,8 @@ def convert_camtek_ini(ini_path: str | Path, original_name: str) -> CamtekIniRes
     """INI 파일을 읽어 원본 이름에 해당하는 col_row_x_y 위치 정보를 계산."""
     try:
         sections = load_ini(ini_path)
-    except OSError:
-        return CamtekIniResult(ParseStatus.INFO_FILE_NOT_FOUND)
+    except OSError as exc:
+        return CamtekIniResult(
+            ParseStatus.INFO_FILE_NOT_FOUND, reason=f"INI 파일 열기 실패: {exc}"
+        )
     return convert_from_sections(sections, original_name)
