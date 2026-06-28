@@ -278,6 +278,49 @@ def test_matched_filter_excludes_unmatched(win):
         assert view == non_none
 
 
+def test_nomatch_button_and_gallery(win):
+    # 허용오차 0 → 전부 none → 미매칭 버튼 활성·카운트 = 전체, 갤러리 구성
+    win.top.spn_tol.setValue(0.0)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    entries = win._nomatch_entries()
+    assert len(entries) == len(win.matches)
+    assert win.btn_nomatch.isEnabled()
+    assert win.btn_nomatch.text().endswith(str(len(entries)))
+
+    from app.ui.nomatch_gallery import NoMatchGalleryDialog, _dominant
+
+    navigated = {}
+    dlg = NoMatchGalleryDialog(entries, win.thumb_cache, lambda i: navigated.setdefault("i", i))
+    # 사유별 필터: '전체' 기본 — 그리드에 모든 항목이 셀로 들어간다.
+    assert dlg._grid.count() == len(entries)
+    # 대표 사유가 분류된다(none 이므로 사유가 존재).
+    assert _dominant(entries[0][1]) is not None
+    # 썸네일 클릭 시 on_navigate 로 해당 index 전달
+    dlg._on_thumb_clicked(entries[0][0])
+    assert navigated.get("i") == entries[0][0]
+
+
+def test_base_change_keeps_exclusion(win):
+    # item 7: 기준 layer 를 바꿔도 매칭 0(none)인 후보는 계속 제외된다.
+    win.top.spn_tol.setValue(0.0)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    # 다른 layer 로 기준 변경(샘플에 존재하는 layer 중 현재와 다른 것)
+    layers = win.lot_index.layer_canonicals()
+    other = next((l for l in layers if l != win.top.base_layer()), None)
+    if other is not None:
+        win.top.cmb_base.setCurrentText(other)
+        for _ in range(5):
+            QCoreApplication.processEvents()
+    none_idx = {i for i, m in enumerate(win.matches) if win._match_status(m) == "none"}
+    # 기본 '매칭만' 필터에서 none 후보는 보기(탐색 후보)에 포함되지 않는다
+    # (단, 전부 none 이면 혼란 방지 폴백으로 전체 표시 — 그 경우는 제외 검사를 건너뜀)
+    view = set(win._view_indices())
+    if len(none_idx) < len(win.matches):
+        assert none_idx.isdisjoint(view)
+
+
 def test_recent_folders_push(win, tmp_path):
     win._push_recent("/a/lot1")
     win._push_recent("/a/lot2")

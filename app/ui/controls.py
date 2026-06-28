@@ -130,10 +130,16 @@ class SideBar(QFrame):
         self.lbl_match.setWordWrap(True)
         outer.addWidget(self.lbl_match)
 
-        # ── 비교 Layer: 라벨 + 전체/해제
-        cmp_head = QHBoxLayout()
-        cmp_head.addWidget(self._section_label("비교 LAYER"))
-        cmp_head.addStretch()
+        # ── 비교 Layer: 라벨 + (아래 줄) 재리뷰/전체/해제 — 좁은 폭에서 라벨이 잘리지 않도록 분리
+        outer.addWidget(self._section_label("비교 LAYER"))
+        cmp_btns = QHBoxLayout()
+        cmp_btns.setSpacing(6)
+        self.btn_rereview = QPushButton("재리뷰")
+        self.btn_rereview.setObjectName("mini")
+        self.btn_rereview.setToolTip(
+            "재리뷰 layer 만 선택(같은 layer 에 재재리뷰가 있으면 재재리뷰 우선)"
+        )
+        self.btn_rereview.clicked.connect(self._set_rereview_compares)
         self.btn_all = QPushButton("전체")
         self.btn_all.setObjectName("mini")
         self.btn_all.setToolTip("선택 가능한 비교 layer 를 모두 선택")
@@ -142,16 +148,10 @@ class SideBar(QFrame):
         self.btn_none.setObjectName("mini")
         self.btn_none.setToolTip("비교 layer 선택 모두 해제")
         self.btn_none.clicked.connect(lambda: self._set_all_compares(False))
-        self.btn_rereview = QPushButton("재리뷰")
-        self.btn_rereview.setObjectName("mini")
-        self.btn_rereview.setToolTip(
-            "재리뷰 layer 만 선택(같은 layer 에 재재리뷰가 있으면 재재리뷰 우선)"
-        )
-        self.btn_rereview.clicked.connect(self._set_rereview_compares)
-        cmp_head.addWidget(self.btn_rereview)
-        cmp_head.addWidget(self.btn_all)
-        cmp_head.addWidget(self.btn_none)
-        outer.addLayout(cmp_head)
+        cmp_btns.addWidget(self.btn_rereview)
+        cmp_btns.addWidget(self.btn_all)
+        cmp_btns.addWidget(self.btn_none)
+        outer.addLayout(cmp_btns)
 
         # 비교 Layer 체크박스 (세로 스크롤 영역에 한 줄씩)
         self._compare_scroll = QScrollArea()
