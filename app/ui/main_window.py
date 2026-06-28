@@ -475,10 +475,15 @@ class MainWindow(QMainWindow):
         status += ")"
         self.nav.set_status(status)
         self.nav.set_status_tooltip(self._failure_summary(failed))
+        # 좌표 추출 실패 진단 리포트를 단일 md 로 갱신(개발용, 항상 최신 1개).
+        report_path = self._write_diag_report(index)
         if failed:
             self.banner.show_message(
                 f"{len(failed)}개 이미지의 좌표를 추출하지 못했습니다(상태표시줄에 상세).",
                 "warn",
+                action_text="진단 로그 열기" if report_path else None,
+                action=(lambda p=report_path: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(p)))) if report_path else None,
             )
         # 접근 불가(권한/네트워크) 경로가 있으면 조용히 누락되지 않도록 알린다.
         errors = getattr(index, "scan_errors", [])
@@ -495,6 +500,19 @@ class MainWindow(QMainWindow):
                 self._failure_summary(failed) + "\n\n[접근 실패 경로]\n" + preview
             )
         self._rebuild_all()
+
+    def _write_diag_report(self, index):
+        """좌표 추출 실패 진단 리포트를 단일 md 로 덮어쓴다(실패 시 None)."""
+        try:
+            from app import diagnostics
+            return diagnostics.write_parse_failure_report(
+                self.settings.workspace_path,
+                index.lot_name,
+                index.records,
+                getattr(index, "scan_errors", []),
+            )
+        except OSError:
+            return None
 
     @staticmethod
     def _failure_summary(failed: list[DefectRecord]) -> str:

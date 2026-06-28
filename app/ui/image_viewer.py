@@ -13,6 +13,7 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QImageReader, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -69,7 +70,19 @@ class ImageViewerDialog(QDialog):
         )
         meta.setWordWrap(True)
         meta.setObjectName("title")
-        outer.addWidget(meta)
+        # 정보 텍스트를 드래그 선택·복사 가능하게(Ctrl+C). 마우스 커서도 텍스트형으로.
+        meta.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        meta.setCursor(Qt.IBeamCursor)
+        meta_row = QHBoxLayout()
+        meta_row.addWidget(meta, 1)
+        btn_copy = QPushButton("정보 복사")
+        btn_copy.setObjectName("mini")
+        btn_copy.setToolTip("이 사진의 layer·wafer·die·좌표·경로를 클립보드로 복사")
+        btn_copy.clicked.connect(self._copy_info)
+        meta_row.addWidget(btn_copy, 0, Qt.AlignTop)
+        outer.addLayout(meta_row)
 
         bar = QHBoxLayout()
         self.btn_fit = QPushButton("실제 크기 (1:1)")
@@ -105,6 +118,25 @@ class ImageViewerDialog(QDialog):
             self._canvas.setText("이미지를 불러올 수 없습니다.")
         self._scroll.setWidget(self._canvas)
         outer.addWidget(self._scroll, 1)
+
+    def _info_text(self) -> str:
+        """클립보드 복사용 정돈된 정보 텍스트."""
+        r = self.record
+        parts = [
+            f"layer: {r.layer}",
+            f"wafer: {r.wafer_id}",
+            f"die: ({r.col},{r.row})",
+            f"pos: {r.position_key}",
+        ]
+        if r.defect_name:
+            parts.append(f"defect: {r.defect_name}")
+        if r.dx_size is not None or r.dy_size is not None or r.d_area is not None:
+            parts.append(f"size: dx={r.dx_size}, dy={r.dy_size}, area={r.d_area}")
+        parts.append(f"path: {r.image_path}")
+        return "\n".join(parts)
+
+    def _copy_info(self) -> None:
+        QApplication.clipboard().setText(self._info_text())
 
     # ---- 줌/맞춤 ---------------------------------------------------------
     def _toggle_fit(self) -> None:

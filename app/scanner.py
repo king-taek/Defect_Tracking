@@ -182,6 +182,8 @@ def _build_record_for_image(
 ) -> DefectRecord:
     name = image_path.name
     stem = image_path.stem
+    # 각 파서 시도의 실패 사유를 모아(시도 트레일) 진단 리포트에 쓴다.
+    trail: list[str] = []
 
     # 1) Camtek 파일명 직접 파싱
     fn = camtek_filename.parse_camtek_filename(name)
@@ -202,6 +204,7 @@ def _build_record_for_image(
             dy_size=fn.dy_size,
             d_area=fn.d_area,
         )
+    trail.append(f"파일명: {fn.reason}")
 
     # 2) ColorImageGrabingInfo.ini
     if ini_sections:
@@ -219,10 +222,27 @@ def _build_record_for_image(
                 x=ini_res.x,
                 y=ini_res.y,
             )
+        trail.append(f"INI: {ini_res.reason}")
+    else:
+        trail.append("INI: ColorImageGrabingInfo.ini 없음")
 
     # 3) KLA info
     if kla_parsed is not None:
         kla_res = kla_info.convert_from_parsed(kla_parsed, name)
+        if kla_res.status == ParseStatus.OK:
+            return DefectRecord(
+                image_path=image_path,
+                wafer_id=wafer_id,
+                layer=layer,
+                layer_folder=layer_folder,
+                source=Source.KLA,
+                status=ParseStatus.OK,
+                col=kla_res.col,
+                row=kla_res.row,
+                x=kla_res.x,
+                y=kla_res.y,
+            )
+        trail.append(f"KLA: {kla_res.reason}")
         return DefectRecord(
             image_path=image_path,
             wafer_id=wafer_id,
@@ -234,7 +254,9 @@ def _build_record_for_image(
             row=kla_res.row,
             x=kla_res.x,
             y=kla_res.y,
+            note=" | ".join(trail),
         )
+    trail.append("KLA: info 파일 없음")
 
     # 어느 방법으로도 좌표를 찾지 못함
     return DefectRecord(
@@ -244,7 +266,7 @@ def _build_record_for_image(
         layer_folder=layer_folder,
         source=Source.UNKNOWN,
         status=ParseStatus.NOT_FOUND,
-        note="좌표 정보를 찾을 수 없습니다.",
+        note=" | ".join(trail),
     )
 
 

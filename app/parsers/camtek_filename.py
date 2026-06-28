@@ -39,6 +39,7 @@ class CamtekNameResult:
     dx_size: Optional[float] = None
     dy_size: Optional[float] = None
     d_area: Optional[float] = None
+    reason: str = ""  # 진단용: 실패 사유(성공이면 빈 문자열)
 
 
 def _is_number(tok: str) -> bool:
@@ -60,17 +61,26 @@ def parse_camtek_filename(filename: str) -> CamtekNameResult:
             col, row, col_idx = int(tokens[i]), int(tokens[i + 1]), i
             break
     if col is None:
-        return CamtekNameResult(ParseStatus.NOT_FOUND)
+        return CamtekNameResult(
+            ParseStatus.NOT_FOUND,
+            reason=f"파일명에서 연속한 두 정수(die col/row)를 찾지 못함 (토큰 {len(tokens)}개)",
+        )
 
     after = tokens[col_idx + 2:]
     # col/row 뒤에 defect 이름(영문자 포함)이 없으면 Camtek 형식이 아님(KLA 원본 등).
     if not any(_HAS_LETTER_RE.search(t) for t in after):
-        return CamtekNameResult(ParseStatus.NOT_FOUND)
+        return CamtekNameResult(
+            ParseStatus.NOT_FOUND,
+            reason="col/row 뒤 defect 이름(영문자) 토큰 없음 → KLA 원본 파일명일 가능성",
+        )
 
     # x/y = col/row 뒤 처음 등장하는 두 수치 토큰. 그 뒤 수치는 크기/면적.
     nums = [t for t in after if _is_number(t)]
     if len(nums) < 2:
-        return CamtekNameResult(ParseStatus.NOT_FOUND)
+        return CamtekNameResult(
+            ParseStatus.NOT_FOUND,
+            reason=f"col/row 뒤 x/y 수치 토큰 부족({len(nums)}개, 2개 필요)",
+        )
     x = float(nums[0])
     y = float(nums[1])
     dx_size = float(nums[2]) if len(nums) >= 3 else None
