@@ -413,14 +413,10 @@ class MainWindow(QMainWindow):
             self.nav.set_enabled(False)
             return
 
-        # 설정 복원(현재 LOT 에 존재하는 경우에만)
-        saved_base = self.settings.base_layer if self.settings.base_layer in layers else None
-        saved_compares = [l for l in self.settings.compare_layers if l in layers] or None
-        # 저장된 선택이 없을 때 기본 체크: '_재리뷰' layer 우선
-        rereview = {l.display or l.canonical for l in index.layers if l.is_re_review}
-        self.top.set_layers(
-            layers, base=saved_base, compares=saved_compares, rereview=rereview
-        )
+        # 기준 layer 는 빈칸으로 시작(사용자가 직접 선택), 비교 기본값은 선호 재리뷰 집합만.
+        # (자재 폴더를 바꿀 때마다 재리뷰만 선택되도록 저장값을 자동 복원하지 않는다.)
+        rereview = self._preferred_rereview(index)
+        self.top.set_layers(layers, base=None, compares=None, rereview=rereview)
         self.settings.save()
 
         ok = sum(1 for r in index.records if r.ok)
@@ -477,6 +473,40 @@ class MainWindow(QMainWindow):
             lines.append(f"    … 외 {len(failed) - 8}개")
         return "\n".join(lines)
 
+    def _update_nomatch_button(self) -> None:
+        """미매칭 갤러리 버튼 카운트/활성 갱신(Phase C 에서 구현). 안전 stub."""
+        return
+
+    def _recommended_base(self) -> str:
+        """그리드 기본 배치 순서에서 현재 LOT 에 존재하는 첫 layer 를 추천(자동선택 X)."""
+        if self.lot_index is None:
+            return ""
+        layers = self.lot_index.layer_canonicals()
+        from app.layout import _canon_token
+        present = {_canon_token(l): l for l in layers}
+        for row in config.DEFAULT_LAYER_GRID:
+            for cell in row:
+                if _canon_token(cell) in present:
+                    return present[_canon_token(cell)]
+        return layers[0] if layers else ""
+
+    def _show_base_prompt(self) -> None:
+        """기준 layer 미선택 시 대기 화면: 매칭·탐색·스트립·맵을 비우고 선택을 안내한다."""
+        self.base_records = []
+        self.matches = []
+        self._view_cache = None
+        self.current = -1
+        self.strip.set_items([], [])
+        self.wafer_map.clear()
+        self.nav.set_enabled(False)
+        self.nav.set_index(0, 0)
+        self.top.set_match_summary("")
+        self._update_nomatch_button()
+        rec = self._recommended_base()
+        hint = f"  (추천: {rec})" if rec else ""
+        self.grid.show_empty(f"기준 layer 를 선택하세요.{hint}")
+        self._empty_label.setVisible(False)
+
     # ------------------------------------------------------- 재계산(분리)
     def _rebuild_all(self) -> None:
         """새 LOT·기준 layer 변경: base 목록·썸네일·그리드 전체 재구성, 인덱스 0."""
@@ -484,6 +514,8 @@ class MainWindow(QMainWindow):
             return
         base_layer = self.top.base_layer()
         if not base_layer:
+            # 기준 layer 미선택: 매칭/탐색을 비우고 선택을 유도(대기 상태).
+            self._show_base_prompt()
             return
         self._save_prefs()
 
@@ -635,6 +667,24 @@ class MainWindow(QMainWindow):
                         paths.append(str(r.matched.image_path))
         if paths:
             self.image_loader.prefetch(paths)
+
+    @staticmethod
+    def _preferred_rereview(index) -> set:
+        """선호 재리뷰 layer 집합: canonical 별 최대 재리뷰 레벨(≥1)의 display 만.
+
+        같은 canonical 에 재리뷰·재재리뷰가 모두 있으면 더 깊은(재재리뷰) 것만 고른다.
+        """
+        best_level: dict[str, int] = {}
+        for layer in index.layers:
+            lv = getattr(layer, "re_review_level", 0)
+            if lv >= 1:
+                best_level[layer.canonical] = max(best_level.get(layer.canonical, 0), lv)
+        chosen = set()
+        for layer in index.layers:
+            lv = getattr(layer, "re_review_level", 0)
+            if lv >= 1 and lv == best_level.get(layer.canonical):
+                chosen.add(layer.display or layer.canonical)
+        return chosen
 
     @staticmethod
     def _match_status(item) -> str:
