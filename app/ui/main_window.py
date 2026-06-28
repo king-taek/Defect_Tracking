@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QScrollArea,
     QSplitter,
     QVBoxLayout,
@@ -46,6 +47,7 @@ from app.ui.export_dialog import ExportSelectDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
+from app.ui.nomatch_gallery import NoMatchGalleryDialog
 from app.ui.notifications import NotificationBanner
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
@@ -173,6 +175,15 @@ class MainWindow(QMainWindow):
         strip_row.setContentsMargins(0, 0, 0, 0)
         strip_row.setSpacing(8)
         strip_row.addWidget(self.strip, 1)
+        # 매칭 없는(후보 제외된) 기준 사진을 모아 보는 버튼(썸네일과 같은 크기)
+        self.btn_nomatch = QPushButton("미매칭\n0")
+        self.btn_nomatch.setFixedSize(96, 96)
+        self.btn_nomatch.setToolTip(
+            "어떤 비교 layer 와도 매칭되지 않아 후보에서 제외된 기준 사진을 모아 봅니다."
+        )
+        self.btn_nomatch.clicked.connect(self._open_nomatch_gallery)
+        self.btn_nomatch.setEnabled(False)
+        strip_row.addWidget(self.btn_nomatch, 0, Qt.AlignVCenter)
         self.wafer_map = WaferMapWidget()
         self.wafer_map.die_clicked.connect(self._jump_to_die)
         strip_row.addWidget(self.wafer_map, 0, Qt.AlignVCenter)
@@ -473,9 +484,26 @@ class MainWindow(QMainWindow):
             lines.append(f"    … 외 {len(failed) - 8}개")
         return "\n".join(lines)
 
+    def _nomatch_entries(self) -> list:
+        """매칭 전무(none) 기준의 (index, BaseDefectMatches) 목록."""
+        return [
+            (i, m) for i, m in enumerate(self.matches)
+            if self._match_status(m) == "none"
+        ]
+
     def _update_nomatch_button(self) -> None:
-        """미매칭 갤러리 버튼 카운트/활성 갱신(Phase C 에서 구현). 안전 stub."""
-        return
+        """미매칭 갤러리 버튼의 카운트·활성 상태를 갱신한다."""
+        n = len(self._nomatch_entries()) if self.matches else 0
+        self.btn_nomatch.setText(f"미매칭\n{n}")
+        self.btn_nomatch.setEnabled(n > 0)
+
+    def _open_nomatch_gallery(self) -> None:
+        entries = self._nomatch_entries()
+        if not entries:
+            self.banner.show_message("매칭 없는 기준 사진이 없습니다.", "info")
+            return
+        dlg = NoMatchGalleryDialog(entries, self.thumb_cache, self._goto, self)
+        dlg.exec()
 
     def _recommended_base(self) -> str:
         """그리드 기본 배치 순서에서 현재 LOT 에 존재하는 첫 layer 를 추천(자동선택 X)."""
@@ -792,6 +820,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_strip_marks(self) -> None:
         """썸네일에 매칭 상태 점 + 세션 마킹 별을 반영한다."""
+        self._update_nomatch_button()
         if not self.matches:
             return
         statuses = [self._match_status(m) for m in self.matches]
