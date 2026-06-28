@@ -283,8 +283,9 @@ def _scan_wafer_folder(
 def _assign_displays(infos: list[LayerInfo]) -> None:
     """canonical 이 충돌하는 경우에만 재리뷰 등으로 구분한 display 이름을 부여한다.
 
-    충돌이 없으면 display = canonical (기존 동작 유지). 충돌 시 재리뷰는
-    "{canonical}_재리뷰", 일반은 canonical, 그래도 겹치면 " (2)", " (3)" … 로 유일화.
+    충돌이 없으면 display = canonical (기존 동작 유지). 충돌 시 재리뷰 깊이에 따라
+    "{canonical}_재리뷰"(레벨1) / "{canonical}_재재리뷰"(레벨2) … 로 구분하고, 일반은
+    canonical, 그래도 겹치면 " (2)", " (3)" … 로 유일화.
     """
     counts: dict[str, int] = {}
     for inf in infos:
@@ -294,8 +295,11 @@ def _assign_displays(infos: list[LayerInfo]) -> None:
     for inf in infos:
         if counts.get(inf.canonical, 0) <= 1:
             name = inf.canonical
+        elif inf.re_review_level >= 1:
+            suffix = "재" * inf.re_review_level + "리뷰"
+            name = f"{inf.canonical}_{suffix}"
         else:
-            name = f"{inf.canonical}_재리뷰" if inf.is_re_review else inf.canonical
+            name = inf.canonical
         base = name
         k = 2
         while name in used:
@@ -320,12 +324,14 @@ def scan_lot(lot_path: str | Path, progress: ProgressCb = None) -> LotIndex:
     # 1차: layer 폴더별 정규화 정보 수집 후 표시 이름(display) 산정(충돌 시에만 구분).
     for layer_dir in layer_dirs:
         canonical, is_rr = layout.normalize_layer(layer_dir.name)
+        level = layout.re_review_level(layer_dir.name)
         index.layers.append(
             LayerInfo(
                 folder_name=layer_dir.name,
                 canonical=canonical,
                 path=layer_dir,
                 is_re_review=is_rr,
+                re_review_level=level,
             )
         )
     _assign_displays(index.layers)

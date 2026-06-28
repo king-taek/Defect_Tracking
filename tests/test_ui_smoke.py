@@ -40,6 +40,8 @@ def win(app, tmp_path):
     w = MainWindow(AppSettings(workspace=str(tmp_path / "ws"), auto_update_check=False))
     w.lot_index = idx
     w._on_scan_finished(idx)
+    # 기준 layer 는 빈칸으로 시작하므로, 테스트는 사용자가 RDL4 를 고른 상태를 시뮬레이션한다.
+    w.top.cmb_base.setCurrentText("RDL4")
     for _ in range(10):
         QCoreApplication.processEvents()
     return w
@@ -71,9 +73,23 @@ def test_set_layers_rereview_default(app):
     # 재리뷰(RDL4,PI4)만 기본 체크, 기준 RDL3 제외 → 비교 = {RDL4, PI4}
     sb.set_layers(["RDL4", "PI4", "RDL3", "PI3"], base="RDL3", rereview={"RDL4", "PI4"})
     assert set(sb.compare_layers()) == {"RDL4", "PI4"}
-    # 재리뷰가 없으면 전부 체크(기준 제외)
+    # 재리뷰가 없으면 아무것도 자동 선택하지 않는다(사용자가 직접 선택).
     sb.set_layers(["A", "B", "C"], base="A", rereview=set())
-    assert set(sb.compare_layers()) == {"B", "C"}
+    assert set(sb.compare_layers()) == set()
+
+
+def test_rereview_button_selects_deepest(app):
+    from app.ui.controls import SideBar
+
+    sb = SideBar()
+    # 재리뷰/재재리뷰 혼재 → 선호 집합(재재리뷰 우선)만 버튼이 선택
+    layers = ["RDL4", "RDL4_재리뷰", "RDL4_재재리뷰", "PI4_재리뷰"]
+    preferred = {"RDL4_재재리뷰", "PI4_재리뷰"}
+    sb.set_layers(layers, base=None, compares=[], rereview=preferred)
+    assert set(sb.compare_layers()) == set()  # compares=[] → 아무것도 선택 안 함
+    sb._set_rereview_compares()
+    assert set(sb.compare_layers()) == preferred
+    assert sb.btn_rereview.isEnabled()
 
 
 def test_base_layer_checkbox_preserved(win):

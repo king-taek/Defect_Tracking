@@ -95,7 +95,8 @@ class LayerInfo:
     folder_name: str  # 원본 폴더명 (예: "1. RDL4_재리뷰")
     canonical: str  # 정규화 토큰 (예: RDL4)
     path: Path
-    is_re_review: bool = False  # _재리뷰 여부
+    is_re_review: bool = False  # _재리뷰 여부(레벨 ≥1)
+    re_review_level: int = 0  # 0 없음 / 1 재리뷰 / 2 재재리뷰 …
     display: str = ""  # 선택 UI/매칭에 쓰는 표시 이름(충돌 시에만 canonical 과 다름)
 
 

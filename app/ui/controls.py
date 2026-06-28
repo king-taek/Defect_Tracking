@@ -76,6 +76,7 @@ class SideBar(QFrame):
         self.setMinimumWidth(200)
         self.setMaximumWidth(360)
         self._compare_checks: list[QCheckBox] = []
+        self._rereview_set: set = set()  # '재리뷰' 버튼이 선택할 선호 재리뷰 집합
         self._build()
 
     @staticmethod
@@ -141,6 +142,13 @@ class SideBar(QFrame):
         self.btn_none.setObjectName("mini")
         self.btn_none.setToolTip("비교 layer 선택 모두 해제")
         self.btn_none.clicked.connect(lambda: self._set_all_compares(False))
+        self.btn_rereview = QPushButton("재리뷰")
+        self.btn_rereview.setObjectName("mini")
+        self.btn_rereview.setToolTip(
+            "재리뷰 layer 만 선택(같은 layer 에 재재리뷰가 있으면 재재리뷰 우선)"
+        )
+        self.btn_rereview.clicked.connect(self._set_rereview_compares)
+        cmp_head.addWidget(self.btn_rereview)
         cmp_head.addWidget(self.btn_all)
         cmp_head.addWidget(self.btn_none)
         outer.addLayout(cmp_head)
@@ -201,11 +209,15 @@ class SideBar(QFrame):
         """layer 목록으로 기준 콤보 + 비교 체크박스를 채운다.
 
         기본값 설정 중에는 시그널을 차단하여 재계산이 0회가 되도록 한다(호출 측에서 1회만 재구성).
-        base/compares 가 주어지면(설정 복원) 그 선택을 best-effort 로 적용한다.
+        base 가 None 이면 기준은 **빈칸**으로 두어 사용자가 직접 고르게 한다(자동 선택 안 함).
+        compares 가 None 이면 비교 기본값은 rereview(선호 재리뷰 집합)만 체크한다.
         """
+        self._rereview_set = set(rereview) if rereview else set()
+
         self.cmb_base.blockSignals(True)
         self.cmb_base.clear()
         self.cmb_base.addItems(layers)
+        self.cmb_base.setPlaceholderText("기준 layer 선택")
 
         # 비교 체크박스 재구성 (세로 스택: 끝의 stretch 앞에 삽입)
         for cb in self._compare_checks:
@@ -220,23 +232,23 @@ class SideBar(QFrame):
             self._compare_box.insertWidget(self._compare_box.count() - 1, cb)
             self._compare_checks.append(cb)
 
-        # 기준 선택(복원 우선)
-        chosen_base = base if (base and base in layers) else (layers[0] if layers else "")
+        # 기준 선택: base 가 주어지면 적용, 없으면 빈칸(-1)으로 두어 사용자 선택을 유도.
+        chosen_base = base if (base and base in layers) else ""
         if chosen_base:
             self.cmb_base.setCurrentText(chosen_base)
+        else:
+            self.cmb_base.setCurrentIndex(-1)
 
         # 비교 선택 기본값:
         #  - 저장된 선택(compares)이 있으면 그것(+체크 유지용 기준)을 복원
-        #  - 없으면 '_재리뷰' layer 우선 체크(rereview), 재리뷰가 없으면 전부 체크
+        #  - 없으면 선호 재리뷰 집합만 체크(재리뷰 없으면 아무것도 안 체크 → 사용자 선택)
         # 기준 layer 는 비교에서 자동 제외되지만(아래 compare_layers) 체크 상태는 유지한다.
         if compares is not None:
             compare_set = set(compares)
             if chosen_base:
                 compare_set.add(chosen_base)
-        elif rereview:
-            compare_set = set(rereview)
         else:
-            compare_set = set(layers)
+            compare_set = set(self._rereview_set)
         for cb in self._compare_checks:
             cb.setChecked(cb.text() in compare_set)
 
@@ -249,6 +261,7 @@ class SideBar(QFrame):
         self.btn_export.setEnabled(bool(layers))
         self.btn_all.setEnabled(bool(layers))
         self.btn_none.setEnabled(bool(layers))
+        self.btn_rereview.setEnabled(bool(self._rereview_set))
 
     def set_match_summary(self, text: str) -> None:
         self.lbl_match.setText(text)
@@ -278,6 +291,21 @@ class SideBar(QFrame):
             if cb.isEnabled() and cb.isChecked() != checked:
                 cb.blockSignals(True)
                 cb.setChecked(checked)
+                cb.blockSignals(False)
+                changed = True
+        if changed:
+            self.compare_layers_changed.emit()
+
+    def _set_rereview_compares(self) -> None:
+        """선호 재리뷰 집합만 체크(같은 layer 재재리뷰 우선). 그 외는 해제 — 한 번의 신호."""
+        if not self._rereview_set:
+            return
+        changed = False
+        for cb in self._compare_checks:
+            want = cb.text() in self._rereview_set
+            if cb.isEnabled() and cb.isChecked() != want:
+                cb.blockSignals(True)
+                cb.setChecked(want)
                 cb.blockSignals(False)
                 changed = True
         if changed:
