@@ -73,9 +73,9 @@ def test_set_layers_rereview_default(app):
     # 재리뷰(RDL4,PI4)만 기본 체크, 기준 RDL3 제외 → 비교 = {RDL4, PI4}
     sb.set_layers(["RDL4", "PI4", "RDL3", "PI3"], base="RDL3", rereview={"RDL4", "PI4"})
     assert set(sb.compare_layers()) == {"RDL4", "PI4"}
-    # 재리뷰가 없으면 아무것도 자동 선택하지 않는다(사용자가 직접 선택).
+    # 재리뷰 layer 가 전혀 없으면 막다른 화면 방지를 위해 전체를 기본 체크(폴백).
     sb.set_layers(["A", "B", "C"], base="A", rereview=set())
-    assert set(sb.compare_layers()) == set()
+    assert set(sb.compare_layers()) == {"B", "C"}
 
 
 def test_rereview_button_selects_deepest(app):
@@ -299,6 +299,16 @@ def test_nomatch_button_and_gallery(win):
     # 썸네일 클릭 시 on_navigate 로 해당 index 전달
     dlg._on_thumb_clicked(entries[0][0])
     assert navigated.get("i") == entries[0][0]
+
+
+def test_nomatch_empty_when_no_compare_layers(win):
+    # 비교 layer 를 모두 해제하면 '매칭 없음'은 의미가 없어 갤러리/버튼이 빈다(오해 방지).
+    win.top._set_all_compares(False)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert win.top.compare_layers() == []
+    assert win._nomatch_entries() == []
+    assert not win.btn_nomatch.isEnabled()
 
 
 def test_base_change_keeps_exclusion(win):

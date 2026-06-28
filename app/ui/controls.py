@@ -241,14 +241,17 @@ class SideBar(QFrame):
 
         # 비교 선택 기본값:
         #  - 저장된 선택(compares)이 있으면 그것(+체크 유지용 기준)을 복원
-        #  - 없으면 선호 재리뷰 집합만 체크(재리뷰 없으면 아무것도 안 체크 → 사용자 선택)
+        #  - 없으면 선호 재리뷰 집합을 체크. 재리뷰 layer 가 전혀 없는 자재는
+        #    빈 선택(매칭 불가)이 되어 막다른 화면이 되므로 전체를 기본 체크한다(폴백).
         # 기준 layer 는 비교에서 자동 제외되지만(아래 compare_layers) 체크 상태는 유지한다.
         if compares is not None:
             compare_set = set(compares)
             if chosen_base:
                 compare_set.add(chosen_base)
-        else:
+        elif self._rereview_set:
             compare_set = set(self._rereview_set)
+        else:
+            compare_set = set(layers)
         for cb in self._compare_checks:
             cb.setChecked(cb.text() in compare_set)
 
