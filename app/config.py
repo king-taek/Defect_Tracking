@@ -89,6 +89,35 @@ def set_active_product(key: str) -> None:
         _active_product = key
 
 
+def match_product_for_path(lot_path) -> tuple[str | None, int]:
+    """자재(LOT) 경로 구성요소에서 등록 제품을 자동 인식한다.
+
+    자재명·상위(device 등) 폴더명을 영숫자 소문자 토큰으로 정규화하고, 등록 제품의
+    key/name 토큰이 그 안에 부분 문자열로 나타나면 매칭으로 본다. 가장 긴(구체적인)
+    제품 토큰을 우선한다. 반환은 (제품 key 또는 None, 점수=매칭 토큰 길이).
+    """
+    from pathlib import Path
+
+    from app.layout import _canon_token
+
+    p = Path(lot_path)
+    parts = [p.name] + [par.name for par in list(p.parents)[:3]]
+    path_tokens = [_canon_token(s) for s in parts if s]
+    path_tokens = [t for t in path_tokens if t]
+
+    best_key: str | None = None
+    best_score = 0
+    for key, prod in PRODUCTS.items():
+        for cand in (key, prod.name):
+            ct = _canon_token(cand)
+            if len(ct) < 4:  # 너무 짧은 토큰은 오매칭 위험 → 제외
+                continue
+            if any(ct in t for t in path_tokens):
+                if len(ct) > best_score:
+                    best_key, best_score = key, len(ct)
+    return best_key, best_score
+
+
 # ---- 하위호환 상수 (기본 제품 값) — 샘플데이터/기존 테스트가 참조 ----
 _DEFAULT_CFG = PRODUCTS[DEFAULT_PRODUCT]
 CAMTEK_PITCH_X = _DEFAULT_CFG.camtek_pitch_x

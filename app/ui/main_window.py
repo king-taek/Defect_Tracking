@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         # 보기 필터: matched(기본, 매칭 0인 후보 제외) / all / unmatched / full
         self._filter = "matched"
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
+        self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
         self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
@@ -184,9 +185,21 @@ class MainWindow(QMainWindow):
         self.btn_nomatch.clicked.connect(self._open_nomatch_gallery)
         self.btn_nomatch.setEnabled(False)
         strip_row.addWidget(self.btn_nomatch, 0, Qt.AlignVCenter)
+        # 웨이퍼 맵 + 캡션(디바이스/정합 안내)을 세로로 묶는다.
+        wafer_box = QVBoxLayout()
+        wafer_box.setContentsMargins(0, 0, 0, 0)
+        wafer_box.setSpacing(2)
         self.wafer_map = WaferMapWidget()
         self.wafer_map.die_clicked.connect(self._jump_to_die)
-        strip_row.addWidget(self.wafer_map, 0, Qt.AlignVCenter)
+        wafer_box.addWidget(self.wafer_map, 0, Qt.AlignHCenter)
+        self.lbl_wafer = QLabel("")
+        self.lbl_wafer.setObjectName("dim")
+        self.lbl_wafer.setStyleSheet("font-size:9px;")
+        self.lbl_wafer.setAlignment(Qt.AlignCenter)
+        self.lbl_wafer.setWordWrap(True)
+        self.lbl_wafer.setFixedWidth(140)
+        wafer_box.addWidget(self.lbl_wafer, 0, Qt.AlignHCenter)
+        strip_row.addLayout(wafer_box)
         band_layout.addLayout(strip_row)
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
@@ -329,10 +342,31 @@ class MainWindow(QMainWindow):
         recents.insert(0, folder)
         self.settings.recent_folders = recents[:5]
 
+    def _auto_select_product(self, folder: str) -> None:
+        """자재 경로에서 디바이스(제품)를 자동 인식해 활성화한다(스캔 전 호출).
+
+        인식되면 좌표 변환·웨이퍼 맵 die 배치가 그 제품 기준으로 적용된다. 실패하면
+        설정의 제품(settings.product)을 그대로 둔다.
+        """
+        try:
+            key, score = config.match_product_for_path(folder)
+        except Exception:  # noqa: BLE001 - 인식 실패는 치명적이지 않음
+            return
+        if key and key != config._active_product:
+            config.set_active_product(key)
+            prod = config.active_product()
+            if prod.source == "db":
+                self.banner.show_message(
+                    f"디바이스 자동 인식: {prod.name}", "info", timeout_ms=2500
+                )
+
     def load_lot(self, folder: str) -> None:
         # 2차 원본 보호(Section 1.1): 캐시/결과 작업공간이 이 LOT 내부면 차단한다.
         if not self._verify_workspace_outside(folder):
             return
+
+        # 디바이스 자동 인식(스캔 전): 좌표 변환·die 배치를 올바른 제품으로 맞춘다.
+        self._auto_select_product(folder)
 
         self.settings.last_lot_folder = folder
         self._push_recent(folder)
@@ -526,6 +560,7 @@ class MainWindow(QMainWindow):
         self.current = -1
         self.strip.set_items([], [])
         self.wafer_map.clear()
+        self.lbl_wafer.setText("")
         self.nav.set_enabled(False)
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
@@ -865,12 +900,19 @@ class MainWindow(QMainWindow):
     def _open_help(self) -> None:
         ShortcutsDialog(self).exec()
 
-    # ---- 웨이퍼 맵 / 겹쳐 보기 ----
+    # ---- 웨이퍼 맵 ----
+    _ALIGN_MIN_OVERLAP = 0.6  # 이 비율 이상 겹쳐야 디바이스 모양을 신뢰
+
     def _update_wafer_map(self, item) -> None:
-        """현재 wafer 의 die 격자를 매칭 상태로 갱신한다."""
+        """현재 wafer 의 die 격자를 매칭 상태로 갱신한다.
+
+        디바이스 DB die_map 이 있으면 관측 die 와 **정합(평행이동)** 시켜 실제 모양으로
+        그린다. 정합 신뢰도가 낮으면 사각 전체로 폴백하고 캡션·로그로 알린다.
+        """
+        from app import wafermap_align
+
         wafer = item.base.wafer_id
         states: dict[tuple[int, int], str] = {}
-        max_col = max_row = 0
         for m in self.matches:
             b = m.base
             if b.wafer_id != wafer or b.col is None or b.row is None:
@@ -878,15 +920,53 @@ class MainWindow(QMainWindow):
             if b.col < 0 or b.row < 0:
                 continue
             states[(b.col, b.row)] = self._match_status(m)
-            max_col = max(max_col, b.col)
-            max_row = max(max_row, b.row)
+        observed = set(states.keys())
+
         prod = config.active_product()
+        valid: Optional[set] = None
+        caption = ""
+        if prod.die_map and observed:
+            align = self._get_alignment(wafer, prod, observed)
+            if align.overlap >= self._ALIGN_MIN_OVERLAP:
+                valid = wafermap_align.shifted_die_map(prod.die_map, align)
+                caption = f"{prod.name} · 모양 정합 {align.overlap * 100:.0f}%"
+            else:
+                caption = f"{prod.name} · 모양 정합 실패 — 사각 표시"
+        elif prod.source == "db":
+            caption = prod.name
+
+        # 격자 크기는 관측 die 와 valid(디바이스 모양)를 모두 덮도록 산정.
+        all_dies = set(observed)
+        if valid:
+            all_dies |= valid
+        max_col = max((c for c, _ in all_dies), default=0)
+        max_row = max((r for _, r in all_dies), default=0)
         cols = max(prod.kla_package_x_count, max_col + 1)
         rows = max(prod.kla_package_y_count, max_row + 1)
         current = (item.base.col, item.base.row)
-        # 디바이스 DB die 배치가 있으면 실제 모양으로(없으면 사각 전체)
-        valid = prod.die_map if prod.die_map else None
         self.wafer_map.set_data(cols, rows, states, current, valid=valid)
+        self.lbl_wafer.setText(caption)
+        self.wafer_map.setToolTip(
+            "웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동"
+            + (f"\n{caption}" if caption else "")
+        )
+
+    def _get_alignment(self, wafer: str, prod, observed: set):
+        """(lot, wafer, product) 단위로 정합 결과를 캐시·재사용한다."""
+        from app import wafermap_align
+
+        key = (id(self.lot_index), wafer, prod.key)
+        cached = self._align_cache.get(key)
+        if cached is None:
+            cached = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
+            self._align_cache[key] = cached
+            if cached.overlap < self._ALIGN_MIN_OVERLAP:
+                import logging
+                logging.getLogger("conder.wafermap").info(
+                    "die 정합 신뢰도 낮음 — wafer=%s product=%s overlap=%.2f",
+                    wafer, prod.key, cached.overlap,
+                )
+        return cached
 
     def _jump_to_die(self, col: int, row: int) -> None:
         if not self.matches:
