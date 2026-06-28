@@ -103,7 +103,7 @@ def main() -> int:
     from app.ui.main_window import MainWindow
 
     window = MainWindow(settings)
-    window.show()
+    window.show_initial()  # 기본 최대화(설정), 해제 이력이 있으면 저장된 창 크기
     splash.finish(window)
     return app.exec()
 

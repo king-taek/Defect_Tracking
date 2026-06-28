@@ -462,3 +462,31 @@ def test_settings_dialog_constructs(app, tmp_path):
     assert out.tolerance == 150.0
     assert out.auto_update_check is False
     assert out.workspace == str(tmp_path / "ws2")
+
+
+def test_stop_scan_hides_progress(win):
+    # 스캔 진행 상태를 흉내내고 _stop_scan 이 진행바/버튼을 숨기고 토큰을 올리는지
+    win.progress.setVisible(True)
+    win.btn_stop.setVisible(True)
+    tok = win._scan_token
+    win._stop_scan()
+    assert not win.btn_stop.isVisible()
+    assert not win.progress.isVisible()
+    assert win._scan_token == tok + 1
+    assert win._scan_worker is None
+
+
+def test_show_initial_maximizes(app, tmp_path):
+    from app.ui.main_window import MainWindow
+
+    w = MainWindow(AppSettings(workspace=str(tmp_path / "ws"), auto_update_check=False,
+                               window_maximized=True))
+    w.show_initial()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert w.isMaximized()
+    # closeEvent 가 최대화 상태를 저장한다
+    from PySide6.QtGui import QCloseEvent
+    w.closeEvent(QCloseEvent())
+    assert w.settings.window_maximized is True
+    w.close()
