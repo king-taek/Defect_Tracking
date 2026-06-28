@@ -1,4 +1,4 @@
-"""Conder Scan Review Image Compare Viewer — 진입점.
+"""Defect Layer Tracker — 진입점.
 
 원본 데이터를 절대 훼손하지 않는(read-only) defect 이미지 비교 뷰어.
 실행: python main.py
@@ -60,7 +60,7 @@ def main() -> int:
     # windowed(.exe) 모드에서는 stderr 가 없을 수 있으므로 안전하게 처리.
     if sys.stderr is not None:
         try:
-            print("Conder Compare 시작 중... (라이브러리 로딩, 잠시만 기다려 주세요)",
+            print("Defect Layer Tracker 시작 중... (라이브러리 로딩, 잠시만 기다려 주세요)",
                   file=sys.stderr, flush=True)
         except (OSError, ValueError):
             pass

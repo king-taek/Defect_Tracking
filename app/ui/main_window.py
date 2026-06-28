@@ -18,7 +18,6 @@ from typing import Optional
 from PySide6.QtCore import Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -28,7 +27,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QSplitter,
     QVBoxLayout,
@@ -43,7 +41,7 @@ from app.scanner import LotIndex
 from app.session import SessionStore
 from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
-from app.ui.controls import NavBar, SideBar
+from app.ui.controls import NavBar, NoScrollComboBox, SideBar
 from app.ui.export_dialog import ExportSelectDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
@@ -52,7 +50,6 @@ from app.ui.notifications import NotificationBanner
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.ui.wafer_map import WaferMapWidget
-from app.ui.compare_overlay import OverlayCompareDialog
 from app.workers import ScanWorker, ThumbnailWorker
 
 
@@ -184,32 +181,23 @@ class MainWindow(QMainWindow):
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
         # 보기 필터: 매칭만(기본) / 전체 / 미매칭 있는 것만 / 완전 매칭만 (triage)
-        self.cmb_filter = QComboBox()
+        self.cmb_filter = NoScrollComboBox()
         self.cmb_filter.addItem("매칭만", "matched")
         self.cmb_filter.addItem("전체", "all")
         self.cmb_filter.addItem("미매칭 있음", "unmatched")
         self.cmb_filter.addItem("완전 매칭", "full")
         self.cmb_filter.setToolTip(
-            "탐색 대상 기준 사진을 매칭 상태로 거른다.\n"
-            "'매칭만'은 어떤 비교 layer 와도 매칭되지 않은 기준 사진을 후보에서 제외한다."
+            "탐색 대상 기준 사진을 매칭 상태로 거릅니다.\n"
+            "· 매칭만: 어떤 비교 layer 와도 매칭 안 된 사진을 후보에서 제외(기본)\n"
+            "· 전체: 모든 기준 사진 표시\n"
+            "· 미매칭 있음: 하나라도 매칭 안 된 layer 가 있는 사진만\n"
+            "· 완전 매칭: 선택한 비교 layer 전부와 매칭된 사진만"
         )
         self.cmb_filter.currentIndexChanged.connect(self._on_filter_changed)
         self.nav.add_widget(self.cmb_filter)
         self.lbl_view = QLabel("")
         self.lbl_view.setObjectName("dim")
         self.nav.add_widget(self.lbl_view)
-        # 겹쳐 보기(블링크) — 기준 vs 비교 layer 위치/크기 변화 감지
-        self.btn_overlay = QPushButton("⧉ 겹쳐보기")
-        self.btn_overlay.setObjectName("mini")
-        self.btn_overlay.setToolTip("기준과 비교 layer 를 겹쳐 보며 블링크/오버레이 (O)")
-        self.btn_overlay.clicked.connect(self._open_overlay)
-        self.nav.add_widget(self.btn_overlay)
-        # 단축키 도움말
-        self.btn_help = QPushButton("?")
-        self.btn_help.setObjectName("mini")
-        self.btn_help.setToolTip("단축키 도움말 (F1)")
-        self.btn_help.clicked.connect(self._open_help)
-        self.nav.add_widget(self.btn_help)
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
 
@@ -269,7 +257,6 @@ class MainWindow(QMainWindow):
                   activated=lambda: self.top._set_all_compares(False))
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
         QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
-        QShortcut(QKeySequence(Qt.Key_O), self, activated=self._open_overlay)
         QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
 
     def _apply_saved_prefs(self) -> None:
@@ -831,22 +818,6 @@ class MainWindow(QMainWindow):
             if b.wafer_id == wafer and b.col == col and b.row == row:
                 self._goto(i)
                 return
-
-    def _open_overlay(self) -> None:
-        if not self.matches or not (0 <= self.current < len(self.matches)):
-            self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
-            return
-        item = self.matches[self.current]
-        pairs = [
-            (r.compare_layer, r.matched)
-            for r in item.results
-            if r.is_match and r.matched is not None
-        ]
-        if not pairs:
-            self.banner.show_message("이 기준에는 겹쳐 볼 매칭 비교 사진이 없습니다.", "info")
-            return
-        dlg = OverlayCompareDialog(item.base, self.top.base_layer(), pairs, self)
-        dlg.exec()
 
     # ------------------------------------------------------------ 설정
     def _open_settings(self) -> None:

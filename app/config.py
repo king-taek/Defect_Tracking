@@ -111,7 +111,7 @@ def kla_zero_y() -> int:
 # 애플리케이션 / 자동 업데이트
 # ---------------------------------------------------------------------------
 
-APP_NAME = "Conder Scan Compare Viewer"
+APP_NAME = "Defect Layer Tracker"
 
 # 자동 업데이트 대상 저장소(메인 브랜치를 가져와 적용)
 UPDATE_OWNER = "king-taek"
