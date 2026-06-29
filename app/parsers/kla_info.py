@@ -3,8 +3,8 @@
 같은 wafer 폴더의 KLA info 파일에서 jpg 파일명과 동일한 TiffFileName 을 찾고,
 그 아래 DefectList line 의 XREL/YREL/XINDEX/YINDEX 와 header 의 DiePitchY 로 변환한다.
 
-  col = XINDEX + zeroX(=3)
-  row = YINDEX + zeroY(=3)
+  col = XINDEX + zeroX(=PackageX÷2)
+  row = YINDEX + zeroY(=PackageY÷2)
   x   = Round(XREL, 0)
   y   = Round(DiePitchY - YREL, 0)   # Y 방향은 DiePitchY 기준으로 반전
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -58,20 +58,21 @@ def select_info_file(filenames: list[str]) -> Optional[str]:
     if dot001:
         return sorted(dot001)[0]
 
+    _skip = frozenset((".pass", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"))
     candidates = [
         f
         for f in filenames
-        if ext(f) not in (".pass", ".jpg", ".jpeg")
+        if ext(f) not in _skip
     ]
     return sorted(candidates)[0] if candidates else None
 
 
 def _read_text(path: Path) -> str:
     data = read_only_bytes(path)
-    for encoding in ("utf-8", "cp949", "latin-1"):
+    for encoding in ("utf-8", "cp949", "utf-16-le", "utf-16-be", "latin-1"):
         try:
             return data.decode(encoding)
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, ValueError):
             continue
     return data.decode("latin-1", errors="replace")
 
@@ -100,49 +101,69 @@ def _parse_defect_fields(data_line: str) -> Optional[list[float]]:
         return None
 
 
+_KLA_FNAME_RE = re.compile(
+    r"^.+?_(-?\d+)_(-?\d+)_(\d+)_(\d+)\.[a-zA-Z]+$"
+)
+
+
 @dataclass
 class _ParsedInfo:
     die_pitch_y: Optional[float]
     # jpg 파일명(소문자) -> DefectList 필드
     defects: dict[str, list[float]]
+    all_defects: list[list[float]] = field(default_factory=list)
 
 
 def parse_info_text(text: str) -> _ParsedInfo:
-    """KLA info 텍스트를 파싱해 DiePitchY 와 TiffFileName->DefectList 매핑을 만든다."""
+    """KLA info 텍스트를 파싱해 DiePitchY 와 TiffFileName->DefectList 매핑을 만든다.
+
+    TiffFileName 이 없는 DefectList 엔트리도 all_defects 에 수집하여,
+    TiffFileName 매칭 실패 시 XINDEX/YINDEX 기반 폴백 검색에 쓴다.
+    """
     lines = text.splitlines()
     die_pitch_y = _parse_die_pitch_y(lines)
     defects: dict[str, list[float]] = {}
+    all_defects: list[list[float]] = []
 
     i = 0
     n = len(lines)
+    pending_tiff: Optional[str] = None
+    in_defect_block = False
     while i < n:
         s = lines[i].strip()
         m = re.match(r"(?i)^TiffFileName\s+(.+?);?\s*$", s)
         if m:
-            tiff_name = m.group(1).strip().strip(";").strip().lower()
-            # 바로 아래에서 DefectList 데이터 line 을 찾는다.
-            fields = None
-            j = i + 1
-            while j < n and j <= i + 4:  # 바로 아래 몇 줄 이내
-                nxt = lines[j].strip()
-                if not nxt:
-                    j += 1
-                    continue
-                if nxt.lower().startswith("defectlist"):
-                    # 키워드 뒤에 데이터가 같은 줄에 있을 수도, 다음 줄일 수도 있음
-                    rest = nxt[len("defectlist"):].strip()
-                    if rest:
-                        fields = _parse_defect_fields(rest)
-                        break
-                    j += 1
-                    continue
-                fields = _parse_defect_fields(nxt)
-                break
-            if fields is not None and tiff_name:
-                defects[tiff_name] = fields
+            pending_tiff = m.group(1).strip().strip(";").strip().lower()
+            in_defect_block = False
+            i += 1
+            continue
+        if s.lower().startswith("defectlist"):
+            rest = s[len("defectlist"):].strip()
+            if rest:
+                fields = _parse_defect_fields(rest)
+                if fields is not None:
+                    all_defects.append(fields)
+                    if pending_tiff:
+                        defects[pending_tiff] = fields
+                        pending_tiff = None
+            else:
+                in_defect_block = True
+            i += 1
+            continue
+        if (in_defect_block or pending_tiff) and s:
+            fields = _parse_defect_fields(s)
+            if fields is not None:
+                all_defects.append(fields)
+                if pending_tiff:
+                    defects[pending_tiff] = fields
+                    pending_tiff = None
+            else:
+                in_defect_block = False
+                pending_tiff = None
         i += 1
 
-    return _ParsedInfo(die_pitch_y=die_pitch_y, defects=defects)
+    return _ParsedInfo(die_pitch_y=die_pitch_y, defects=defects,
+                       all_defects=all_defects)
 
 
 def load_info(info_path: str | Path) -> _ParsedInfo:
@@ -161,13 +182,27 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
             if Path(k).stem == stem:
                 fields = v
                 break
+    if fields is None and parsed.all_defects:
+        m = _KLA_FNAME_RE.match(key)
+        if m:
+            want_xi = int(m.group(1))
+            want_yi = int(m.group(2))
+            want_id = int(m.group(4))
+            for entry in parsed.all_defects:
+                if (len(entry) >= _MIN_FIELDS
+                        and int(round(entry[_XINDEX_IDX])) == want_xi
+                        and int(round(entry[_YINDEX_IDX])) == want_yi
+                        and int(round(entry[0])) == want_id):
+                    fields = entry
+                    break
     if fields is None:
         sample = ", ".join(list(parsed.defects)[:3])
         return KlaResult(
             ParseStatus.NOT_FOUND,
             reason=(
                 f"info 에 TiffFileName '{key}' 매칭 실패"
-                f"(보유 {len(parsed.defects)}개{', 예: ' + sample if sample else ''})"
+                f"(보유 {len(parsed.defects)}개{', 예: ' + sample if sample else ''}, "
+                f"DefectList {len(parsed.all_defects)}건)"
             ),
         )
     if parsed.die_pitch_y is None:

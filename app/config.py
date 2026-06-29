@@ -71,7 +71,7 @@ PRODUCTS: dict[str, ProductConfig] = {
         camtek_col_offset=2,
         camtek_row_base=7,
         kla_package_x_count=7,
-        kla_package_y_count=6,
+        kla_package_y_count=5,
     ),
 }
 DEFAULT_PRODUCT = "TB500INT"
