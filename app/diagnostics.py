@@ -98,7 +98,7 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
         lines.append(f"- layer 분포: {dist}")
         lines.append("- 예시 파일:")
         for r in recs[:5]:
-            lines.append(f"  - `{r.layer_folder}/{r.wafer_id}/{Path(r.image_path).name}`")
+            lines.append(f"  - `{Path(r.image_path).resolve()}`")
         lines.append("")
 
     if scan_errors:
