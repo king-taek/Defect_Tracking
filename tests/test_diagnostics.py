@@ -54,3 +54,17 @@ def test_report_no_failures(tmp_path):
                       layer_folder="1. RDL4", status=ParseStatus.OK, col=1, row=1, x=0.0, y=0.0)
     out = diagnostics.write_parse_failure_report(tmp_path, "LOT", [ok])
     assert "실패가 없습니다" in out.read_text(encoding="utf-8")
+
+
+def test_report_rotates_at_25mb(tmp_path):
+    """로그 파일이 25MB를 넘으면 다음 번호 파일로 이어 쓴다."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    base = logs / "parse_failures.md"
+    base.write_bytes(b"x" * (26 * 1024 * 1024))  # 26MB 더미
+
+    ok = DefectRecord(image_path=Path("/x/c.jpg"), wafer_id="W1", layer="RDL4",
+                      layer_folder="1. RDL4", status=ParseStatus.OK, col=1, row=1, x=0.0, y=0.0)
+    out = diagnostics.write_parse_failure_report(tmp_path, "LOT", [ok])
+    assert out == logs / "parse_failures_2.md"
+    assert "실패가 없습니다" in out.read_text(encoding="utf-8")
