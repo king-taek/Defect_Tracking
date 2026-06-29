@@ -274,8 +274,8 @@ def _build_record_for_image(
     )
 
 
-def _read_info_text_safe(path: Path, limit: int = 4000) -> str:
-    """진단용: info 파일 텍스트를 읽되 크기를 제한한다."""
+def _read_info_text_safe(path: Path) -> str:
+    """진단용: info 파일 텍스트 전문을 읽는다."""
     try:
         from app.safety import read_only_bytes
         raw = read_only_bytes(path)
@@ -287,8 +287,6 @@ def _read_info_text_safe(path: Path, limit: int = 4000) -> str:
                 continue
         else:
             text = raw.decode("latin-1", errors="replace")
-        if len(text) > limit:
-            return text[:limit] + f"\n... (총 {len(text)}자 중 {limit}자까지 표시)"
         return text
     except OSError:
         return "(읽기 실패)"

@@ -194,14 +194,30 @@ def _format_diag_context(rec: DefectRecord) -> list[str]:
     return lines
 
 
+_MAX_LOG_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+def _pick_log_file(logs_dir: Path) -> Path:
+    """현재 쓸 로그 파일을 반환한다. 25MB 초과 시 다음 번호 파일을 만든다."""
+    base = logs_dir / "parse_failures.md"
+    if not base.exists() or base.stat().st_size < _MAX_LOG_SIZE:
+        return base
+    idx = 2
+    while True:
+        candidate = logs_dir / f"parse_failures_{idx}.md"
+        if not candidate.exists() or candidate.stat().st_size < _MAX_LOG_SIZE:
+            return candidate
+        idx += 1
+
+
 def write_parse_failure_report(
     workspace_path: Path, lot_name: str, records: list[DefectRecord],
     scan_errors: list[str] | None = None,
 ) -> Path:
-    """진단 리포트를 workspace/logs/parse_failures.md 에 **누적 추가**하고 경로를 반환한다."""
+    """진단 리포트를 workspace/logs/parse_failures*.md 에 **누적 추가**하고 경로를 반환한다."""
     logs = Path(workspace_path) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
-    out = logs / "parse_failures.md"
+    out = _pick_log_file(logs)
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     separator = f"\n---\n\n> 스캔 시각: {stamp}\n\n"
     report = build_failure_report(lot_name, records, scan_errors)
