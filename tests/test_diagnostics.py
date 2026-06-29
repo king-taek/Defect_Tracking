@@ -24,31 +24,29 @@ def test_parser_reason_filled():
     assert "KLA" in r.reason or "정수" in r.reason
 
 
-def test_report_single_file_overwrite(tmp_path):
+def test_report_append_accumulates(tmp_path):
     recs = [
-        _rec(ParseStatus.OK, name="ok.jpg") if False else _rec(
-            ParseStatus.NOT_FOUND, note="파일명: col/row 뒤 defect 이름(영문자) 토큰 없음 → KLA 원본"),
+        _rec(ParseStatus.NOT_FOUND, note="파일명: col/row 뒤 defect 이름(영문자) 토큰 없음 → KLA 원본"),
         _rec(ParseStatus.NOT_FOUND, note="파일명: col/row 뒤 defect 이름(영문자) 토큰 없음 → KLA 원본", name="b.jpg"),
     ]
-    # OK 1개 추가(전체 카운트 확인)
     ok = DefectRecord(image_path=Path("/x/c.jpg"), wafer_id="W1", layer="RDL4",
                       layer_folder="1. RDL4", status=ParseStatus.OK, col=1, row=1, x=0.0, y=0.0)
     recs.append(ok)
     out = diagnostics.write_parse_failure_report(tmp_path, "LOT1", recs, ["/net/x: PermissionError"])
     assert out == tmp_path / "logs" / "parse_failures.md"
     text = out.read_text(encoding="utf-8")
-    # 클러스터링: 동일 사유 2개가 한 묶음(2개)으로
     assert "(2개)" in text
-    assert "KLA 원본" in text  # 처방 힌트
-    assert "PermissionError" in text  # 접근 실패 경로
+    assert "KLA 원본" in text
+    assert "PermissionError" in text
     assert "실패: **2개**" in text
 
-    # 덮어쓰기 — 실패 없는 스캔이면 '실패 없음' 으로 교체(누적 X)
+    # 두 번째 스캔 — 누적 추가되어 이전 내용도 보존
     out2 = diagnostics.write_parse_failure_report(tmp_path, "LOT1", [ok])
     assert out2 == out
     text2 = out2.read_text(encoding="utf-8")
     assert "실패가 없습니다" in text2
-    assert "(2개)" not in text2
+    assert "(2개)" in text2  # 이전 리포트 내용이 남아 있어야 함
+    assert "스캔 시각:" in text2
 
 
 def test_report_no_failures(tmp_path):
