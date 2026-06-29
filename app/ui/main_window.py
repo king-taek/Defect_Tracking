@@ -545,7 +545,7 @@ class MainWindow(QMainWindow):
         self._rebuild_all()
 
     def _write_diag_report(self, index):
-        """좌표 추출 실패 진단 리포트를 단일 md 로 덮어쓴다(실패 시 None)."""
+        """좌표 추출 실패 진단 리포트를 단일 md 에 누적 추가한다(실패 시 None)."""
         try:
             from app import diagnostics
             return diagnostics.write_parse_failure_report(

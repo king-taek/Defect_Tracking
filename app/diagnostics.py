@@ -1,7 +1,7 @@
 """좌표 추출 실패 진단 리포트(개발용) — 단일 markdown 파일로 관리.
 
 스캔에서 좌표를 뽑지 못한 record 의 '왜'를 모아 한 파일로 남긴다. 매 스캔마다
-**덮어쓰기**하여 항상 최신 1개만 유지한다(누적 X). 원본이 아닌 워크스페이스에만 쓴다.
+**누적 추가(append)** 하여 이력을 보존한다. 원본이 아닌 워크스페이스에만 쓴다.
 민감정보(좌표값 등)는 적지 않고 파일명/구조/카운트/사유만 기록한다.
 
 핵심: 같은 '시도 트레일(note)'을 가진 실패끼리 **서명(signature) 클러스터링**해
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 
 from app.models import DefectRecord, ParseStatus
@@ -112,9 +113,13 @@ def write_parse_failure_report(
     workspace_path: Path, lot_name: str, records: list[DefectRecord],
     scan_errors: list[str] | None = None,
 ) -> Path:
-    """진단 리포트를 workspace/logs/parse_failures.md 에 **덮어쓰기**하고 경로를 반환한다."""
+    """진단 리포트를 workspace/logs/parse_failures.md 에 **누적 추가**하고 경로를 반환한다."""
     logs = Path(workspace_path) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     out = logs / "parse_failures.md"
-    out.write_text(build_failure_report(lot_name, records, scan_errors), encoding="utf-8")
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    separator = f"\n---\n\n> 스캔 시각: {stamp}\n\n"
+    report = build_failure_report(lot_name, records, scan_errors)
+    with open(out, "a", encoding="utf-8") as f:
+        f.write(separator + report)
     return out
