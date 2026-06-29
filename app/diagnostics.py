@@ -92,7 +92,6 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
         hint = _hint_for(sig)
         if hint:
             lines.append(f"> 처방: {hint}")
-        # layer/wafer 분포
         by_layer = Counter(r.layer_folder for r in recs)
         dist = ", ".join(f"{k}×{v}" for k, v in by_layer.most_common(6))
         lines.append(f"- layer 분포: {dist}")
@@ -101,12 +100,98 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
             lines.append(f"  - `{Path(r.image_path).resolve()}`")
         lines.append("")
 
+        # 폴더별 진단 컨텍스트(같은 클러스터에서 고유 wafer_dir 기준)
+        seen_dirs: set[str] = set()
+        diag_count = 0
+        for r in recs:
+            if diag_count >= 3:
+                break
+            d = r.diag
+            if not d:
+                continue
+            wdir = d.get("wafer_dir", "")
+            if wdir in seen_dirs:
+                continue
+            seen_dirs.add(wdir)
+            diag_count += 1
+            lines.extend(_format_diag_context(r))
+
     if scan_errors:
         lines.append("## 접근 실패 경로")
         for e in scan_errors[:50]:
             lines.append(f"- {e}")
         lines.append("")
     return "\n".join(lines) + "\n"
+
+
+def _format_diag_context(rec: DefectRecord) -> list[str]:
+    """단일 실패 record 의 진단 컨텍스트를 markdown 줄 목록으로 포맷한다."""
+    d = rec.diag
+    if not d:
+        return []
+    lines: list[str] = []
+    wdir = d.get("wafer_dir", str(Path(rec.image_path).parent))
+    lines.append(f"#### 폴더 컨텍스트: `{wdir}`")
+    lines.append("")
+
+    # 좌표 출처·상태
+    lines.append(f"- 좌표 출처(source): **{rec.source.value if hasattr(rec.source, 'value') else rec.source}**")
+    lines.append(f"- 파싱 상태(status): **{rec.status.value if hasattr(rec.status, 'value') else rec.status}**")
+    lines.append(f"- 시도 트레일(note): {rec.note or '(없음)'}")
+    lines.append("")
+
+    # 폴더 내 파일 목록
+    all_files = d.get("files_in_folder", [])
+    img_count = d.get("image_count", 0)
+    lines.append(f"**폴더 내 파일 ({len(all_files)}개, 이미지 {img_count}개):**")
+    lines.append("")
+    for fname in all_files:
+        lines.append(f"- `{fname}`")
+    lines.append("")
+
+    # Camtek INI 정보
+    ini_files = d.get("ini_files", [])
+    has_ini = d.get("has_ini_sections", False)
+    if ini_files:
+        lines.append(f"**Camtek INI 파일:** {', '.join(f'`{f}`' for f in ini_files)}")
+        if has_ini:
+            keys = d.get("ini_section_keys", [])
+            lines.append(f"- INI section 수: {len(keys)}")
+            if keys:
+                preview = ", ".join(keys[:10])
+                suffix = f" ... 외 {len(keys) - 10}개" if len(keys) > 10 else ""
+                lines.append(f"- section 키 예시: `{preview}`{suffix}")
+        lines.append("")
+    else:
+        lines.append("**Camtek INI 파일:** 없음")
+        lines.append("")
+
+    # KLA info 정보
+    kla_file = d.get("kla_info_file")
+    if kla_file:
+        lines.append(f"**KLA info 파일:** `{kla_file}`")
+        pitch_y = d.get("kla_die_pitch_y")
+        tiff_count = d.get("kla_tiff_count", 0)
+        all_defect_count = d.get("kla_all_defect_count", 0)
+        lines.append(f"- DiePitchY: {pitch_y}")
+        lines.append(f"- TiffFileName 매핑 수: {tiff_count}")
+        lines.append(f"- 전체 DefectList 엔트리 수: {all_defect_count}")
+        lines.append("")
+        info_text = d.get("kla_info_text", "")
+        if info_text:
+            lines.append("<details><summary>KLA info 파일 내용 (펼치기)</summary>")
+            lines.append("")
+            lines.append("```")
+            lines.append(info_text)
+            lines.append("```")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+    else:
+        lines.append("**KLA info 파일:** 없음 (선택된 info 파일 없음)")
+        lines.append("")
+
+    return lines
 
 
 def write_parse_failure_report(

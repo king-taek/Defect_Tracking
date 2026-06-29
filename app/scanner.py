@@ -180,6 +180,7 @@ def _build_record_for_image(
     layer_folder: str,
     ini_sections: dict[str, dict[str, str]],
     kla_parsed,  # Optional[_ParsedInfo]
+    wafer_diag: dict,  # 폴더 레벨 진단 컨텍스트
 ) -> DefectRecord:
     name = image_path.name
     stem = image_path.stem
@@ -256,6 +257,7 @@ def _build_record_for_image(
             x=kla_res.x,
             y=kla_res.y,
             note=" | ".join(trail),
+            diag=wafer_diag,
         )
     trail.append("KLA: info 파일 없음")
 
@@ -268,7 +270,28 @@ def _build_record_for_image(
         source=Source.UNKNOWN,
         status=ParseStatus.NOT_FOUND,
         note=" | ".join(trail),
+        diag=wafer_diag,
     )
+
+
+def _read_info_text_safe(path: Path, limit: int = 4000) -> str:
+    """진단용: info 파일 텍스트를 읽되 크기를 제한한다."""
+    try:
+        from app.safety import read_only_bytes
+        raw = read_only_bytes(path)
+        for enc in ("utf-8", "cp949", "utf-16-le", "utf-16-be", "latin-1"):
+            try:
+                text = raw.decode(enc)
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        else:
+            text = raw.decode("latin-1", errors="replace")
+        if len(text) > limit:
+            return text[:limit] + f"\n... (총 {len(text)}자 중 {limit}자까지 표시)"
+        return text
+    except OSError:
+        return "(읽기 실패)"
 
 
 def _scan_wafer_folder(
@@ -288,16 +311,35 @@ def _scan_wafer_folder(
     kla_parsed = None
     kla_candidates = [n for n in filenames if Path(n).suffix.lower() != ".ini"]
     info_name = kla_info.select_info_file(kla_candidates)
+    info_text = ""
     if info_name:
+        info_path = wafer_dir / info_name
+        info_text = _read_info_text_safe(info_path)
         try:
-            kla_parsed = kla_info.load_info(wafer_dir / info_name)
+            kla_parsed = kla_info.load_info(info_path)
         except OSError:
             kla_parsed = None
+
+    # 진단용 폴더 컨텍스트(실패 record 에만 첨부)
+    wafer_diag: dict = {
+        "wafer_dir": str(wafer_dir),
+        "files_in_folder": filenames,
+        "image_count": len(image_files),
+        "ini_files": [f.name for f in ini_files],
+        "has_ini_sections": bool(ini_sections),
+        "ini_section_keys": sorted(ini_sections.keys())[:20] if ini_sections else [],
+        "kla_info_file": info_name,
+        "kla_info_text": info_text,
+        "kla_tiff_count": len(kla_parsed.defects) if kla_parsed else 0,
+        "kla_all_defect_count": len(kla_parsed.all_defects) if kla_parsed else 0,
+        "kla_die_pitch_y": kla_parsed.die_pitch_y if kla_parsed else None,
+    }
 
     wafer_id = wafer_dir.name
     return [
         _build_record_for_image(
-            img, wafer_id, layer, layer_folder, ini_sections, kla_parsed
+            img, wafer_id, layer, layer_folder, ini_sections, kla_parsed,
+            wafer_diag,
         )
         for img in image_files
     ]
