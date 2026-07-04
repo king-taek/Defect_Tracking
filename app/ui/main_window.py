@@ -549,7 +549,7 @@ class MainWindow(QMainWindow):
         try:
             from app import diagnostics
             return diagnostics.write_parse_failure_report(
-                self.settings.workspace_path,
+                self.settings.log_dir_path,
                 index.lot_name,
                 index.records,
                 getattr(index, "scan_errors", []),

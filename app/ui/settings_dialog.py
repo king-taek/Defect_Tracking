@@ -70,6 +70,10 @@ class SettingsDialog(QDialog):
         self.ed_output.setPlaceholderText("(비우면 작업공간/exports 사용)")
         form.addRow("출력 폴더", self._with_browse(self.ed_output, self._pick_output))
 
+        self.ed_log_dir = QLineEdit(self._settings.log_dir)
+        self.ed_log_dir.setPlaceholderText("(비우면 작업공간/logs 사용)")
+        form.addRow("로그 저장 경로", self._with_browse(self.ed_log_dir, self._pick_log_dir))
+
         self.spn_tol = QDoubleSpinBox()
         self.spn_tol.setRange(0.0, 100000.0)
         self.spn_tol.setDecimals(1)
@@ -155,12 +159,16 @@ class SettingsDialog(QDialog):
         ShortcutsDialog(self).exec()
 
     def _open_logs(self) -> None:
-        """진단/로그 폴더(workspace/logs)를 파일 탐색기로 연다."""
+        """진단/로그 폴더(로그 저장 경로, 비어 있으면 workspace/logs)를 파일 탐색기로 연다."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 
-        base = self.ed_workspace.text().strip() or self._settings.workspace
-        logs = Path(base) / "logs"
+        log_dir = self.ed_log_dir.text().strip()
+        if log_dir:
+            logs = Path(log_dir)
+        else:
+            base = self.ed_workspace.text().strip() or self._settings.workspace
+            logs = Path(base) / "logs"
         try:
             logs.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -233,15 +241,28 @@ class SettingsDialog(QDialog):
         if folder:
             self.ed_output.setText(folder)
 
+    def _pick_log_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "로그 저장 경로 선택", self.ed_log_dir.text() or self.ed_workspace.text()
+        )
+        if folder:
+            self.ed_log_dir.setText(folder)
+
     def _on_accept(self) -> None:
         workspace = self.ed_workspace.text().strip()
         output = self.ed_output.text().strip()
+        log_dir = self.ed_log_dir.text().strip()
         if not workspace:
             self._error("작업공간 폴더를 지정하세요.")
             return
-        # 원본 보호: 작업공간/출력이 현재 LOT 내부면 차단.
+        # 원본 보호: 작업공간/출력/로그 경로가 현재 LOT 내부면 차단.
         if self._current_lot:
-            for target, label in ((workspace, "작업공간"), (output or workspace, "출력")):
+            targets = (
+                (workspace, "작업공간"),
+                (output or workspace, "출력"),
+                (log_dir or workspace, "로그"),
+            )
+            for target, label in targets:
                 if conflicting_source(target, [self._current_lot]) is not None:
                     self._error(
                         f"{label} 폴더가 현재 LOT 폴더 내부에 있습니다. 원본 보호를 위해 "
@@ -268,6 +289,7 @@ class SettingsDialog(QDialog):
         """다이얼로그 입력을 반영한 설정(저장은 호출 측)."""
         self._settings.workspace = self.ed_workspace.text().strip()
         self._settings.output_folder = self.ed_output.text().strip()
+        self._settings.log_dir = self.ed_log_dir.text().strip()
         self._settings.tolerance = self.spn_tol.value()
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT

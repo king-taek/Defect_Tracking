@@ -94,7 +94,7 @@ def main() -> int:
     settings = AppSettings.load()
     _load_device_db(settings)
     config.set_active_product(settings.product)
-    logging_config.setup_logging(settings.workspace_path)
+    logging_config.setup_logging(settings.log_dir_path)
     logging_config.get_logger().info("애플리케이션 시작 (제품=%s)", settings.product)
 
     show_status(splash, "화면 구성 중...")

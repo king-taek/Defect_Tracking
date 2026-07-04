@@ -138,8 +138,27 @@ def test_product_profiles_default_and_switch():
 def test_setup_logging_idempotent(tmp_path):
     from app import logging_config
 
-    logger = logging_config.setup_logging(tmp_path / "ws")
+    log_dir = tmp_path / "ws" / "logs"
+    logger = logging_config.setup_logging(log_dir)
     n = len(logger.handlers)
-    logging_config.setup_logging(tmp_path / "ws")  # 두 번째 호출
+    logging_config.setup_logging(log_dir)  # 두 번째 호출
     assert len(logger.handlers) == n  # 핸들러 중복 추가 안 됨
-    assert (tmp_path / "ws" / "logs" / "conder.log").exists()
+    assert (log_dir / "conder.log").exists()
+
+
+def test_log_dir_path_falls_back_to_workspace_logs(tmp_path):
+    s = AppSettings(workspace=str(tmp_path / "ws"), log_dir="")
+    assert s.log_dir_path == tmp_path / "ws" / "logs"
+
+
+def test_log_dir_path_uses_explicit_setting(tmp_path):
+    custom = tmp_path / "custom-log"
+    s = AppSettings(workspace=str(tmp_path / "ws"), log_dir=str(custom))
+    assert s.log_dir_path == custom
+
+
+def test_default_log_dir_empty_on_non_windows():
+    from app import config
+
+    if config.os.name != "nt":
+        assert config.default_log_dir() == ""

@@ -183,6 +183,17 @@ def default_workspace() -> Path:
     return Path(base) / "ConderCompare"
 
 
+def default_log_dir() -> str:
+    """로그 전용 기본 경로(비어 있으면 workspace/logs 를 씀).
+
+    Windows 배포 환경에서만 지정된 고정 경로를 쓰고, 그 외(테스트/CI 등)에서는
+    빈 문자열로 두어 기존 workspace/logs 폴백을 그대로 따른다.
+    """
+    if os.name == "nt":
+        return r"C:\Users\304236\Desktop\Defect_Tracking-main\log"
+    return ""
+
+
 @dataclass
 class AppSettings:
     """사용자 설정. output workspace 내 settings.json에 저장된다."""
@@ -196,6 +207,7 @@ class AppSettings:
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(있으면 제품 목록 확장)
+    log_dir: str = field(default_factory=default_log_dir)  # 비어 있으면 workspace/logs 사용
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
     window_maximized: bool = True  # 시작 시 최대화(기본). 사용자가 해제하면 False 로 저장
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
@@ -216,6 +228,12 @@ class AppSettings:
         if self.output_folder:
             return Path(self.output_folder)
         return self.workspace_path / "exports"
+
+    @property
+    def log_dir_path(self) -> Path:
+        if self.log_dir:
+            return Path(self.log_dir)
+        return self.workspace_path / "logs"
 
     def settings_file(self) -> Path:
         return self.workspace_path / "settings.json"

@@ -32,8 +32,9 @@ def test_report_append_accumulates(tmp_path):
     ok = DefectRecord(image_path=Path("/x/c.jpg"), wafer_id="W1", layer="LYA4",
                       layer_folder="1. LYA4", status=ParseStatus.OK, col=1, row=1, x=0.0, y=0.0)
     recs.append(ok)
-    out = diagnostics.write_parse_failure_report(tmp_path, "LOT1", recs, ["/net/x: PermissionError"])
-    assert out == tmp_path / "logs" / "parse_failures.md"
+    log_dir = tmp_path / "logs"
+    out = diagnostics.write_parse_failure_report(log_dir, "LOT1", recs, ["/net/x: PermissionError"])
+    assert out == log_dir / "parse_failures.md"
     text = out.read_text(encoding="utf-8")
     assert "(2개)" in text
     assert "KLA 원본" in text
@@ -41,7 +42,7 @@ def test_report_append_accumulates(tmp_path):
     assert "실패: **2개**" in text
 
     # 두 번째 스캔 — 누적 추가되어 이전 내용도 보존
-    out2 = diagnostics.write_parse_failure_report(tmp_path, "LOT1", [ok])
+    out2 = diagnostics.write_parse_failure_report(log_dir, "LOT1", [ok])
     assert out2 == out
     text2 = out2.read_text(encoding="utf-8")
     assert "실패가 없습니다" in text2
@@ -52,7 +53,7 @@ def test_report_append_accumulates(tmp_path):
 def test_report_no_failures(tmp_path):
     ok = DefectRecord(image_path=Path("/x/c.jpg"), wafer_id="W1", layer="LYA4",
                       layer_folder="1. LYA4", status=ParseStatus.OK, col=1, row=1, x=0.0, y=0.0)
-    out = diagnostics.write_parse_failure_report(tmp_path, "LOT", [ok])
+    out = diagnostics.write_parse_failure_report(tmp_path / "logs", "LOT", [ok])
     assert "실패가 없습니다" in out.read_text(encoding="utf-8")
 
 
@@ -65,6 +66,6 @@ def test_report_rotates_at_25mb(tmp_path):
 
     ok = DefectRecord(image_path=Path("/x/c.jpg"), wafer_id="W1", layer="LYA4",
                       layer_folder="1. LYA4", status=ParseStatus.OK, col=1, row=1, x=0.0, y=0.0)
-    out = diagnostics.write_parse_failure_report(tmp_path, "LOT", [ok])
+    out = diagnostics.write_parse_failure_report(logs, "LOT", [ok])
     assert out == logs / "parse_failures_2.md"
     assert "실패가 없습니다" in out.read_text(encoding="utf-8")

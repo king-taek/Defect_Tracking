@@ -34,6 +34,8 @@ _HINTS = [
     ("die 위치 음수", "XINDEX/YINDEX 또는 제품 zero offset 이 맞지 않음 — 제품 프로파일을 "
                      "확인하세요."),
     ("필드 누락", "INI section 에 x/y/col/row 키가 부족 — INI 생성 설정을 확인하세요."),
+    ("미분류(class 0) 후보 이미지", "KLA 가 찍었지만 정식 결함으로 분류/등록하지 않은 후보 "
+                                   "이미지 — 실제 결함이 아니면 정상이며 무시해도 됩니다."),
 ]
 
 
@@ -211,11 +213,11 @@ def _pick_log_file(logs_dir: Path) -> Path:
 
 
 def write_parse_failure_report(
-    workspace_path: Path, lot_name: str, records: list[DefectRecord],
+    log_dir: Path, lot_name: str, records: list[DefectRecord],
     scan_errors: list[str] | None = None,
 ) -> Path:
-    """진단 리포트를 workspace/logs/parse_failures*.md 에 **누적 추가**하고 경로를 반환한다."""
-    logs = Path(workspace_path) / "logs"
+    """진단 리포트를 log_dir/parse_failures*.md 에 **누적 추가**하고 경로를 반환한다."""
+    logs = Path(log_dir)
     logs.mkdir(parents=True, exist_ok=True)
     out = _pick_log_file(logs)
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
