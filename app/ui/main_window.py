@@ -327,7 +327,7 @@ class MainWindow(QMainWindow):
         start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
         # 네이티브 탐색기 대신 앱 내 커스텀 폴더 트리 선택기를 사용한다.
         from app.ui.folder_picker import FolderPickerDialog
-        dlg = FolderPickerDialog(start, self.settings.recent_folders, self)
+        dlg = FolderPickerDialog(self.settings, start, self)
         if dlg.exec():
             folder = dlg.selected_path()
             if folder:

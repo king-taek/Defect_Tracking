@@ -274,17 +274,73 @@ def test_grid_rollback_base_top_left(win):
     assert (r, c) == (0, 0)
 
 
-def test_folder_picker_constructs(app, tmp_path):
-    from PySide6.QtWidgets import QFileSystemModel
-    from app.ui.folder_picker import FolderPickerDialog, _NoIconProvider
+def test_folder_picker_navigation_and_lists(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
 
-    (tmp_path / "sub").mkdir()
-    dlg = FolderPickerDialog(str(tmp_path), recent=[str(tmp_path)])
-    dlg._go_to(str(tmp_path / "sub"))
-    assert dlg.selected_path() == str(tmp_path / "sub")
-    # 성능: 파일시스템 워처 없음 + 빈 아이콘 프로바이더(네트워크 드라이브 렉 방지).
-    assert dlg.model.testOption(QFileSystemModel.DontWatchForChanges) is True
-    assert isinstance(dlg.model.iconProvider(), _NoIconProvider)
+    lot = generate(tmp_path / "src")  # tmp_path/src/<LOT_NAME>
+    root = lot.parent
+    s = AppSettings(workspace=str(tmp_path / "ws"), recent_folders=[str(lot)])
+    dlg = FolderPickerDialog(s, str(root))
+
+    # 목록에 LOT 폴더가 뜬다(한 단계 os.scandir).
+    names = [dlg.listw.item(i).data(0x0100) for i in range(dlg.listw.count())]
+    assert lot.name in names
+
+    # 진입/위로 네비게이션.
+    dlg._go_to(lot)
+    assert dlg._cur == lot
+    dlg._go_up()
+    assert dlg._cur == root
+    # 뒤로: 방금 위로 왔으니 history 로 lot 복귀.
+    dlg._go_back()
+    assert dlg._cur == lot
+
+
+def test_folder_picker_filter_hides_items(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+
+    root = tmp_path / "root"
+    (root / "AlphaLot").mkdir(parents=True)
+    (root / "BetaLot").mkdir()
+    dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(root))
+
+    dlg._apply_filter("alpha")
+    hidden = {
+        dlg.listw.item(i).data(0x0100): dlg.listw.item(i).isHidden()
+        for i in range(dlg.listw.count())
+    }
+    assert hidden.get("AlphaLot") is False
+    assert hidden.get("BetaLot") is True
+
+
+def test_folder_picker_favorite_toggle_persists(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+
+    (tmp_path / "root" / "sub").mkdir(parents=True)
+    s = AppSettings(workspace=str(tmp_path / "ws"))
+    dlg = FolderPickerDialog(s, str(tmp_path / "root"))
+    dlg._set_candidate(tmp_path / "root" / "sub")
+    dlg._toggle_favorite()
+    assert str(tmp_path / "root" / "sub") in s.favorite_folders
+    dlg._toggle_favorite()
+    assert str(tmp_path / "root" / "sub") not in s.favorite_folders
+
+
+def test_folder_picker_corrects_layer_to_material(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+
+    lot = generate(tmp_path / "src")
+    layer = next(p for p in lot.iterdir() if p.is_dir())  # 자재 아래 layer
+    s = AppSettings(workspace=str(tmp_path / "ws"))
+    dlg = FolderPickerDialog(s, str(lot))
+
+    # layer 폴더를 후보로 두면 선택 시 상위 자재로 보정된다.
+    dlg._set_candidate(layer)
+    assert dlg.selected_path() == str(lot)
+
+    # 자재 폴더 자체는 그대로.
+    dlg._set_candidate(lot)
+    assert dlg.selected_path() == str(lot)
 
 
 def test_theme_styles_item_views():

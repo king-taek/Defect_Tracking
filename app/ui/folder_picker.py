@@ -1,165 +1,473 @@
-"""앱 내 커스텀 폴더 선택 다이얼로그.
+"""자재(LOT) 폴더 선택 다이얼로그 — 브레드크럼 + 한 단계 목록 + 사이드바.
 
-윈도우 기본(네이티브) 폴더 탐색기 대신, 테마가 적용된 트리 탐색기로 자재 폴더를 고른다.
-디렉터리만 보이며, 경로 직접 입력·최근 폴더 바로가기를 지원한다. 원본은 읽기만 한다.
+성능: 현재 디렉터리의 하위 폴더 한 단계만 os.scandir 로 나열한다(트리·워처·재귀·셸 아이콘
+없음 → 네트워크 드라이브에서도 즉시). 명확함: 고른 폴더가 자재/layer/wafer 중 무엇인지,
+유효한지(layer·wafer 개수)를 하단 배너에 실시간 표시한다(scanner.classify_selection 을
+백그라운드로 실행). layer/wafer 를 골라도 선택 시 상위 자재 폴더로 보정한다.
+
+편의: 최근 폴더·즐겨찾기·드라이브 사이드바, 이름 타이핑 필터. 원본은 읽기만 한다.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QDir, Qt
-from PySide6.QtGui import QIcon
-
-try:  # Qt6: QFileSystemModel 은 QtGui 로 이동(배포판에 따라 QtWidgets 에도 존재)
-    from PySide6.QtGui import QFileSystemModel
-except ImportError:  # pragma: no cover
-    from PySide6.QtWidgets import QFileSystemModel  # type: ignore
-
+from PySide6.QtCore import (
+    QDir,
+    QObject,
+    QRunnable,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QFileIconProvider,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
-    QTreeView,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from app import scanner
 from app.ui import theme
 
+# 검증 배너 종류별 색(테마 팔레트 재사용).
+_BANNER_COLORS = {
+    "material": (theme.MATCH, "#10241b"),
+    "layerwafer": (theme.NEON, "#101a24"),
+    "too_high": (theme.WARN, "#241f10"),
+    "unknown": (theme.TEXT_DIM, theme.BG_ELEV),
+    "busy": (theme.TEXT_DIM, theme.BG_ELEV),
+    "none": (theme.TEXT_DIM, theme.BG_ELEV),
+}
 
-class _NoIconProvider(QFileIconProvider):
-    """빈 아이콘만 반환 — 항목마다의 셸 아이콘 조회(네트워크 드라이브에서 매우 느림)를 제거."""
 
-    def icon(self, _info) -> QIcon:  # noqa: N802
-        return QIcon()
+def _subdir_count(path: Path) -> int:
+    """path 바로 아래 폴더 수(싸게 os.scandir 1회)."""
+    n = 0
+    try:
+        with os.scandir(path) as it:
+            for e in it:
+                if e.is_dir():
+                    n += 1
+    except OSError:
+        return 0
+    return n
+
+
+def _first_subdir(path: Path) -> Optional[Path]:
+    try:
+        with os.scandir(path) as it:
+            names = sorted(e.name for e in it if e.is_dir())
+    except OSError:
+        return None
+    return path / names[0] if names else None
+
+
+class _ValidateSignals(QObject):
+    # token, kind, material_path, layer_count, wafer_count
+    done = Signal(int, str, str, int, int)
+
+
+class _ValidateWorker(QRunnable):
+    """후보 폴더를 백그라운드로 판별한다(classify_selection + 개수 계산).
+
+    UI 스레드를 막지 않도록 무거운 깊이 BFS 를 여기서 수행한다. 오래된 요청은 token 으로
+    UI 에서 무시한다.
+    """
+
+    def __init__(self, token: int, path: str):
+        super().__init__()
+        self.token = token
+        self.path = path
+        self.signals = _ValidateSignals()
+
+    @Slot()
+    def run(self) -> None:
+        kind, material = scanner.classify_selection(self.path)
+        layers = wafers = 0
+        try:
+            if material is not None and kind in ("material", "layer", "wafer"):
+                layers = _subdir_count(material)
+                first = _first_subdir(material)
+                if first is not None:
+                    wafers = _subdir_count(first)
+        except Exception:  # noqa: BLE001 - 개수는 부가 정보, 실패해도 판별은 전달
+            layers = wafers = 0
+        mat_str = str(material) if material is not None else ""
+        self.signals.done.emit(self.token, kind, mat_str, layers, wafers)
 
 
 class FolderPickerDialog(QDialog):
-    """디렉터리 트리로 폴더를 고르는 다이얼로그(테마 적용)."""
+    """자재 폴더 선택기. `settings` 로 최근·즐겨찾기를 읽고 고정 토글 시 저장한다."""
 
-    def __init__(
-        self,
-        start_path: str = "",
-        recent: Optional[list[str]] = None,
-        parent: Optional[QWidget] = None,
-    ):
+    def __init__(self, settings, start_path: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("자재 폴더 선택")
-        self.setMinimumSize(640, 520)
-        # 안전망: 다이얼로그에도 어두운 테마를 명시(아이템 뷰 흰 배경 방지).
-        self.setStyleSheet(
-            f"QDialog {{ background:{theme.BG}; }}"
-            f" QTreeView, QComboBox {{ background:{theme.BG_ELEV}; color:{theme.TEXT};"
-            f" border:1px solid {theme.NEON_SOFT}; border-radius:8px; }}"
-        )
-        self._recent = [p for p in (recent or []) if Path(p).exists()]
-        self._build()
-        if start_path and Path(start_path).exists():
-            self._go_to(start_path)
+        self.settings = settings
+        self.setWindowTitle("자재(LOT) 폴더 선택")
+        self.setMinimumSize(860, 560)
+        self.resize(980, 640)
 
-    def _build(self) -> None:
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 12)
-        outer.setSpacing(8)
+        self._pool = QThreadPool.globalInstance()
+        self._cur: Path = self._safe_dir(start_path)
+        self._history: list[Path] = []
+        self._candidate: Optional[Path] = None
+        # 마지막 검증 결과 캐시(candidate 경로 기준).
+        self._valid_for: Optional[Path] = None
+        self._valid_kind: str = ""
+        self._valid_material: str = ""
+        self._token = 0
 
-        title = QLabel("자재(LOT) 폴더를 선택하세요")
-        title.setObjectName("title")
-        outer.addWidget(title)
+        self._build_ui()
+        self._reload_sidebar()
+        self._go_to(self._cur, push=False)
 
-        # 경로 입력 + 이동
-        path_row = QHBoxLayout()
-        self.ed_path = QLineEdit()
-        self.ed_path.setPlaceholderText("경로를 직접 입력하고 Enter (또는 아래 트리에서 선택)")
-        self.ed_path.returnPressed.connect(lambda: self._go_to(self.ed_path.text().strip()))
-        path_row.addWidget(self.ed_path, 1)
-        btn_go = QPushButton("이동")
-        btn_go.clicked.connect(lambda: self._go_to(self.ed_path.text().strip()))
-        path_row.addWidget(btn_go)
-        outer.addLayout(path_row)
-
-        # 최근 폴더 바로가기(있을 때만)
-        if self._recent:
-            rec_row = QHBoxLayout()
-            rec_row.addWidget(QLabel("최근:"))
-            self.cmb_recent = QComboBox()
-            self.cmb_recent.addItem("최근 폴더 선택…", "")
-            for p in self._recent:
-                self.cmb_recent.addItem(p, p)
-            self.cmb_recent.activated.connect(self._on_recent)
-            rec_row.addWidget(self.cmb_recent, 1)
-            outer.addLayout(rec_row)
-
-        # 디렉터리 트리
-        self.model = QFileSystemModel(self)
-        # 성능: 파일시스템 워처 제거(네트워크 드라이브 렉의 핵심 원인) + 셸 아이콘 조회 제거.
+    # ----------------------------------------------------------- helpers
+    @staticmethod
+    def _safe_dir(path: str) -> Path:
         try:
-            self.model.setOption(QFileSystemModel.DontWatchForChanges, True)
-        except (AttributeError, TypeError):  # pragma: no cover - 배포판별 enum 차이
+            p = Path(path)
+            if p.exists() and p.is_dir():
+                return p
+        except OSError:
             pass
-        self.model.setIconProvider(_NoIconProvider())
-        self.model.setResolveSymlinks(False)
-        self.model.setFilter(QDir.Dirs | QDir.NoDotAndDotDot | QDir.Drives)
-        self.model.setRootPath("")
-        self.tree = QTreeView()
-        self.tree.setModel(self.model)
-        self.tree.setUniformRowHeights(True)  # 렌더 성능
-        # 이름 열만 보이게(크기/형식/날짜 숨김)
-        for col in range(1, self.model.columnCount()):
-            self.tree.hideColumn(col)
-        self.tree.setHeaderHidden(True)
-        self.tree.setAnimated(False)
-        self.tree.selectionModel().currentChanged.connect(self._on_tree_selection)
-        self.tree.doubleClicked.connect(lambda _idx: self.accept())
-        outer.addWidget(self.tree, 1)
+        return Path.home()
 
-        self.lbl_sel = QLabel("")
-        self.lbl_sel.setObjectName("dim")
-        self.lbl_sel.setStyleSheet("font-size:11px;")
-        self.lbl_sel.setWordWrap(True)
-        outer.addWidget(self.lbl_sel)
+    def _list_subdirs(self, path: Path) -> list[str]:
+        """한 단계 하위 폴더 이름만 나열(숨김 제외, 이름순). 네트워크에서도 가볍다."""
+        try:
+            with os.scandir(path) as it:
+                names = [e.name for e in it if e.is_dir() and not e.name.startswith(".")]
+        except OSError:
+            return []
+        return sorted(names, key=str.lower)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("선택")
-        buttons.button(QDialogButtonBox.Cancel).setText("취소")
-        self._ok_btn = buttons.button(QDialogButtonBox.Ok)
-        self._ok_btn.setEnabled(False)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        outer.addWidget(buttons)
+    # ----------------------------------------------------------- UI build
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
 
-    def _on_recent(self, idx: int) -> None:
-        path = self.cmb_recent.itemData(idx)
+        # 상단: 뒤로/위로 + 브레드크럼 + 경로 입력
+        topbar = QHBoxLayout()
+        topbar.setSpacing(6)
+        self.btn_back = QPushButton("‹ 뒤로")
+        self.btn_back.setFixedWidth(72)
+        self.btn_back.clicked.connect(self._go_back)
+        self.btn_up = QPushButton("↑ 위로")
+        self.btn_up.setFixedWidth(72)
+        self.btn_up.clicked.connect(self._go_up)
+        topbar.addWidget(self.btn_back)
+        topbar.addWidget(self.btn_up)
+
+        self._crumbs = QHBoxLayout()
+        self._crumbs.setSpacing(2)
+        crumb_host = QWidget()
+        crumb_host.setLayout(self._crumbs)
+        topbar.addWidget(crumb_host, 1)
+        root.addLayout(topbar)
+
+        self.ed_path = QLineEdit()
+        self.ed_path.setPlaceholderText("경로를 붙여넣고 Enter — 예: \\\\server\\share\\LOT")
+        self.ed_path.returnPressed.connect(self._on_path_entered)
+        root.addWidget(self.ed_path)
+
+        # 본문: 좌 사이드바 / 우 (필터 + 목록)
+        body = QHBoxLayout()
+        body.setSpacing(10)
+
+        self.sidebar = QListWidget()
+        self.sidebar.setFixedWidth(240)
+        self.sidebar.itemClicked.connect(self._on_sidebar_clicked)
+        body.addWidget(self.sidebar)
+
+        right = QVBoxLayout()
+        right.setSpacing(6)
+        self.ed_filter = QLineEdit()
+        self.ed_filter.setPlaceholderText("이 폴더 안에서 이름으로 거르기…")
+        self.ed_filter.setClearButtonEnabled(True)
+        self.ed_filter.textChanged.connect(self._apply_filter)
+        right.addWidget(self.ed_filter)
+
+        self.listw = QListWidget()
+        self.listw.itemClicked.connect(self._on_item_clicked)
+        self.listw.itemActivated.connect(self._on_item_activated)
+        self.listw.itemDoubleClicked.connect(self._on_item_activated)
+        right.addWidget(self.listw, 1)
+        body.addLayout(right, 1)
+        root.addLayout(body, 1)
+
+        # 하단: 검증 배너 + ★ 고정 + 취소/선택
+        self.banner = QLabel("폴더를 고르면 자재 여부를 여기서 확인합니다.")
+        self.banner.setWordWrap(True)
+        self.banner.setMinimumHeight(40)
+        self.banner.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.banner.setContentsMargins(10, 6, 10, 6)
+        self._set_banner("none", "폴더를 고르면 자재 여부를 여기서 확인합니다.")
+        root.addWidget(self.banner)
+
+        bottom = QHBoxLayout()
+        bottom.setSpacing(8)
+        self.btn_pin = QPushButton("☆ 즐겨찾기")
+        self.btn_pin.setFixedWidth(120)
+        self.btn_pin.clicked.connect(self._toggle_favorite)
+        bottom.addWidget(self.btn_pin)
+        bottom.addStretch(1)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        self.btn_ok = QPushButton("이 폴더 선택")
+        self.btn_ok.setDefault(True)
+        self.btn_ok.clicked.connect(self.accept)
+        bottom.addWidget(btn_cancel)
+        bottom.addWidget(self.btn_ok)
+        root.addLayout(bottom)
+
+        # 검증 디바운스 타이머
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(150)
+        self._debounce.timeout.connect(self._run_validation)
+
+    # ----------------------------------------------------------- sidebar
+    def _reload_sidebar(self) -> None:
+        self.sidebar.clear()
+
+        def _header(text: str) -> None:
+            it = QListWidgetItem(text)
+            it.setFlags(Qt.NoItemFlags)
+            it.setForeground(Qt.gray)
+            self.sidebar.addItem(it)
+
+        def _entry(label: str, path: str) -> None:
+            it = QListWidgetItem(label)
+            it.setData(Qt.UserRole, path)
+            it.setToolTip(path)
+            self.sidebar.addItem(it)
+
+        favs = [f for f in getattr(self.settings, "favorite_folders", []) if Path(f).exists()]
+        if favs:
+            _header("★ 즐겨찾기")
+            for f in favs:
+                _entry("★ " + Path(f).name, f)
+        recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
+        if recents:
+            _header("↻ 최근")
+            for f in recents:
+                _entry("📁 " + Path(f).name, f)
+        _header("💻 드라이브 · 홈")
+        _entry("🏠 홈", str(Path.home()))
+        for d in QDir.drives():
+            p = d.absoluteFilePath()
+            _entry("💾 " + p, p)
+
+    def _on_sidebar_clicked(self, item: QListWidgetItem) -> None:
+        path = item.data(Qt.UserRole)
         if path:
-            self._go_to(path)
+            self._go_to(self._safe_dir(path))
 
-    def _go_to(self, path: str) -> None:
-        if not path or not Path(path).exists():
-            return
-        index = self.model.index(path)
-        if not index.isValid():
-            return
-        self.tree.setCurrentIndex(index)
-        self.tree.scrollTo(index)
-        self.tree.expand(index)
+    # ----------------------------------------------------------- navigation
+    def _go_to(self, path: Path, push: bool = True) -> None:
+        path = self._safe_dir(str(path))
+        if push and path != self._cur:
+            self._history.append(self._cur)
+        self._cur = path
+        self.ed_path.setText(str(path))
+        self.ed_filter.clear()
+        self._populate_list()
+        self._rebuild_crumbs()
+        self.btn_back.setEnabled(bool(self._history))
+        self.btn_up.setEnabled(path.parent != path)
+        # 현재 폴더 자체를 후보로 삼아 자동 검증(자재로 바로 들어오면 즉시 확인).
+        self._set_candidate(path)
 
-    def _on_tree_selection(self, current, _previous) -> None:
-        # 모델 정보로 판단(네트워크 stat 최소화). filePath 는 캐시된 경로라 저렴하다.
-        is_dir = current.isValid() and self.model.isDir(current)
-        path = self.model.filePath(current) if is_dir else ""
-        self.ed_path.setText(path)
-        self.lbl_sel.setText(f"선택: {path}" if path else "")
-        self._ok_btn.setEnabled(is_dir)
+    def _go_up(self) -> None:
+        if self._cur.parent != self._cur:
+            self._go_to(self._cur.parent)
 
-    def selected_path(self) -> str:
-        idx = self.tree.currentIndex()
-        if idx.isValid() and self.model.isDir(idx):
-            return self.model.filePath(idx)
+    def _go_back(self) -> None:
+        if self._history:
+            prev = self._history.pop()
+            self._go_to(prev, push=False)
+
+    def _on_path_entered(self) -> None:
         text = self.ed_path.text().strip()
-        return text if text and Path(text).is_dir() else ""
+        if not text:
+            return
+        p = Path(text)
+        if p.exists() and p.is_dir():
+            self._go_to(p)
+        else:
+            self._set_banner("too_high", f"경로를 찾을 수 없습니다: {text}")
+
+    def _rebuild_crumbs(self) -> None:
+        while self._crumbs.count():
+            w = self._crumbs.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        parts = list(self._cur.parts)
+        acc = Path(parts[0]) if parts else self._cur
+        for i, part in enumerate(parts):
+            if i > 0:
+                acc = acc / part
+            label = part if part not in ("/", "\\") else "/"
+            btn = QPushButton(label)
+            btn.setFlat(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                f"QPushButton {{ border: none; padding: 2px 6px; color: {theme.NEON}; }}"
+                f"QPushButton:hover {{ color: {theme.TEXT}; text-decoration: underline; }}"
+            )
+            target = acc
+            btn.clicked.connect(lambda _=False, t=target: self._go_to(t))
+            self._crumbs.addWidget(btn)
+            if i < len(parts) - 1:
+                sep = QLabel("›")
+                sep.setStyleSheet(f"color: {theme.TEXT_DIM};")
+                self._crumbs.addWidget(sep)
+        self._crumbs.addStretch(1)
+
+    # ----------------------------------------------------------- list
+    def _populate_list(self) -> None:
+        self.listw.clear()
+        for name in self._list_subdirs(self._cur):
+            it = QListWidgetItem("📁 " + name)
+            it.setData(Qt.UserRole, name)
+            self.listw.addItem(it)
+        if self.listw.count() == 0:
+            it = QListWidgetItem("(하위 폴더 없음 — 이 폴더가 자재일 수 있습니다)")
+            it.setFlags(Qt.NoItemFlags)
+            it.setForeground(Qt.gray)
+            self.listw.addItem(it)
+
+    def _apply_filter(self, text: str) -> None:
+        needle = text.strip().lower()
+        for i in range(self.listw.count()):
+            it = self.listw.item(i)
+            name = it.data(Qt.UserRole)
+            if name is None:  # 안내/빈 항목은 그대로 둔다
+                continue
+            it.setHidden(bool(needle) and needle not in name.lower())
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        name = item.data(Qt.UserRole)
+        if name is None:
+            return
+        self._set_candidate(self._cur / name)
+
+    def _on_item_activated(self, item: QListWidgetItem) -> None:
+        name = item.data(Qt.UserRole)
+        if name is None:
+            return
+        self._go_to(self._cur / name)
+
+    # ----------------------------------------------------------- validation
+    def _set_candidate(self, path: Path) -> None:
+        self._candidate = path
+        self._update_pin_button()
+        self._set_banner("busy", f"‘{path.name or path}’ 확인 중…")
+        self._debounce.start()
+
+    def _run_validation(self) -> None:
+        if self._candidate is None:
+            return
+        self._token += 1
+        worker = _ValidateWorker(self._token, str(self._candidate))
+        worker.signals.done.connect(self._on_validated)
+        self._pool.start(worker)
+
+    @Slot(int, str, str, int, int)
+    def _on_validated(
+        self, token: int, kind: str, material: str, layers: int, wafers: int
+    ) -> None:
+        if token != self._token or self._candidate is None:
+            return  # 오래된 결과 무시
+        self._valid_for = self._candidate
+        self._valid_kind = kind
+        self._valid_material = material
+        name = self._candidate.name or str(self._candidate)
+        if kind == "material":
+            self._set_banner(
+                "material",
+                f"✓ 자재(LOT) 폴더 · layer {layers}개 · wafer {wafers}개",
+            )
+            self.btn_ok.setEnabled(True)
+        elif kind in ("layer", "wafer"):
+            mat_name = Path(material).name if material else "?"
+            self._set_banner(
+                "layerwafer",
+                f"{kind} 폴더 · 선택 시 자재 ‘{mat_name}’ 로 이동합니다"
+                f" (layer {layers}개 · wafer {wafers}개)",
+            )
+            self.btn_ok.setEnabled(True)
+        elif kind == "too_high":
+            self._set_banner(
+                "too_high",
+                f"‘{name}’ 는 상위(device) 폴더입니다 · 자재 폴더로 들어가세요",
+            )
+            self.btn_ok.setEnabled(False)
+        else:  # unknown
+            self._set_banner(
+                "unknown",
+                f"‘{name}’ 에서 이미지를 찾지 못함 · 그래도 선택할 수 있습니다",
+            )
+            self.btn_ok.setEnabled(True)
+
+    def _set_banner(self, kind: str, text: str) -> None:
+        fg, bg = _BANNER_COLORS.get(kind, _BANNER_COLORS["none"])
+        self.banner.setText(text)
+        self.banner.setStyleSheet(
+            f"QLabel {{ background-color: {bg}; color: {fg};"
+            f" border: 1px solid {fg}; border-radius: 6px; padding: 8px 10px; }}"
+        )
+
+    # ----------------------------------------------------------- favorites
+    def _update_pin_button(self) -> None:
+        target = self._candidate or self._cur
+        favs = list(getattr(self.settings, "favorite_folders", []))
+        if str(target) in favs:
+            self.btn_pin.setText("★ 고정됨")
+        else:
+            self.btn_pin.setText("☆ 즐겨찾기")
+
+    def _toggle_favorite(self) -> None:
+        target = str(self._candidate or self._cur)
+        favs = list(getattr(self.settings, "favorite_folders", []))
+        if target in favs:
+            favs.remove(target)
+        else:
+            favs.insert(0, target)
+        self.settings.favorite_folders = favs[:10]
+        try:
+            self.settings.save()
+        except Exception:  # noqa: BLE001 - 저장 실패해도 세션 내 반영은 유지
+            pass
+        self._reload_sidebar()
+        self._update_pin_button()
+
+    # ----------------------------------------------------------- result
+    def selected_path(self) -> str:
+        """선택 확정 시 반환할 자재 경로(보정 포함). 취소/부적합이면 빈 문자열."""
+        target = self._candidate or self._cur
+        # 마지막 검증이 현재 후보에 대한 것이면 캐시 사용, 아니면 동기 재판정.
+        if self._valid_for == target and self._valid_kind:
+            kind, material = self._valid_kind, self._valid_material
+        else:
+            k, m = scanner.classify_selection(target)
+            kind, material = k, (str(m) if m is not None else "")
+        if kind == "material":
+            return str(target)
+        if kind in ("layer", "wafer") and material:
+            return material
+        if kind == "unknown":
+            return str(target)
+        return ""  # too_high / none
