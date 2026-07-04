@@ -42,12 +42,17 @@ _ALL_WAFERS = "전체"
 _THUMB_PX = 150  # 상세 목록 썸네일 크기(고정)
 
 
+# 히트맵 die 색(배경 theme.BG 위에서 잘 보이도록 밝게). 배경/빈 die 와 구분된다.
+_HEAT_LO = QColor("#6fb0e0")   # 낮은 밀도(밝은 슬레이트블루)
+_HEAT_HI = QColor("#ff8a5c")   # 높은 밀도(밝은 코랄)
+
+
 def _heat_color(count: int, max_count: int) -> QColor:
-    """defect 개수를 밀도 색으로 변환(0=빈칸, 많을수록 진한 경고색)."""
+    """defect 개수를 밀도 색으로 변환(0=빈 die 톤, 많을수록 밝은 코랄)."""
     if count <= 0:
-        return QColor(theme.BG_ELEV)
-    lo = QColor(theme.NEON_DIM)   # 낮은 밀도(차분한 블루)
-    hi = QColor(theme.NOMATCH)    # 높은 밀도(경고 레드)
+        return QColor(theme.BG_ELEV)  # 빈 die: 배경(BG)보다 밝은 중간 톤
+    lo = _HEAT_LO
+    hi = _HEAT_HI
     if max_count <= 1:
         t = 1.0
     else:
@@ -65,7 +70,7 @@ class HeatmapWaferMap(QWidget):
     die 개수가 적으면(subdivide=True) 각 die 를 4×5 하위셀로 나눠 그린다.
     """
 
-    cell_clicked = Signal(object)  # HeatKey
+    selection_changed = Signal(object)  # list[HeatKey]
 
     _DIE_PX = 20          # 미분할 die 한 변
     _SUBCELL_PX = 9       # 하위셀 한 변
@@ -79,11 +84,23 @@ class HeatmapWaferMap(QWidget):
         self._subdivide = False
         self._density: dict[HeatKey, int] = {}
         self._max_count = 1
-        self._selected: Optional[HeatKey] = None
+        self._selected_keys: set[HeatKey] = set()
+        # 여러 die 선택(드래그 사각) 모드 + 러버밴드 상태.
+        self._multi = False
+        self._rubber_origin = None
+        self._rubber_cur = None
         # 그리기 원점(실좌표) — 내용 bounding box 좌상단을 (0,0) 픽셀에 맞춘다(맵 떠보임/잘림 방지).
         self._origin_col = 0
         self._origin_row = 0
         self.setToolTip("defect 밀도 — 색이 진할수록 defect 이 많음. 위치를 클릭하세요.")
+
+    def set_multi(self, on: bool) -> None:
+        self._multi = on
+        self._selected_keys = set()
+        self._rubber_origin = None
+        self._rubber_cur = None
+        self.update()
+        self.selection_changed.emit([])
 
     def _die_w(self) -> int:
         return heatmap.SUB_COLS * self._SUBCELL_PX if self._subdivide else self._DIE_PX
@@ -106,17 +123,15 @@ class HeatmapWaferMap(QWidget):
         self._subdivide = subdivide
         self._density = density
         self._max_count = max(density.values(), default=1)
-        self._selected = None
+        self._selected_keys = set()
+        self._rubber_origin = None
+        self._rubber_cur = None
         self._origin_col, self._origin_row = origin
         dw, dh = self._die_w(), self._die_h()
         self.setFixedSize(
             max(40, self._cols * (dw + self._GAP) + self._GAP),
             max(40, self._rows * (dh + self._GAP) + self._GAP),
         )
-        self.update()
-
-    def set_selected(self, key: Optional[HeatKey]) -> None:
-        self._selected = key
         self.update()
 
     def _die_origin(self, col: int, row: int) -> tuple[int, int]:
@@ -127,6 +142,8 @@ class HeatmapWaferMap(QWidget):
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
+        # 위젯 전체를 UI 어두운 배경으로 채운다(흰 배경 제거, die 색과 구분).
+        painter.fillRect(self.rect(), QColor(theme.BG))
         border = QColor(theme.NEON_SOFT)
         die_border = QColor(theme.BASE_GLOW)
         for dr in range(self._rows):
@@ -161,43 +178,99 @@ class HeatmapWaferMap(QWidget):
                 painter.setPen(QPen(border, 1))
                 painter.drawRect(rect)
 
-    def _paint_selection(self, painter) -> None:
-        if self._selected is None:
-            return
-        key = self._selected
-        if not (self._origin_col <= key.col < self._origin_col + self._cols
-                and self._origin_row <= key.row < self._origin_row + self._rows):
-            return
+    def _key_rect(self, key: HeatKey) -> QRect:
         ox, oy = self._die_origin(key.col, key.row)
-        painter.setPen(QPen(QColor(theme.NEON), 2))
         if self._subdivide and key.subdivided:
-            x = ox + key.sub_col * self._SUBCELL_PX
-            y = oy + key.sub_row * self._SUBCELL_PX
-            painter.drawRect(QRect(x, y, self._SUBCELL_PX, self._SUBCELL_PX).adjusted(0, 0, -1, -1))
+            return QRect(ox + key.sub_col * self._SUBCELL_PX,
+                         oy + key.sub_row * self._SUBCELL_PX,
+                         self._SUBCELL_PX, self._SUBCELL_PX)
+        return QRect(ox, oy, self._die_w(), self._die_h())
+
+    def _paint_selection(self, painter) -> None:
+        painter.setPen(QPen(QColor(theme.NEON), 2))
+        for key in self._selected_keys:
+            if not (self._origin_col <= key.col < self._origin_col + self._cols
+                    and self._origin_row <= key.row < self._origin_row + self._rows):
+                continue
+            painter.drawRect(self._key_rect(key).adjusted(0, 0, -1, -1))
+        # 드래그 러버밴드
+        if self._rubber_origin is not None and self._rubber_cur is not None:
+            rb = QRect(self._rubber_origin, self._rubber_cur).normalized()
+            painter.setPen(QPen(QColor(theme.NEON), 1, Qt.DashLine))
+            painter.drawRect(rb)
+
+    def _key_at(self, pos) -> Optional[HeatKey]:
+        dw, dh = self._die_w(), self._die_h()
+        dc = (pos.x() - self._GAP) // (dw + self._GAP)
+        dr = (pos.y() - self._GAP) // (dh + self._GAP)
+        if not (0 <= dc < self._cols and 0 <= dr < self._rows):
+            return None
+        col = int(dc) + self._origin_col
+        row = int(dr) + self._origin_row
+        if self._subdivide:
+            ox, oy = self._die_origin(col, row)
+            sc = min(heatmap.SUB_COLS - 1, max(0, (pos.x() - ox) // self._SUBCELL_PX))
+            sr = min(heatmap.SUB_ROWS - 1, max(0, (pos.y() - oy) // self._SUBCELL_PX))
+            key = HeatKey(col, row, int(sc), int(sr))
         else:
-            painter.drawRect(QRect(ox, oy, self._die_w(), self._die_h()).adjusted(0, 0, -1, -1))
+            key = HeatKey(col, row)
+        return key if self._density.get(key, 0) > 0 else None
+
+    def _keys_in_rect(self, rect: QRect) -> list[HeatKey]:
+        out = []
+        for key, cnt in self._density.items():
+            if cnt > 0 and self._key_rect(key).intersects(rect):
+                out.append(key)
+        return out
+
+    def _emit_selection(self) -> None:
+        keys = sorted(self._selected_keys,
+                      key=lambda k: (k.row, k.col, k.sub_row, k.sub_col))
+        self.selection_changed.emit(keys)
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() != Qt.LeftButton:
             return
         pos = event.position().toPoint()
-        dw, dh = self._die_w(), self._die_h()
-        dc = (pos.x() - self._GAP) // (dw + self._GAP)
-        dr = (pos.y() - self._GAP) // (dh + self._GAP)
-        if not (0 <= dc < self._cols and 0 <= dr < self._rows):
+        if self._multi:
+            self._rubber_origin = pos
+            self._rubber_cur = pos
+            self.update()
             return
-        col = int(dc) + self._origin_col
-        row = int(dr) + self._origin_row
-        ox, oy = self._die_origin(int(col), int(row))
-        if self._subdivide:
-            sc = min(heatmap.SUB_COLS - 1, max(0, (pos.x() - ox) // self._SUBCELL_PX))
-            sr = min(heatmap.SUB_ROWS - 1, max(0, (pos.y() - oy) // self._SUBCELL_PX))
-            key = HeatKey(int(col), int(row), int(sc), int(sr))
+        key = self._key_at(pos)
+        if key is not None:
+            self._selected_keys = {key}
+            self.update()
+            self._emit_selection()
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        if self._multi and self._rubber_origin is not None:
+            self._rubber_cur = event.position().toPoint()
+            self.update()
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        if event.button() != Qt.LeftButton or not self._multi:
+            return
+        if self._rubber_origin is None:
+            return
+        origin = self._rubber_origin
+        cur = self._rubber_cur or origin
+        rect = QRect(origin, cur).normalized()
+        if rect.width() < 4 and rect.height() < 4:
+            # 클릭: 단일 die 토글
+            key = self._key_at(origin)
+            if key is not None:
+                if key in self._selected_keys:
+                    self._selected_keys.discard(key)
+                else:
+                    self._selected_keys.add(key)
         else:
-            key = HeatKey(int(col), int(row))
-        if self._density.get(key, 0) > 0:
-            self.set_selected(key)
-            self.cell_clicked.emit(key)
+            # 사각 선택: 겹치는 die 를 누적 선택
+            self._selected_keys |= set(self._keys_in_rect(rect))
+        self._rubber_origin = None
+        self._rubber_cur = None
+        self.update()
+        self._emit_selection()
 
 
 class HeatmapDialog(QDialog):
@@ -212,6 +285,7 @@ class HeatmapDialog(QDialog):
         on_add_to_export: Callable[[list[int]], None],
         settings,
         current_wafer: Optional[str] = None,
+        records_by_layer: Optional[dict] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
@@ -221,11 +295,16 @@ class HeatmapDialog(QDialog):
         self._thumb_cache = thumb_cache
         self._on_add = on_add_to_export
         self._settings = settings
+        self._records_by_layer = records_by_layer or {}
         self.setWindowTitle("Defect 히트맵")
         self.setMinimumSize(900, 600)
 
         self._groups: dict[HeatKey, list[int]] = {}
-        self._selected_key: Optional[HeatKey] = None
+        self._selected_keys: list[HeatKey] = []  # 현재 선택된 위치(단일/다중)
+        self._show_all = False  # '전체 defect 보기' 토글
+        self._xr = (0.0, 1.0)   # die 내부 local 좌표 범위(subcell 판정용)
+        self._yr = (0.0, 1.0)
+        self._subdivide = False
 
         wafers = self._wafers()
         self._current_wafer = current_wafer if current_wafer in wafers else (
@@ -348,7 +427,7 @@ class HeatmapDialog(QDialog):
         map_scroll.setWidgetResizable(False)
         map_scroll.setAlignment(Qt.AlignCenter)
         map_scroll.setWidget(self._map)
-        self._map.cell_clicked.connect(self._on_cell_clicked)
+        self._map.selection_changed.connect(self._on_selection_changed)
         lay.addWidget(map_scroll, 1)
         self.lbl_map = QLabel("")
         self.lbl_map.setObjectName("dim")
@@ -367,9 +446,26 @@ class HeatmapDialog(QDialog):
         self.lbl_detail = QLabel("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
         self.lbl_detail.setObjectName("dim")
         head.addWidget(self.lbl_detail, 1)
+        # 여러 다이 선택(드래그 사각) 토글
+        self.btn_multi = QPushButton("여러 다이 선택")
+        self.btn_multi.setObjectName("mini")
+        self.btn_multi.setCheckable(True)
+        self.btn_multi.setToolTip("켜면 웨이퍼맵에서 드래그(사각)·클릭으로 여러 die 를 선택합니다.")
+        self.btn_multi.toggled.connect(self._on_multi_toggled)
+        head.addWidget(self.btn_multi, 0)
+        # 전체 defect 보기(매칭 없는 것 포함) 토글
+        self.btn_show_all = QPushButton("전체 defect 보기")
+        self.btn_show_all.setObjectName("mini")
+        self.btn_show_all.setCheckable(True)
+        self.btn_show_all.setToolTip(
+            "켜면 선택 위치의 모든 defect(선택 layer, 미매칭 포함)을 보여줍니다.\n"
+            "매칭된 것은 매치로 묶고, 나머지는 가로로 나열합니다."
+        )
+        self.btn_show_all.toggled.connect(self._on_show_all_toggled)
+        head.addWidget(self.btn_show_all, 0)
         self.btn_add_all = QPushButton("이 위치 전체 담기")
         self.btn_add_all.setObjectName("mini")
-        self.btn_add_all.setToolTip("이 위치의 defect 을 모두 출력 트레이에 담습니다.")
+        self.btn_add_all.setToolTip("선택 위치의 defect 을 모두 출력 트레이에 담습니다.")
         self.btn_add_all.clicked.connect(self._add_all_current)
         self.btn_add_all.setEnabled(False)
         head.addWidget(self.btn_add_all, 0)
@@ -390,8 +486,15 @@ class HeatmapDialog(QDialog):
     # ---- 웨이퍼맵 / 상호작용 ----------------------------------------
     def _on_wafer_changed(self, wafer: str) -> None:
         self._current_wafer = wafer
-        self._selected_key = None
+        self._selected_keys = []
         self._refresh_map()
+        self._rebuild_detail()
+
+    def _on_multi_toggled(self, on: bool) -> None:
+        self._map.set_multi(on)  # set_multi 가 selection_changed([]) 를 emit → 상세 초기화
+
+    def _on_show_all_toggled(self, on: bool) -> None:
+        self._show_all = on
         self._rebuild_detail()
 
     def _refresh_map(self) -> None:
@@ -400,8 +503,10 @@ class HeatmapDialog(QDialog):
         die_count = len(observed)
         subdivide = heatmap.should_subdivide(die_count)
         xr, yr = heatmap.local_ranges([r for _, r in entries])
+        self._xr, self._yr, self._subdivide = xr, yr, subdivide
         self._groups = heatmap.group_defects(entries, subdivide, xr, yr)
         density = {k: len(v) for k, v in self._groups.items()}
+        self._selected_keys = []
 
         prod = config.active_product()
         valid = None
@@ -435,10 +540,6 @@ class HeatmapDialog(QDialog):
             + (f"\n{caption}" if caption else "")
         )
 
-    def _on_cell_clicked(self, key: HeatKey) -> None:
-        self._selected_key = key
-        self._rebuild_detail()
-
     def _clear_detail(self) -> None:
         # 마지막 stretch 를 제외한 위젯 제거
         while self._detail_box.count() > 1:
@@ -448,22 +549,116 @@ class HeatmapDialog(QDialog):
                 w.setParent(None)
                 w.deleteLater()
 
+    def _on_selection_changed(self, keys) -> None:
+        self._selected_keys = list(keys)
+        self._rebuild_detail()
+
+    def _union_indices(self) -> list[int]:
+        """선택된 위치(단일/다중)의 base defect index 합집합(순서 유지, 중복 제거)."""
+        seen: set[int] = set()
+        out: list[int] = []
+        for k in self._selected_keys:
+            for bi in self._groups.get(k, []):
+                if bi not in seen:
+                    seen.add(bi)
+                    out.append(bi)
+        return out
+
+    def _key_for_record(self, rec) -> HeatKey:
+        if self._subdivide and rec.x is not None and rec.y is not None:
+            sc, sr = heatmap.subcell_of(rec.x, rec.y, self._xr, self._yr)
+            return HeatKey(int(rec.col), int(rec.row), sc, sr)
+        return HeatKey(int(rec.col), int(rec.row))
+
+    def _records_at_selection(self) -> list[tuple[str, object]]:
+        """선택 위치의 선택 layer(기준+체크 비교) 모든 defect record — (layer, record)."""
+        layers = [self._base_layer] + self._selected_compare_layers()
+        wafer = self._current_wafer
+        key_set = set(self._selected_keys)
+        out: list[tuple[str, object]] = []
+        for lyr in layers:
+            for rec in self._records_by_layer.get(lyr, []):
+                if not getattr(rec, "ok", False):
+                    continue
+                if wafer != _ALL_WAFERS and rec.wafer_id != wafer:
+                    continue
+                if rec.col is None or rec.row is None:
+                    continue
+                if self._key_for_record(rec) in key_set:
+                    out.append((lyr, rec))
+        return out
+
     def _rebuild_detail(self) -> None:
         self._clear_detail()
-        key = self._selected_key
-        indices = self._groups.get(key, []) if key else []
-        self.btn_add_all.setEnabled(bool(indices))
-        if not key:
+        indices = self._union_indices()
+        self.btn_add_all.setEnabled(bool(indices) or bool(self._selected_keys))
+        if not self._selected_keys:
             self.lbl_detail.setText("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
             return
-        loc = (f"die({key.col},{key.row})"
-               + (f" · 하위셀({key.sub_col},{key.sub_row})" if key.subdivided else ""))
-        self.lbl_detail.setText(f"{loc} — defect {len(indices)}개")
+        n_loc = len(self._selected_keys)
+        loc = (self._key_label(self._selected_keys[0]) if n_loc == 1
+               else f"{n_loc}개 위치")
         show_compares = self._selected_compare_layers()
+
+        # 매칭 있는 base defect 은 매치 행으로
+        shown_paths: set[str] = set()
         for bi in indices:
             self._detail_box.insertWidget(
                 self._detail_box.count() - 1, self._make_row(bi, show_compares)
             )
+            item = self.matches[bi]
+            shown_paths.add(str(item.base.image_path))
+            for lyr in show_compares:
+                mr = item.for_layer(lyr)
+                if mr and mr.is_match and mr.matched is not None:
+                    shown_paths.add(str(mr.matched.image_path))
+
+        extra_n = 0
+        if self._show_all:
+            # 매치로 안 묶인 나머지 defect(미매칭 base·비교) 을 가로 나열
+            extras = [
+                (lyr, rec) for lyr, rec in self._records_at_selection()
+                if str(rec.image_path) not in shown_paths
+            ]
+            extra_n = len(extras)
+            if extras:
+                self._detail_box.insertWidget(
+                    self._detail_box.count() - 1, self._make_flow_section(extras)
+                )
+
+        self.lbl_detail.setText(
+            f"{loc} — 매치 {len(indices)}건"
+            + (f" · 그 외 defect {extra_n}개" if self._show_all else "")
+        )
+
+    @staticmethod
+    def _key_label(key: HeatKey) -> str:
+        return (f"die({key.col},{key.row})"
+                + (f" · 하위셀({key.sub_col},{key.sub_row})" if key.subdivided else ""))
+
+    def _make_flow_section(self, extras: list[tuple[str, object]]) -> QWidget:
+        """매치로 안 묶인 defect 들을 layer 배지와 함께 가로(줄바꿈) 나열."""
+        from app.ui.flow_layout import FlowLayout
+
+        box = QFrame()
+        box.setObjectName("cell")
+        box.setStyleSheet(
+            f"QFrame#cell {{ background:{theme.BG_ELEV};"
+            f" border:1px solid {theme.NEON_SOFT}; border-radius:8px; }}"
+        )
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(8, 6, 8, 8)
+        outer.setSpacing(4)
+        cap = QLabel(f"그 외 defect (매치 없음) — {len(extras)}개")
+        cap.setObjectName("dim")
+        cap.setStyleSheet("font-size:10px;")
+        outer.addWidget(cap)
+        host = QWidget()
+        flow = FlowLayout(host, margin=0, h_spacing=8, v_spacing=8)
+        for lyr, rec in extras:
+            flow.addWidget(self._thumb_with_badge(rec.image_path, lyr))
+        outer.addWidget(host)
+        return box
 
     def _make_row(self, bi: int, show_compares: list[str]) -> QWidget:
         """한 defect 행 — 기준 + 매칭된 비교 layer 사진만 가로로 나열."""
@@ -539,7 +734,6 @@ class HeatmapDialog(QDialog):
 
     # ---- 출력 트레이 담기 -------------------------------------------
     def _add_all_current(self) -> None:
-        key = self._selected_key
-        indices = self._groups.get(key, []) if key else []
+        indices = self._union_indices()
         if indices:
-            self._on_add(list(indices))
+            self._on_add(indices)

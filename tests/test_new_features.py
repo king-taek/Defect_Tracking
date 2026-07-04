@@ -139,10 +139,47 @@ def test_heatmap_dialog_constructs_and_selects(win, app):
     assert dlg._groups, "defect 밀도 그룹이 있어야 한다"
     # 첫 셀 선택 → 상세 목록 구성(행 stretch 외 1개 이상) + 담기 동작
     key = next(iter(dlg._groups))
-    dlg._on_cell_clicked(key)
+    dlg._on_selection_changed([key])
     assert dlg._detail_box.count() >= 2  # 행 위젯 + stretch
     dlg._add_all_current()
     assert added, "이 위치 전체 담기가 트레이 콜백을 호출해야 한다"
+
+
+def test_heatmap_multi_select_union(win, app):
+    from app.ui.heatmap_dialog import HeatmapDialog
+
+    added = []
+    dlg = HeatmapDialog(
+        win.matches, win.top.base_layer(), win.top.compare_layers(),
+        win.thumb_cache, lambda idxs: added.extend(idxs), win.settings,
+        current_wafer=win.matches[0].base.wafer_id,
+    )
+    keys = list(dlg._groups.keys())
+    if len(keys) >= 2:
+        dlg._on_selection_changed(keys[:2])
+        expected = set(dlg._groups[keys[0]]) | set(dlg._groups[keys[1]])
+        assert set(dlg._union_indices()) == expected
+    # 다중 선택 토글 → 맵이 multi 모드
+    dlg.btn_multi.setChecked(True)
+    assert dlg._map._multi is True
+
+
+def test_heatmap_show_all_includes_unmatched(win, app):
+    """'전체 defect 보기'는 매칭 없는 defect 도 records_by_layer 에서 수집한다."""
+    from app.ui.heatmap_dialog import HeatmapDialog
+
+    rbl = win.lot_index.records_by_layer()
+    dlg = HeatmapDialog(
+        win.matches, win.top.base_layer(), win.top.compare_layers(),
+        win.thumb_cache, lambda idxs: None, win.settings,
+        current_wafer=win.matches[0].base.wafer_id, records_by_layer=rbl,
+    )
+    key = next(iter(dlg._groups))
+    dlg._on_selection_changed([key])
+    dlg.btn_show_all.setChecked(True)
+    # 선택 위치에서 선택 layer 의 record 를 실제로 수집한다(기준 defect 이 하나는 있음).
+    recs = dlg._records_at_selection()
+    assert any(lyr == dlg._base_layer for lyr, _ in recs)
 
 
 def test_heatmap_all_wafers_aggregates(win, app):
@@ -205,6 +242,45 @@ def test_wafer_map_bbox_normalized_no_margin_or_clip(win, app):
         config.set_active_product(prod0)
         config.PRODUCTS.pop("TESTDISC_NORM", None)
         win._align_cache.clear()
+
+
+def test_excel_no_top_item_header(win, app, tmp_path):
+    """엑셀 상단 '항목' 컬럼 헤더 행이 제거됐다(블록마다 Layer 행 사용)."""
+    from app.export.excel_report import export_excel
+    from openpyxl import load_workbook
+
+    out = tmp_path / "o.xlsx"
+    sel = win.matches[:2]
+    export_excel(out, lot_name="L", base_layer=win.top.base_layer(),
+                 compare_layers=win.top.compare_layers(), tolerance=100.0,
+                 selected=sel, thumb_cache=win.thumb_cache,
+                 source_roots=[win.lot_index.lot_path])
+    wb = load_workbook(out)
+    ws = wb.active
+    firsts = {row[0] for row in ws.iter_rows(values_only=True) if row}
+    assert "항목" not in firsts
+    assert "Layer" in firsts  # 블록별 Layer 행은 있다
+
+
+def test_grid_rollback_base_top_left(win):
+    # 항목 5 롤백: 기준 셀이 압축 배치의 (0,0)에 온다.
+    win.top.spn_tol.setValue(100000.0)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    win._goto(0)
+    gl = win.grid._grid
+    base_cell = win.grid._cells[win.grid._base_layer]
+    r, c, _, _ = gl.getItemPosition(gl.indexOf(base_cell))
+    assert (r, c) == (0, 0)
+
+
+def test_folder_picker_constructs(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+
+    (tmp_path / "sub").mkdir()
+    dlg = FolderPickerDialog(str(tmp_path), recent=[str(tmp_path)])
+    dlg._go_to(str(tmp_path / "sub"))
+    assert dlg.selected_path() == str(tmp_path / "sub")
 
 
 def test_heatmap_subdivide_small_die_count(app):

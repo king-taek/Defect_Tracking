@@ -325,9 +325,13 @@ class MainWindow(QMainWindow):
     def _choose_folder(self) -> None:
         last = self.settings.last_lot_folder
         start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "자재 폴더 선택", start)
-        if folder:
-            self._open_folder(folder)
+        # 네이티브 탐색기 대신 앱 내 커스텀 폴더 트리 선택기를 사용한다.
+        from app.ui.folder_picker import FolderPickerDialog
+        dlg = FolderPickerDialog(start, self.settings.recent_folders, self)
+        if dlg.exec():
+            folder = dlg.selected_path()
+            if folder:
+                self._open_folder(folder)
 
     def _open_folder(self, folder: str) -> None:
         """선택 폴더의 구조 레벨을 판별해 자재 폴더로 보정하거나 재선택을 안내한다.
@@ -699,6 +703,9 @@ class MainWindow(QMainWindow):
         current_wafer = None
         if 0 <= self.current < len(self.matches):
             current_wafer = self.matches[self.current].base.wafer_id
+        records_by_layer = (
+            self.lot_index.records_by_layer() if self.lot_index else {}
+        )
         dlg = HeatmapDialog(
             self.matches,
             self.top.base_layer(),
@@ -707,6 +714,7 @@ class MainWindow(QMainWindow):
             self._add_indices_to_export,
             self.settings,
             current_wafer=current_wafer,
+            records_by_layer=records_by_layer,
             parent=self,
         )
         dlg.exec()

@@ -111,20 +111,7 @@ def export_excel(
     ws.row_dimensions[r].height = 20
     r += 2
 
-    # ---- 컬럼 헤더 (기준 / 비교 layer) ----
-    _set_cell(ws, r, 1, "항목", bold=True, color="FFFFFFFF", fill=_NAVY, align="center")
-    for ci, name in enumerate(columns):
-        is_base = ci == 0
-        _set_cell(
-            ws, r, 2 + ci,
-            ("★ " + name) if is_base else name,
-            bold=True,
-            color="FFFFFFFF",
-            fill=_NEON if is_base else _NAVY,
-            align="center",
-        )
-    ws.row_dimensions[r].height = 20
-    r += 1
+    # 상단 컬럼 헤더 행은 두지 않는다 — 블록마다 'Layer' 행으로 이미 표기하므로 중복이다(항목 1).
 
     # ---- 각 기준 defect 블록 ----
     for idx, item in enumerate(selected, start=1):

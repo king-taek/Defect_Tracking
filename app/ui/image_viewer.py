@@ -122,9 +122,11 @@ class ImageViewerDialog(QDialog):
         if self._image.isNull():
             self._canvas.setText("이미지를 불러올 수 없습니다.")
         else:
-            # 클릭-드래그로 화면 이동(항목 6): 캔버스에서 마우스 이벤트를 받는다.
+            # 클릭-드래그로 화면 이동: 캔버스에서 마우스 이벤트를 받는다.
             self._canvas.setCursor(Qt.OpenHandCursor)
             self._canvas.installEventFilter(self)
+            # 휠은 스크롤이 아니라 항상 줌으로만 동작하도록 뷰포트/캔버스에서 가로챈다.
+            self._scroll.viewport().installEventFilter(self)
         self._scroll.setWidget(self._canvas)
         outer.addWidget(self._scroll, 1)
 
@@ -193,8 +195,15 @@ class ImageViewerDialog(QDialog):
 
     # ---- 클릭-드래그 패닝(항목 6) --------------------------------------
     def eventFilter(self, obj, event):  # noqa: N802
-        """캔버스에서 좌클릭 드래그를 스크롤(화면 이동)으로 변환한다."""
+        """휠=줌 전용, 캔버스 좌클릭 드래그=화면 이동."""
         from PySide6.QtCore import QEvent
+
+        # 휠은 스크롤 영역이 먹어 스크롤되지 않도록 가로채 항상 줌으로만 처리한다.
+        if event.type() == QEvent.Wheel and not self._image.isNull():
+            delta = event.angleDelta().y()
+            if delta != 0:
+                self._zoom(1.2 if delta > 0 else 1 / 1.2)
+            return True
 
         if obj is self._canvas and not self._image.isNull():
             et = event.type()
