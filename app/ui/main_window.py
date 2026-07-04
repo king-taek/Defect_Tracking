@@ -1011,7 +1011,10 @@ class MainWindow(QMainWindow):
         cols = max(prod.kla_package_x_count, max_col + 1)
         rows = max(prod.kla_package_y_count, max_row + 1)
         current = (item.base.col, item.base.row)
-        self.wafer_map.set_data(cols, rows, states, current, valid=valid)
+        # 실제 관측(매칭)된 die 는 DB 고정 모양(valid) 밖이어도 항상 그린다 — 그렇지 않으면
+        # 정합 후 모양 밖으로 나온 새 die 가 격자만 커지고 색칠 없이 사라져 보인다.
+        paint_valid = (valid | observed) if valid is not None else None
+        self.wafer_map.set_data(cols, rows, states, current, valid=paint_valid)
         self.lbl_wafer.setText(caption)
         self.wafer_map.setToolTip(
             "웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동"
@@ -1076,6 +1079,9 @@ class MainWindow(QMainWindow):
         config.set_active_product(s.product)
         # 제품/DB 가 바뀌면 die_map 이 달라지므로 웨이퍼 맵 정합 캐시를 무효화한다.
         self._align_cache.clear()
+        # 다음 네비게이션까지 기다리지 않고 지금 바로 새 제품 기준으로 다시 그린다.
+        if self.matches:
+            self._goto(self.current)
         # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
         if s.workspace != old_workspace or s.output_folder != old_output:
             s.ensure_workspace()

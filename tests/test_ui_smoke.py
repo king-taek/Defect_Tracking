@@ -356,6 +356,80 @@ def test_wafer_map_updates(win):
     assert (item.base.col, item.base.row) in win.wafer_map._states
 
 
+def test_wafer_map_paints_observed_die_outside_device_shape(win):
+    """DB die_map 밖이어도 실제 관측(매칭)된 die 는 그려져야 한다(회귀).
+
+    device_db 기반 제품의 die_map 이 실제 관측 die 범위를 다 담지 못하면(예:
+    zeroX/zeroY 실측 계산으로 col/row 범위가 넓어진 경우), 정합은 성공하되
+    관측 die 하나가 die_map 밖에 남을 수 있다 — 이 die 도 지워지지 않고 그려져야 한다.
+    """
+    from app import config
+
+    item = win.matches[0]
+    wafer = item.base.wafer_id
+    observed = {
+        (m.base.col, m.base.row)
+        for m in win.matches
+        if m.base.wafer_id == wafer and m.base.col is not None and m.base.row is not None
+    }
+    assert len(observed) >= 2, "샘플 데이터에 wafer 당 die 가 2개 이상 있어야 테스트 가능"
+    missing = sorted(observed)[0]
+    partial_die_map = frozenset(observed - {missing})  # 관측 die 중 하나를 뺀 DB 모양
+
+    prod = config.active_product()
+    config.PRODUCTS["TESTDEV_PARTIAL"] = config.ProductConfig(
+        key="TESTDEV_PARTIAL", name="Test Partial Device",
+        camtek_pitch_x=prod.camtek_pitch_x, camtek_pitch_y=prod.camtek_pitch_y,
+        kla_package_x_count=prod.kla_package_x_count,
+        kla_package_y_count=prod.kla_package_y_count,
+        die_map=partial_die_map, source="db",
+    )
+    try:
+        config.set_active_product("TESTDEV_PARTIAL")
+        win._align_cache.clear()
+        win._update_wafer_map(item)
+        # 정합이 성공해 die_map 클리핑이 실제로 적용되는 시나리오인지 확인.
+        assert win.wafer_map._valid is not None
+        # 수정 전에는 missing die 가 valid 밖이라 그려지지 않았을 것 — 이제는 포함돼야 한다.
+        assert missing in win.wafer_map._valid
+        assert missing in win.wafer_map._states
+    finally:
+        config.set_active_product(prod.key)
+        config.PRODUCTS.pop("TESTDEV_PARTIAL", None)
+        win._align_cache.clear()
+
+
+def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
+    """설정에서 제품을 바꾸면 다음 네비게이션을 기다리지 않고 바로 다시 그려야 한다."""
+    from app import config
+    from app.config import ProductConfig
+    from app.ui.settings_dialog import SettingsDialog
+
+    prod = config.active_product()
+    other_key = "TESTDEV_SWITCH"
+    config.PRODUCTS[other_key] = ProductConfig(
+        key=other_key, name="Test Switch Device",
+        camtek_pitch_x=prod.camtek_pitch_x, camtek_pitch_y=prod.camtek_pitch_y,
+        kla_package_x_count=prod.kla_package_x_count + 3,
+        kla_package_y_count=prod.kla_package_y_count + 3,
+    )
+    try:
+        before_cols = win.wafer_map._cols
+        # 다이얼로그가 새 제품으로 초기화되도록 미리 설정한 뒤, 모달을 띄우지 않고
+        # 바로 accept 된 것처럼 흉내 낸다(exec() monkeypatch — 실제 _open_settings() 호출).
+        win.settings.product = other_key
+        monkeypatch.setattr(SettingsDialog, "exec", lambda self: True)
+        win._open_settings()
+        assert config.active_product().key == other_key
+        # 더 큰 package 크기를 쓰는 제품으로 바꿨으니 격자가 즉시(다음 네비게이션 전에) 커져야 한다.
+        assert win.wafer_map._cols >= before_cols + 3
+    finally:
+        config.set_active_product(prod.key)
+        config.PRODUCTS.pop(other_key, None)
+        win._align_cache.clear()
+        win._goto(win.current)
+
+
 def test_jump_to_die(win):
     win._goto(2)
     cur_wafer = win.matches[win.current].base.wafer_id
