@@ -14,11 +14,15 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
 
 def main() -> int:
+    # 번들 디바이스 DB 를 함께 포함(런타임에 config.bundled_device_db_path 가 찾음).
+    # Windows 는 add-data 구분자로 ';', 그 외는 ':' 를 쓴다.
+    sep = ";" if os.name == "nt" else ":"
     cmd = [
         sys.executable,
         "-m",
@@ -29,6 +33,8 @@ def main() -> int:
         "--windowed",
         "--name",
         "ConderCompare",
+        "--add-data",
+        f"data{os.sep}AOIDeviceDB.xlsx{sep}data",
         "main.py",
     ]
     print("실행:", " ".join(cmd))

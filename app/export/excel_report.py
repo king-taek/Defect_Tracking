@@ -145,6 +145,22 @@ def export_excel(
         ws.row_dimensions[r].height = 18
         r += 1
 
+        # Layer 이름 행 — 각 사진마다 어떤 layer 인지 블록마다 반복 표기(항목 8).
+        layer_names = [base_layer] + compare_layers
+        _set_cell(ws, r, 1, "Layer", bold=True, align="center", fill=_LIGHT)
+        for ci, name in enumerate(layer_names):
+            is_base = ci == 0
+            _set_cell(
+                ws, r, 2 + ci,
+                ("★ " + name + " (기준)") if is_base else name,
+                bold=True,
+                color="FFFFFFFF",
+                fill=_NEON if is_base else _NAVY,
+                align="center",
+            )
+        ws.row_dimensions[r].height = 18
+        r += 1
+
         # 이미지 행
         _set_cell(ws, r, 1, "이미지", bold=True, align="center", fill=_LIGHT)
         ws.row_dimensions[r].height = _IMG_ROW_HEIGHT

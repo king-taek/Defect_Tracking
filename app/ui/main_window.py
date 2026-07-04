@@ -42,8 +42,9 @@ from app.scanner import LotIndex
 from app.session import SessionStore
 from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
-from app.ui.controls import NavBar, NoScrollComboBox, SideBar
-from app.ui.export_dialog import ExportSelectDialog
+from app.ui.controls import NavBar, SideBar
+from app.ui.export_dialog import ExportTrayDialog
+from app.ui.heatmap_dialog import HeatmapDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
@@ -83,8 +84,10 @@ class MainWindow(QMainWindow):
         # 정답 도구(reference_gate) 모드로도 매칭해 현재 모드와 비교(사용자 요청).
         self._matches_reference: list[BaseDefectMatches] = []
         self._reference_diff: list[tuple[int, BaseDefectMatches, BaseDefectMatches]] = []
-        # 보기 필터: matched(기본, 매칭 0인 후보 제외) / all / unmatched / full
+        # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
+        # 출력 담기 트레이(항목 1): 현재 matches 기준 base index 목록. 기준/새 LOT 시 초기화.
+        self._export_tray: list[int] = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
         self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
@@ -212,6 +215,16 @@ class MainWindow(QMainWindow):
         self.btn_ref_diff.clicked.connect(self._open_reference_diff)
         self.btn_ref_diff.setEnabled(False)
         strip_row.addWidget(self.btn_ref_diff, 0, Qt.AlignVCenter)
+        # defect 히트맵 보기(항목 4) — 웨이퍼맵에 defect 밀도를 표시하고 위치별 비교.
+        self.btn_heatmap = QPushButton("히트맵\n보기")
+        self.btn_heatmap.setFixedSize(96, 96)
+        self.btn_heatmap.setToolTip(
+            "defect 밀도 히트맵을 새 창으로 엽니다. 위치를 클릭하면 그 자리의 defect 들을 "
+            "layer 별로 나란히 비교하고 출력에 담을 수 있습니다."
+        )
+        self.btn_heatmap.clicked.connect(self._open_heatmap)
+        self.btn_heatmap.setEnabled(False)
+        strip_row.addWidget(self.btn_heatmap, 0, Qt.AlignVCenter)
         # 웨이퍼 맵 + 캡션(디바이스/정합 안내)을 세로로 묶는다.
         wafer_box = QVBoxLayout()
         wafer_box.setContentsMargins(0, 0, 0, 0)
@@ -231,26 +244,33 @@ class MainWindow(QMainWindow):
         self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
-        # 보기 필터: 매칭만(기본) / 전체 / 미매칭 있는 것만 / 완전 매칭만 (triage)
-        self.cmb_filter = NoScrollComboBox()
-        self.cmb_filter.addItem("매칭만", "matched")
-        self.cmb_filter.addItem("전체", "all")
-        self.cmb_filter.addItem("미매칭 있음", "unmatched")
-        self.cmb_filter.addItem("완전 매칭", "full")
-        self.cmb_filter.setToolTip(
-            "탐색 대상 기준 사진을 매칭 상태로 거릅니다.\n"
-            "· 매칭만: 어떤 비교 layer 와도 매칭 안 된 사진을 후보에서 제외(기본)\n"
-            "· 전체: 모든 기준 사진 표시\n"
-            "· 미매칭 있음: 하나라도 매칭 안 된 layer 가 있는 사진만\n"
-            "· 완전 매칭: 선택한 비교 layer 전부와 매칭된 사진만"
+        # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 어떤 비교 layer 와도 매칭 안 된
+        # 기준 사진은 항상 후보에서 제외한다.
+        # 항목 9 에서 비운 자리에 '출력에 추가'(트레이 담기) 버튼을 둔다(항목 1).
+        self.btn_add_export = QPushButton("＋ 출력에 추가")
+        self.btn_add_export.setObjectName("mini")
+        self.btn_add_export.setToolTip(
+            "현재 기준 사진을 출력 목록(트레이)에 담습니다. (A)\n"
+            "담은 것들은 '결과 출력' 시 함께 Excel 로 나옵니다."
         )
-        self.cmb_filter.currentIndexChanged.connect(self._on_filter_changed)
-        self.nav.add_widget(self.cmb_filter)
+        self.btn_add_export.clicked.connect(self._add_current_to_export)
+        self.btn_add_export.setEnabled(False)
+        self.nav.add_widget(self.btn_add_export)
+        # 상단 썸네일 확대율 표시 + 조절(항목 7)
+        self.btn_thumb_zoom = QPushButton("")
+        self.btn_thumb_zoom.setObjectName("mini")
+        self.btn_thumb_zoom.setToolTip(
+            "상단 매치 썸네일의 확대율을 조절합니다.\n"
+            "사진 중앙 일부만 잘라 확대해 보여주며, 값이 작을수록 더 크게 확대됩니다."
+        )
+        self.btn_thumb_zoom.clicked.connect(self._adjust_thumbnail_zoom)
+        self.nav.add_widget(self.btn_thumb_zoom)
         self.lbl_view = QLabel("")
         self.lbl_view.setObjectName("dim")
         self.nav.add_widget(self.lbl_view)
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
+        self._update_thumb_zoom_label()
 
         # 진행바 + 중단 버튼(스캔 중에만 표시)
         progress_row = QHBoxLayout()
@@ -319,6 +339,7 @@ class MainWindow(QMainWindow):
                   activated=lambda: self.top._set_all_compares(False))
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
         QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
+        QShortcut(QKeySequence(Qt.Key_A), self, activated=self._add_current_to_export)
         QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
 
     def _apply_saved_prefs(self) -> None:
@@ -393,6 +414,8 @@ class MainWindow(QMainWindow):
             return
         if key and key != config._active_product:
             config.set_active_product(key)
+            # 빌트인(die_map 없음)으로 인식됐으면 같은 크기의 DB die_map 제품으로 승격.
+            config.ensure_die_map_product()
             prod = config.active_product()
             if prod.source == "db":
                 self.banner.show_message(
@@ -650,6 +673,7 @@ class MainWindow(QMainWindow):
         self.top.set_match_summary("")
         self._update_nomatch_button()
         self._update_reference_diff_button()
+        self._clear_export_tray()
         rec = self._recommended_base()
         hint = f"  (추천: {rec})" if rec else ""
         self.grid.show_empty(f"기준 layer 를 선택하세요.{hint}")
@@ -670,6 +694,8 @@ class MainWindow(QMainWindow):
         self.base_records = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
+        # 기준 layer/LOT 가 바뀌면 base index 의미가 달라지므로 출력 트레이를 초기화한다.
+        self._clear_export_tray()
         self._compute_matches()
 
         # 썸네일 스트립(기준 layer 에만 의존 → 여기서만 재구성)
@@ -694,6 +720,7 @@ class MainWindow(QMainWindow):
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
             self.wafer_map.clear()
         self._refresh_strip_marks()
+        self._update_add_export_button()
 
     def _rematch(self, rebuild_grid: bool) -> None:
         """비교 토글/허용오차 변경: 재매칭. 현재 인덱스는 유지(범위 clamp)."""
@@ -761,6 +788,25 @@ class MainWindow(QMainWindow):
         dlg = ReferenceDiffDialog(self._reference_diff, self.thumb_cache, self._goto, self)
         dlg.exec()
 
+    def _open_heatmap(self) -> None:
+        if not self.matches:
+            self.banner.show_message("먼저 자재 폴더와 기준 layer 를 선택하세요.", "info")
+            return
+        current_wafer = None
+        if 0 <= self.current < len(self.matches):
+            current_wafer = self.matches[self.current].base.wafer_id
+        dlg = HeatmapDialog(
+            self.matches,
+            self.top.base_layer(),
+            self.top.compare_layers(),
+            self.thumb_cache,
+            self._add_indices_to_export,
+            self.settings,
+            current_wafer=current_wafer,
+            parent=self,
+        )
+        dlg.exec()
+
     def _get_match_indices(self, compare_layers, rbl):
         """(lot, 비교 layer 집합) 기준으로 die/실패 인덱스를 캐시·재사용한다."""
         sig = (id(self.lot_index), tuple(compare_layers))
@@ -809,7 +855,9 @@ class MainWindow(QMainWindow):
         items = [(i, r.image_path) for i, r in enumerate(self.base_records)]
         if not items:
             return
-        worker = ThumbnailWorker(self.thumb_cache, items)
+        worker = ThumbnailWorker(
+            self.thumb_cache, items, center_ratio=self._thumbnail_center_ratio()
+        )
         token = self._scan_token
         worker.signals.ready.connect(
             lambda i, p, t=token: self.strip.set_thumbnail(i, p)
@@ -823,6 +871,79 @@ class MainWindow(QMainWindow):
         self.settings.tolerance = self.top.tolerance()
         self.settings.base_layer = self.top.base_layer()
         self.settings.compare_layers = self.top.compare_layers()
+
+    # ------------------------------------------------- 썸네일 확대율(항목 7)
+    def _thumbnail_center_ratio(self) -> float:
+        """상단 썸네일 중앙 crop 비율(설정값, 0.02~1.0 로 clamp)."""
+        r = getattr(self.settings, "thumbnail_center_ratio", None)
+        if r is None:
+            r = config.THUMBNAIL_CENTER_RATIO
+        return max(0.02, min(1.0, float(r)))
+
+    def _update_thumb_zoom_label(self) -> None:
+        ratio = self._thumbnail_center_ratio()
+        zoom = config.zoom_from_ratio(ratio)
+        self.btn_thumb_zoom.setText(f"🔍 중앙 {ratio * 100:.0f}% · ≈{zoom}×")
+
+    def _adjust_thumbnail_zoom(self) -> None:
+        """썸네일 확대율(중앙 crop 배율)을 사용자에게 물어 조절한다."""
+        cur_zoom = config.zoom_from_ratio(self._thumbnail_center_ratio())
+        value, ok = QInputDialog.getInt(
+            self,
+            "썸네일 확대율",
+            "상단 매치 썸네일 확대율(×)을 입력하세요.\n"
+            f"현재: 약 {cur_zoom}× (값이 클수록 더 크게 확대).\n"
+            "권장 1~20 (예: 5 = 사진 중앙 20% 를 잘라 확대).",
+            value=cur_zoom,
+            minValue=1,
+            maxValue=50,
+        )
+        if not ok:
+            return
+        self.settings.thumbnail_center_ratio = round(1.0 / max(1, value), 4)
+        try:
+            self.settings.save()
+        except OSError:
+            pass
+        self._update_thumb_zoom_label()
+        # 새 배율로 상단 썸네일 재생성(캐시 키에 배율이 포함되어 자동 구분됨).
+        if self.base_records:
+            self._start_thumbnails()
+        self.banner.show_message(f"썸네일 확대율을 약 {value}× 로 바꿨습니다.", "success",
+                                 timeout_ms=2000)
+
+    # ------------------------------------------------- 출력 담기 트레이(항목 1)
+    def _add_current_to_export(self) -> None:
+        if not self.matches or not (0 <= self.current < len(self.matches)):
+            self.banner.show_message("담을 기준 사진이 없습니다.", "info")
+            return
+        self._add_indices_to_export([self.current])
+
+    def _add_indices_to_export(self, indices: list[int]) -> None:
+        """주어진 base index 들을 출력 트레이에 담는다(중복 무시)."""
+        added = 0
+        for i in indices:
+            if 0 <= i < len(self.matches) and i not in self._export_tray:
+                self._export_tray.append(i)
+                added += 1
+        self._update_add_export_button()
+        if added:
+            self.banner.show_message(
+                f"출력 목록에 {added}장 담았습니다. (현재 {len(self._export_tray)}장)",
+                "success", timeout_ms=2000,
+            )
+        else:
+            self.banner.show_message("이미 담긴 사진입니다.", "info", timeout_ms=1500)
+
+    def _clear_export_tray(self) -> None:
+        self._export_tray = []
+        self._update_add_export_button()
+
+    def _update_add_export_button(self) -> None:
+        n = len(self._export_tray)
+        self.btn_add_export.setText(f"＋ 출력에 추가 ({n})" if n else "＋ 출력에 추가")
+        self.btn_add_export.setEnabled(bool(self.matches))
+        self.btn_heatmap.setEnabled(bool(self.matches))
 
     # ------------------------------------------------------------ 탐색
     def _goto(self, index: int) -> None:
@@ -949,21 +1070,6 @@ class MainWindow(QMainWindow):
                 self._goto(i)
                 return
         self._goto(targets[0])  # 끝까지 없으면 처음으로 순환
-
-    def _on_filter_changed(self) -> None:
-        self._filter = self.cmb_filter.currentData() or "all"
-        self._view_cache = None
-        if not self.matches:
-            self._refresh_view_count()
-            return
-        view = self._view_indices()
-        self.strip.set_visible_set(view)
-        self._refresh_view_count()
-        # 현재 항목이 필터에서 벗어나면 첫 대상으로 이동, 아니면 번호만 갱신
-        if self.current not in view:
-            self._step(1)
-        else:
-            self._goto(self.current)
 
     def _refresh_view_count(self) -> None:
         if self._filter == "all" or not self.matches:
@@ -1125,14 +1231,21 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         s = dlg.updated_settings()
-        # 디바이스 DB 경로가 지정되면 읽어 제품 목록을 갱신한 뒤 활성 제품 적용.
-        if s.device_db_path:
-            try:
-                from app.device_db import load_device_db
-                config.register_devices(load_device_db(s.device_db_path))
-            except Exception:  # noqa: BLE001
-                self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
+        # 디바이스 DB 를 다시 읽어 제품 목록을 갱신한 뒤 활성 제품 적용.
+        # 경로가 지정되면 그 경로를, 비면 번들 DB 를 자동으로 읽는다(하드코딩 금지).
+        try:
+            from pathlib import Path as _P
+
+            from app.device_db import load_device_db
+            db_path = _P(s.device_db_path) if s.device_db_path else None
+            if db_path is None or not db_path.exists():
+                db_path = config.bundled_device_db_path()
+            if db_path is not None:
+                config.register_devices(load_device_db(db_path))
+        except Exception:  # noqa: BLE001
+            self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
         config.set_active_product(s.product)
+        config.ensure_die_map_product()
         # 제품/DB 가 바뀌면 die_map 이 달라지므로 웨이퍼 맵 정합 캐시를 무효화한다.
         self._align_cache.clear()
         # 다음 네비게이션까지 기다리지 않고 지금 바로 새 제품 기준으로 다시 그린다.
@@ -1237,12 +1350,30 @@ class MainWindow(QMainWindow):
         if not self.matches:
             self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
             return
-        dlg = ExportSelectDialog(self.matches, self.current, self.thumb_cache, self)
+        # 트레이가 비어 있으면 현재 사진을 담도록 유도(빈 출력 방지).
+        if not self._export_tray:
+            self.banner.show_message(
+                "출력 목록이 비었습니다. '＋ 출력에 추가'(A)로 사진을 먼저 담아 주세요.",
+                "info",
+                action_text="현재 사진 담기",
+                action=self._add_current_to_export,
+                timeout_ms=6000,
+            )
+            return
+        # 담긴 index 중 현재 matches 범위 내인 것만(안전) 유지하며 카드 다이얼로그 표시.
+        entries = [
+            (i, self.matches[i]) for i in self._export_tray
+            if 0 <= i < len(self.matches)
+        ]
+        dlg = ExportTrayDialog(entries, self.thumb_cache, self)
         if not dlg.exec():
             return
         indices = dlg.selected_indices()
+        # 다이얼로그에서 제거한 결과를 트레이에 반영(다음 출력에도 유지).
+        self._export_tray = list(indices)
+        self._update_add_export_button()
         if not indices:
-            self.banner.show_message("선택된 기준 사진이 없습니다.", "info")
+            self.banner.show_message("출력할 사진이 없습니다.", "info")
             return
 
         default_dir = str(self.settings.exports_path)

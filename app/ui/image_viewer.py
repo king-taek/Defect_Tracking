@@ -41,6 +41,11 @@ class ImageViewerDialog(QDialog):
         self.resize(960, 760)
         self._scale = 1.0
         self._fit = True
+        # 클릭-드래그 패닝 상태(항목 6)
+        self._panning = False
+        self._pan_start = None  # QPoint (뷰포트 좌표)
+        self._pan_h0 = 0
+        self._pan_v0 = 0
 
         self._image = self._load(record.image_path)
         self._build()
@@ -116,6 +121,10 @@ class ImageViewerDialog(QDialog):
         self._canvas.setAlignment(Qt.AlignCenter)
         if self._image.isNull():
             self._canvas.setText("이미지를 불러올 수 없습니다.")
+        else:
+            # 클릭-드래그로 화면 이동(항목 6): 캔버스에서 마우스 이벤트를 받는다.
+            self._canvas.setCursor(Qt.OpenHandCursor)
+            self._canvas.installEventFilter(self)
         self._scroll.setWidget(self._canvas)
         outer.addWidget(self._scroll, 1)
 
@@ -181,6 +190,32 @@ class ImageViewerDialog(QDialog):
         if delta != 0:
             self._zoom(1.2 if delta > 0 else 1 / 1.2)
             event.accept()
+
+    # ---- 클릭-드래그 패닝(항목 6) --------------------------------------
+    def eventFilter(self, obj, event):  # noqa: N802
+        """캔버스에서 좌클릭 드래그를 스크롤(화면 이동)으로 변환한다."""
+        from PySide6.QtCore import QEvent
+
+        if obj is self._canvas and not self._image.isNull():
+            et = event.type()
+            if et == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._panning = True
+                self._pan_start = event.globalPosition().toPoint()
+                self._pan_h0 = self._scroll.horizontalScrollBar().value()
+                self._pan_v0 = self._scroll.verticalScrollBar().value()
+                self._canvas.setCursor(Qt.ClosedHandCursor)
+                return True
+            if et == QEvent.MouseMove and self._panning and self._pan_start is not None:
+                delta = event.globalPosition().toPoint() - self._pan_start
+                self._scroll.horizontalScrollBar().setValue(self._pan_h0 - delta.x())
+                self._scroll.verticalScrollBar().setValue(self._pan_v0 - delta.y())
+                return True
+            if et == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self._panning = False
+                self._pan_start = None
+                self._canvas.setCursor(Qt.OpenHandCursor)
+                return True
+        return super().eventFilter(obj, event)
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)

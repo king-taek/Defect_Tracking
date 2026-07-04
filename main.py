@@ -25,21 +25,30 @@ def _check_dependencies() -> list[str]:
 
 
 def _load_device_db(settings) -> None:
-    """설정에 디바이스 DB 경로가 있으면 읽어 제품 목록에 병합한다(실패 무시)."""
+    """디바이스 DB 를 읽어 제품 목록에 병합한다(실패 무시).
+
+    설정에 경로가 있으면 그 경로를, 없으면 앱과 함께 배포되는 번들 DB
+    (data/AOIDeviceDB.xlsx)를 자동으로 읽는다. DB 를 하드코딩하지 않고 항상 파일에서
+    읽어 와 웨이퍼맵 die 위치가 DB 기준으로 표시되도록 한다.
+    """
     from pathlib import Path
 
+    from app import config
+
     path = getattr(settings, "device_db_path", "")
-    if not path or not Path(path).exists():
+    db_path = Path(path) if path else None
+    if db_path is None or not db_path.exists():
+        db_path = config.bundled_device_db_path()  # 번들 DB 자동 로드
+    if db_path is None:
         return
     try:
-        from app import config
         from app.device_db import load_device_db
 
-        config.register_devices(load_device_db(path))
+        config.register_devices(load_device_db(db_path))
     except Exception:  # noqa: BLE001 - DB 로드 실패는 치명적이지 않음
         from app import logging_config
 
-        logging_config.get_logger().exception("디바이스 DB 로드 실패: %s", path)
+        logging_config.get_logger().exception("디바이스 DB 로드 실패: %s", db_path)
 
 
 def main() -> int:
@@ -94,6 +103,9 @@ def main() -> int:
     settings = AppSettings.load()
     _load_device_db(settings)
     config.set_active_product(settings.product)
+    # 빌트인 폴백(die_map 없음) 대신 같은 패키지 크기의 DB die_map 제품으로 승격 →
+    # 웨이퍼맵이 기본적으로 실제 die 모양으로 표시되도록.
+    config.ensure_die_map_product()
     logging_config.setup_logging(settings.log_dir_path)
     logging_config.get_logger().info("애플리케이션 시작 (제품=%s)", settings.product)
 

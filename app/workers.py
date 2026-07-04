@@ -63,12 +63,13 @@ class ThumbnailSignals(QObject):
 
 
 class ThumbnailWorker(QRunnable):
-    """기준 record 들의 중앙 10% 썸네일을 백그라운드에서 생성한다."""
+    """기준 record 들의 중앙 crop 썸네일을 백그라운드에서 생성한다(확대율은 center_ratio)."""
 
-    def __init__(self, cache, items: list[tuple[int, Path]]):
+    def __init__(self, cache, items: list[tuple[int, Path]], center_ratio: float | None = None):
         super().__init__()
         self.cache = cache
         self.items = items
+        self.center_ratio = center_ratio
         self.signals = ThumbnailSignals()
         self._cancelled = False
 
@@ -82,7 +83,10 @@ class ThumbnailWorker(QRunnable):
             if self._cancelled:
                 return None
             try:
-                thumb = self.cache.get_center_thumbnail(path)
+                if self.center_ratio is not None:
+                    thumb = self.cache.get_center_thumbnail(path, self.center_ratio)
+                else:
+                    thumb = self.cache.get_center_thumbnail(path)
             except Exception:  # noqa: BLE001 - 개별 실패는 건너뛴다
                 _log.exception("썸네일 생성 실패: %s", path)
                 return None

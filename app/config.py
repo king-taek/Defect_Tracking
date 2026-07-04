@@ -92,6 +92,27 @@ def set_active_product(key: str) -> None:
         _active_product = key
 
 
+def ensure_die_map_product() -> None:
+    """활성 제품에 die_map 이 없으면(빌트인 폴백) 같은 패키지 크기의 DB 제품으로 승격한다.
+
+    DB 자동 로드 직후 호출한다. 빌트인 제품(die_map 비어 사각 표시)만 있을 때에도, DB 에
+    같은 패키지(X×Y) 크기의 die_map 이 있으면 그 DB 제품을 활성화해 웨이퍼맵이 기본적으로
+    실제 die 모양으로 뜨게 한다. 사용자가 이미 die_map 있는 제품을 고른 경우엔 건드리지 않는다.
+    """
+    cur = active_product()
+    if cur.die_map:
+        return
+    for key, prod in PRODUCTS.items():
+        if (
+            prod.source == "db"
+            and prod.die_map
+            and prod.kla_package_x_count == cur.kla_package_x_count
+            and prod.kla_package_y_count == cur.kla_package_y_count
+        ):
+            set_active_product(key)
+            return
+
+
 def match_product_for_path(lot_path) -> tuple[str | None, int]:
     """자재(LOT) 경로 구성요소에서 등록 제품을 자동 인식한다.
 
@@ -159,8 +180,16 @@ UPDATE_BRANCH = "main"
 DEFAULT_TOLERANCE = 100.0
 
 # 상단 썸네일은 사진 중앙 일부 구간만 확대 (Section 8.6) - 중앙 비율
-THUMBNAIL_CENTER_RATIO = 0.10
+# 0.20 = 중앙 20% 를 잘라 ≈5× 확대(값이 작을수록 더 크게 확대). 사용자 설정으로 조절 가능.
+THUMBNAIL_CENTER_RATIO = 0.20
 THUMBNAIL_SIZE = 140
+
+
+def zoom_from_ratio(ratio: float) -> int:
+    """중앙 crop 비율(0<r≤1)을 대략적인 확대 배율로 환산(표시용). 0.20→5, 0.10→10."""
+    if ratio <= 0:
+        return 1
+    return max(1, round(1.0 / ratio))
 
 # Layer 비교 그리드 기본 배치 (Section 8.4). 2열 그리드, 위에서 아래로.
 DEFAULT_LAYER_GRID = [
@@ -186,6 +215,32 @@ def default_workspace() -> Path:
     return Path(base) / "ConderCompare"
 
 
+def bundled_device_db_path() -> Path | None:
+    """앱과 함께 배포되는 기본 디바이스 DB(data/AOIDeviceDB.xlsx) 경로.
+
+    사용자가 별도 DB 경로를 지정하지 않았을 때 자동 로드용으로 쓴다(원본은 read-only).
+    - 소스 실행: 리포지토리 루트의 data/AOIDeviceDB.xlsx
+    - PyInstaller onefile: sys._MEIPASS/data/AOIDeviceDB.xlsx
+    찾지 못하면 None.
+    """
+    import sys
+
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "data" / "AOIDeviceDB.xlsx")
+    # config.py -> app/ -> repo root
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates.append(repo_root / "data" / "AOIDeviceDB.xlsx")
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c
+        except OSError:
+            continue
+    return None
+
+
 def default_log_dir() -> str:
     """로그 전용 기본 경로(비어 있으면 workspace/logs 를 씀).
 
@@ -209,7 +264,9 @@ class AppSettings:
     compare_layers: list[str] = field(default_factory=list)
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
-    device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(있으면 제품 목록 확장)
+    device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(비면 번들 DB 자동 로드)
+    thumbnail_center_ratio: float = THUMBNAIL_CENTER_RATIO  # 상단 썸네일 중앙 crop 비율(확대율)
+    heatmap_layout: int = 0  # 히트맵 팝업 레이아웃 프리셋 인덱스(마지막 선택 기억)
     log_dir: str = field(default_factory=default_log_dir)  # 비어 있으면 workspace/logs 사용
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
     window_maximized: bool = True  # 시작 시 최대화(기본). 사용자가 해제하면 False 로 저장
