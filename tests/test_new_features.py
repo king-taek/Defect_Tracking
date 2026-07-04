@@ -192,7 +192,7 @@ def test_heatmap_all_wafers_aggregates(win, app):
     # '전체' wafer 항목이 콤보 맨 앞에 있고, 선택 시 모든 wafer 를 집계한다.
     assert dlg.cmb_wafer.itemText(0) == _ALL_WAFERS
     dlg._on_wafer_changed(_ALL_WAFERS)
-    all_entries = dlg._current_entries()
+    all_entries = dlg._base_entries()
     total = sum(1 for m in win.matches
                 if m.base.col is not None and m.base.row is not None
                 and m.base.col >= 0 and m.base.row >= 0)
@@ -365,3 +365,120 @@ def test_heatmap_subdivide_small_die_count(app):
     matches = [mk(0, 0, 0, 0), mk(0, 0, 90, 90), mk(1, 1, 0, 0), mk(2, 2, 0, 0)]
     dlg = HeatmapDialog(matches, "LYA4", [], None, lambda idxs: None, AppSettings())
     assert dlg._map._subdivide is True
+
+
+# ---- 8차: 히트맵 모드/드래그/클러스터 · 폴더트리 · 출력 · 도움말 ----
+
+def _make_heatmap(win):
+    from app.ui.heatmap_dialog import HeatmapDialog
+    return HeatmapDialog(
+        win.matches, win.top.base_layer(), win.top.compare_layers(),
+        win.thumb_cache, lambda idxs: None, win.settings,
+        records_by_layer=win.lot_index.records_by_layer(),
+    )
+
+
+def test_heatmap_default_wafer_is_all(win, app):
+    from app.ui.heatmap_dialog import _ALL_WAFERS
+    dlg = _make_heatmap(win)
+    assert dlg._current_wafer == _ALL_WAFERS
+    assert dlg.cmb_wafer.currentText() == _ALL_WAFERS
+
+
+def test_heatmap_toggle_button_text_on_off(win, app):
+    dlg = _make_heatmap(win)
+    assert "OFF" in dlg.btn_show_all.text()
+    dlg.btn_show_all.setChecked(True)
+    assert "ON" in dlg.btn_show_all.text()
+    dlg.btn_multi.setChecked(True)
+    assert "ON" in dlg.btn_multi.text()
+
+
+def test_heatmap_show_all_map_density_is_superset(win, app):
+    # 전체 defect 모드의 맵 entries 는 매치만(기준 defect)보다 많다(다층 defect 포함).
+    dlg = _make_heatmap(win)
+    base_n = len(dlg._map_entries())      # 매치만: 기준 defect
+    dlg._show_all = True
+    all_n = len(dlg._map_entries())        # 전체: 선택 layer 모든 defect
+    assert all_n >= base_n
+    assert all_n > base_n
+
+
+def test_heatmap_matched_only_hides_unmatched(win, app):
+    dlg = _make_heatmap(win)
+    dlg._selected_keys = list(dlg._groups.keys())
+    dlg._show_all = False
+    dlg._rebuild_detail()
+    # 담기 대상(=매치만 상세에 표시되는 기준)은 전부 매칭된 것.
+    assert dlg._add_targets == [bi for bi in dlg._add_targets if dlg._is_matched(bi)]
+    assert all(dlg._is_matched(bi) for bi in dlg._add_targets)
+
+
+def test_heatmap_map_caption_shows_mode(win, app):
+    dlg = _make_heatmap(win)
+    assert "매치만" in dlg.lbl_map.text()
+    dlg.btn_show_all.setChecked(True)
+    assert "전체 defect" in dlg.lbl_map.text()
+
+
+def test_heatmap_drag_box_selects_without_multi(win, app):
+    import types
+    from PySide6.QtCore import QPoint, Qt as _Qt
+    dlg = _make_heatmap(win)
+    m = dlg._map
+    assert m._multi is False
+    dense = [k for k, c in m._density.items() if c > 0]
+    if not dense:
+        return  # 데이터 없으면 skip
+    # 위젯 전체를 감싸는 드래그 → 밀도>0 die 다중 선택(멀티 off 에서도)
+    m._rubber_origin = QPoint(0, 0)
+    m._rubber_cur = QPoint(m.width(), m.height())
+    m._dragging = True
+    m.mouseReleaseEvent(types.SimpleNamespace(button=lambda: _Qt.LeftButton))
+    assert len(m._selected_keys) >= 1
+
+
+def test_heatmap_show_all_builds_cross_layer_detail(win, app):
+    dlg = _make_heatmap(win)
+    dlg.btn_show_all.setChecked(True)
+    keys = list(dlg._groups.keys())
+    if not keys:
+        return
+    dlg._selected_keys = keys[:2]
+    dlg._rebuild_detail()
+    txt = dlg.lbl_detail.text()
+    assert ("교차매치" in txt) or ("개별" in txt)
+
+
+def test_folder_picker_tree_lazy_expand_and_click(app, tmp_path):
+    from PySide6.QtCore import Qt as _Qt
+    from app.ui.folder_picker import FolderPickerDialog
+
+    (tmp_path / "root" / "childA").mkdir(parents=True)
+    (tmp_path / "root" / "childB").mkdir()
+    dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
+    node = dlg._make_dir_node(dlg.sidebar.invisibleRootItem(), "root", str(tmp_path / "root"))
+    assert node.childCount() == 1  # 더미(펼침 화살표)
+    dlg._on_tree_expanded(node)
+    paths = [node.child(i).data(0, _Qt.UserRole) for i in range(node.childCount())]
+    assert any(p.endswith("childA") for p in paths)
+    dlg._on_tree_clicked(node)
+    assert dlg._cur == (tmp_path / "root")
+
+
+def test_export_dialog_has_visible_confirm_button(app):
+    from app.ui.export_dialog import ExportTrayDialog
+    dlg = ExportTrayDialog([], None, None)
+    assert hasattr(dlg, "btn_export")
+    assert dlg.btn_export.text() == "Excel 출력"
+    assert dlg.btn_export.isEnabled() is False  # 빈 트레이 → 비활성(존재는 함)
+
+
+def test_help_dialog_has_sections_and_features(app):
+    from app.ui.help_dialog import ShortcutsDialog, _FEATURES, _SHORTCUT_GROUPS
+    dlg = ShortcutsDialog()
+    assert dlg.windowTitle() == "도움말"
+    assert len(_SHORTCUT_GROUPS) >= 3
+    names = [n for n, _ in _FEATURES]
+    assert any("히트맵" in n for n in names)
+    assert any("클러스터" in n for n in names)

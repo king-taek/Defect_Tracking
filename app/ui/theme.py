@@ -97,6 +97,14 @@ QPushButton#mini {{
     font-size: 11px;
     border-radius: 8px;
 }}
+/* 토글(checkable) mini 버튼이 켜지면 네온 배경으로 확실히 구분 */
+QPushButton#mini:checked {{
+    background-color: {NEON_DIM};
+    border: 1px solid {NEON};
+    color: {TEXT};
+    font-weight: 700;
+}}
+QPushButton#mini:checked:hover {{ background-color: {NEON}; }}
 
 /* 스크롤 영역은 기본 흰 배경 대신 투명(뒤 패널이 비치게) */
 QScrollArea {{ background: transparent; border: none; }}

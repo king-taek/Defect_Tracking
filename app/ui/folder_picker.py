@@ -34,6 +34,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -186,9 +188,12 @@ class FolderPickerDialog(QDialog):
         body = QHBoxLayout()
         body.setSpacing(10)
 
-        self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(240)
-        self.sidebar.itemClicked.connect(self._on_sidebar_clicked)
+        # 좌측: 폴더 구조 트리(지연 로딩) + 접이식 최근/즐겨찾기. 기본 탐색기처럼 탐색.
+        self.sidebar = QTreeWidget()
+        self.sidebar.setHeaderHidden(True)
+        self.sidebar.setFixedWidth(260)
+        self.sidebar.itemClicked.connect(self._on_tree_clicked)
+        self.sidebar.itemExpanded.connect(self._on_tree_expanded)
         body.addWidget(self.sidebar)
 
         right = QVBoxLayout()
@@ -238,40 +243,59 @@ class FolderPickerDialog(QDialog):
         self._debounce.setInterval(150)
         self._debounce.timeout.connect(self._run_validation)
 
-    # ----------------------------------------------------------- sidebar
+    # ----------------------------------------------------------- sidebar (폴더 트리)
+    _LOADED = Qt.UserRole + 1  # 지연 로딩 완료 플래그
+
+    def _make_dir_node(self, parent, label: str, path: str):
+        """지연 확장 폴더 노드(펼치면 그때 한 단계만 os.scandir). 더미 자식으로 화살표 표시."""
+        node = QTreeWidgetItem(parent, [label])
+        node.setData(0, Qt.UserRole, path)
+        node.setData(0, self._LOADED, False)
+        node.setToolTip(0, path)
+        QTreeWidgetItem(node, ["…"])  # placeholder → 펼침 화살표
+        return node
+
+    def _make_group_node(self, label: str):
+        """접이식 그룹 헤더(경로 없음). 자식은 폴더 노드."""
+        node = QTreeWidgetItem(self.sidebar, [label])
+        node.setData(0, Qt.UserRole, None)
+        node.setData(0, self._LOADED, True)  # 그룹은 지연 로딩 대상 아님
+        node.setFlags(Qt.ItemIsEnabled)
+        return node
+
     def _reload_sidebar(self) -> None:
         self.sidebar.clear()
-
-        def _header(text: str) -> None:
-            it = QListWidgetItem(text)
-            it.setFlags(Qt.NoItemFlags)
-            it.setForeground(Qt.gray)
-            self.sidebar.addItem(it)
-
-        def _entry(label: str, path: str) -> None:
-            it = QListWidgetItem(label)
-            it.setData(Qt.UserRole, path)
-            it.setToolTip(path)
-            self.sidebar.addItem(it)
-
         favs = [f for f in getattr(self.settings, "favorite_folders", []) if Path(f).exists()]
         if favs:
-            _header("★ 즐겨찾기")
+            grp = self._make_group_node("★ 즐겨찾기")
             for f in favs:
-                _entry("★ " + Path(f).name, f)
+                self._make_dir_node(grp, "★ " + (Path(f).name or f), f)
+            grp.setExpanded(True)
         recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
         if recents:
-            _header("↻ 최근")
+            grp = self._make_group_node("↻ 최근")
             for f in recents:
-                _entry("📁 " + Path(f).name, f)
-        _header("💻 드라이브 · 홈")
-        _entry("🏠 홈", str(Path.home()))
+                self._make_dir_node(grp, "📁 " + (Path(f).name or f), f)
+            grp.setExpanded(True)
+        drives = self._make_group_node("💻 드라이브 · 홈")
+        self._make_dir_node(drives, "🏠 홈", str(Path.home()))
         for d in QDir.drives():
             p = d.absoluteFilePath()
-            _entry("💾 " + p, p)
+            self._make_dir_node(drives, "💾 " + p, p)
+        drives.setExpanded(True)
 
-    def _on_sidebar_clicked(self, item: QListWidgetItem) -> None:
-        path = item.data(Qt.UserRole)
+    def _on_tree_expanded(self, node: QTreeWidgetItem) -> None:
+        if node.data(0, self._LOADED):
+            return
+        path = node.data(0, Qt.UserRole)
+        node.takeChildren()  # 더미 제거
+        if path:
+            for name in self._list_subdirs(Path(path)):
+                self._make_dir_node(node, "📁 " + name, str(Path(path) / name))
+        node.setData(0, self._LOADED, True)
+
+    def _on_tree_clicked(self, node: QTreeWidgetItem, _col: int = 0) -> None:
+        path = node.data(0, Qt.UserRole)
         if path:
             self._go_to(self._safe_dir(path))
 

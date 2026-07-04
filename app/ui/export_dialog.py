@@ -12,7 +12,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -117,14 +116,20 @@ class ExportTrayDialog(QDialog):
         self._empty.setVisible(False)
         outer.addWidget(self._empty)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
-        self.buttons.button(QDialogButtonBox.Ok).setText("Excel 출력")
-        self.buttons.button(QDialogButtonBox.Cancel).setText("취소")
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-        outer.addWidget(self.buttons)
+        # 하단 바 — 취소 + 확인(Excel 출력). QDialogButtonBox 는 빈 트레이일 때 OK 가
+        # 흐려져 '없는 것'처럼 보였으므로, 명시적 버튼으로 확인을 항상 뚜렷하게 노출한다.
+        bottom = QHBoxLayout()
+        bottom.addStretch(1)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        bottom.addWidget(btn_cancel)
+        self.btn_export = QPushButton("Excel 출력")
+        self.btn_export.setObjectName("primary")
+        self.btn_export.setToolTip("담은 사진을 Excel 파일로 출력합니다.")
+        self.btn_export.setDefault(True)
+        self.btn_export.clicked.connect(self.accept)
+        bottom.addWidget(self.btn_export)
+        outer.addLayout(bottom)
 
     def _clear_grid(self) -> None:
         while self._grid.count():
@@ -141,7 +146,7 @@ class ExportTrayDialog(QDialog):
         shown = len(self._kept)
         self.title.setText(f"담은 사진 — 총 {shown}장")
         self._empty.setVisible(shown == 0)
-        self.buttons.button(QDialogButtonBox.Ok).setEnabled(shown > 0)
+        self.btn_export.setEnabled(shown > 0)
         self.btn_clear.setEnabled(shown > 0)
 
     def _make_card(self, item: BaseDefectMatches) -> QWidget:
