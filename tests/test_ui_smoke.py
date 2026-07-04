@@ -278,37 +278,9 @@ def test_matched_filter_excludes_unmatched(win):
         assert view == non_none
 
 
-def test_nomatch_button_and_gallery(win):
-    # 허용오차 0 → 전부 none → 미매칭 버튼 활성·카운트 = 전체, 갤러리 구성
-    win.top.spn_tol.setValue(0.0)
-    for _ in range(5):
-        QCoreApplication.processEvents()
-    entries = win._nomatch_entries()
-    assert len(entries) == len(win.matches)
-    assert win.btn_nomatch.isEnabled()
-    assert win.btn_nomatch.text().endswith(str(len(entries)))
-
-    from app.ui.nomatch_gallery import NoMatchGalleryDialog, _dominant
-
-    navigated = {}
-    dlg = NoMatchGalleryDialog(entries, win.thumb_cache, lambda i: navigated.setdefault("i", i))
-    # 사유별 필터: '전체' 기본 — 그리드에 모든 항목이 셀로 들어간다.
-    assert dlg._grid.count() == len(entries)
-    # 대표 사유가 분류된다(none 이므로 사유가 존재).
-    assert _dominant(entries[0][1]) is not None
-    # 썸네일 클릭 시 on_navigate 로 해당 index 전달
-    dlg._on_thumb_clicked(entries[0][0])
-    assert navigated.get("i") == entries[0][0]
-
-
-def test_nomatch_empty_when_no_compare_layers(win):
-    # 비교 layer 를 모두 해제하면 '매칭 없음'은 의미가 없어 갤러리/버튼이 빈다(오해 방지).
-    win.top._set_all_compares(False)
-    for _ in range(5):
-        QCoreApplication.processEvents()
-    assert win.top.compare_layers() == []
-    assert win._nomatch_entries() == []
-    assert not win.btn_nomatch.isEnabled()
+def test_no_nomatch_button(win):
+    # '미매칭 n' 버튼은 제거됨(항목 9).
+    assert not hasattr(win, "btn_nomatch")
 
 
 def test_base_change_keeps_exclusion(win):

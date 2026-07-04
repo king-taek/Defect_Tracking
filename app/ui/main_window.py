@@ -48,7 +48,6 @@ from app.ui.heatmap_dialog import HeatmapDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
-from app.ui.nomatch_gallery import NoMatchGalleryDialog
 from app.ui.notifications import NotificationBanner
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
@@ -82,8 +81,9 @@ class MainWindow(QMainWindow):
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
         # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
-        # 출력 담기 트레이(항목 1): 현재 matches 기준 base index 목록. 기준/새 LOT 시 초기화.
-        self._export_tray: list[int] = []
+        # 출력 담기 트레이: 담은 BaseDefectMatches 스냅샷 목록(base image_path 로 중복 제거).
+        # 스냅샷이라 기준 layer·자재(LOT)를 바꿔도 담은 것이 그대로 유지된다.
+        self._export_tray: list = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
         self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
@@ -192,15 +192,6 @@ class MainWindow(QMainWindow):
         strip_row.setContentsMargins(0, 0, 0, 0)
         strip_row.setSpacing(8)
         strip_row.addWidget(self.strip, 1)
-        # 매칭 없는(후보 제외된) 기준 사진을 모아 보는 버튼(썸네일과 같은 크기)
-        self.btn_nomatch = QPushButton("미매칭\n0")
-        self.btn_nomatch.setFixedSize(96, 96)
-        self.btn_nomatch.setToolTip(
-            "어떤 비교 layer 와도 매칭되지 않아 후보에서 제외된 기준 사진을 모아 봅니다."
-        )
-        self.btn_nomatch.clicked.connect(self._open_nomatch_gallery)
-        self.btn_nomatch.setEnabled(False)
-        strip_row.addWidget(self.btn_nomatch, 0, Qt.AlignVCenter)
         # defect 히트맵 보기(항목 4) — 웨이퍼맵에 defect 밀도를 표시하고 위치별 비교.
         self.btn_heatmap = QPushButton("히트맵\n보기")
         self.btn_heatmap.setFixedSize(96, 96)
@@ -600,33 +591,6 @@ class MainWindow(QMainWindow):
             lines.append(f"    … 외 {len(failed) - 8}개")
         return "\n".join(lines)
 
-    def _nomatch_entries(self) -> list:
-        """매칭 전무(none) 기준의 (index, BaseDefectMatches) 목록.
-
-        비교 layer 가 하나도 없으면 '매칭 없음'은 의미가 없으므로 빈 목록을 반환한다
-        (모든 기준이 results 없이 none 으로 분류되는 오해를 방지).
-        """
-        if not self.top.compare_layers():
-            return []
-        return [
-            (i, m) for i, m in enumerate(self.matches)
-            if self._match_status(m) == "none"
-        ]
-
-    def _update_nomatch_button(self) -> None:
-        """미매칭 갤러리 버튼의 카운트·활성 상태를 갱신한다."""
-        n = len(self._nomatch_entries()) if self.matches else 0
-        self.btn_nomatch.setText(f"미매칭\n{n}")
-        self.btn_nomatch.setEnabled(n > 0)
-
-    def _open_nomatch_gallery(self) -> None:
-        entries = self._nomatch_entries()
-        if not entries:
-            self.banner.show_message("매칭 없는 기준 사진이 없습니다.", "info")
-            return
-        dlg = NoMatchGalleryDialog(entries, self.thumb_cache, self._goto, self)
-        dlg.exec()
-
     def _recommended_base(self) -> str:
         """그리드 기본 배치 순서에서 현재 LOT 에 존재하는 첫 layer 를 추천(자동선택 X)."""
         if self.lot_index is None:
@@ -652,8 +616,7 @@ class MainWindow(QMainWindow):
         self.nav.set_enabled(False)
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
-        self._update_nomatch_button()
-        self._clear_export_tray()
+        self._update_add_export_button()  # 트레이는 유지, 버튼 상태만 갱신
         rec = self._recommended_base()
         hint = f"  (추천: {rec})" if rec else ""
         self.grid.show_empty(f"기준 layer 를 선택하세요.{hint}")
@@ -674,8 +637,7 @@ class MainWindow(QMainWindow):
         self.base_records = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
-        # 기준 layer/LOT 가 바뀌면 base index 의미가 달라지므로 출력 트레이를 초기화한다.
-        self._clear_export_tray()
+        # 출력 트레이는 스냅샷이라 기준 layer/자재 변경에도 유지한다(초기화하지 않음).
         self._compute_matches()
 
         # 썸네일 스트립(기준 layer 에만 의존 → 여기서만 재구성)
@@ -827,13 +789,21 @@ class MainWindow(QMainWindow):
             return
         self._add_indices_to_export([self.current])
 
+    def _tray_keys(self) -> set:
+        return {str(m.base.image_path) for m in self._export_tray}
+
     def _add_indices_to_export(self, indices: list[int]) -> None:
-        """주어진 base index 들을 출력 트레이에 담는다(중복 무시)."""
+        """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시)."""
+        keys = self._tray_keys()
         added = 0
         for i in indices:
-            if 0 <= i < len(self.matches) and i not in self._export_tray:
-                self._export_tray.append(i)
-                added += 1
+            if 0 <= i < len(self.matches):
+                m = self.matches[i]
+                k = str(m.base.image_path)
+                if k not in keys:
+                    self._export_tray.append(m)
+                    keys.add(k)
+                    added += 1
         self._update_add_export_button()
         if added:
             self.banner.show_message(
@@ -992,7 +962,6 @@ class MainWindow(QMainWindow):
 
     def _refresh_strip_marks(self) -> None:
         """썸네일에 매칭 상태 점 + 세션 마킹 별을 반영한다."""
-        self._update_nomatch_button()
         if not self.matches:
             return
         statuses = [self._match_status(m) for m in self.matches]
@@ -1061,16 +1030,12 @@ class MainWindow(QMainWindow):
 
         prod = config.active_product()
         valid: Optional[set] = None
-        caption = ""
+        # 캡션은 제품명만 표기(‘모양 정합 %’ 등은 노출하지 않음).
+        caption = prod.name if prod.source == "db" else ""
         if prod.die_map and observed:
             align = self._get_alignment(wafer, prod, observed)
             if align.overlap >= self._ALIGN_MIN_OVERLAP:
                 valid = wafermap_align.shifted_die_map(prod.die_map, align)
-                caption = f"{prod.name} · 모양 정합 {align.overlap * 100:.0f}%"
-            else:
-                caption = f"{prod.name} · 모양 정합 실패 — 사각 표시"
-        elif prod.source == "db":
-            caption = prod.name
 
         current = (item.base.col, item.base.row)
         # 실제 관측(매칭)된 die 는 DB 고정 모양(valid) 밖이어도 항상 그린다 — 그렇지 않으면
@@ -1272,31 +1237,31 @@ class MainWindow(QMainWindow):
         if not self.matches:
             self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
             return
-        # 트레이가 비어 있으면 현재 사진을 담도록 유도(빈 출력 방지).
-        if not self._export_tray:
-            self.banner.show_message(
-                "출력 목록이 비었습니다. '＋ 출력에 추가'(A)로 사진을 먼저 담아 주세요.",
-                "info",
-                action_text="현재 사진 담기",
-                action=self._add_current_to_export,
-                timeout_ms=6000,
-            )
-            return
-        # 담긴 index 중 현재 matches 범위 내인 것만(안전) 유지하며 카드 다이얼로그 표시.
-        entries = [
-            (i, self.matches[i]) for i in self._export_tray
-            if 0 <= i < len(self.matches)
+        # 이번 LOT 에서 매칭 있는 기준 사진(스냅샷) — 다이얼로그의 '전체 추가' 버튼용.
+        all_matched = [
+            m for m in self.matches if self._match_status(m) != "none"
         ]
-        dlg = ExportTrayDialog(entries, self.thumb_cache, self)
+        # 트레이가 비어 있어도 다이얼로그를 열어(전체 추가 버튼 사용) 담을 수 있게 한다.
+        dlg = ExportTrayDialog(
+            list(self._export_tray), self.thumb_cache,
+            all_matched=all_matched, parent=self,
+        )
         if not dlg.exec():
             return
-        indices = dlg.selected_indices()
-        # 다이얼로그에서 제거한 결과를 트레이에 반영(다음 출력에도 유지).
-        self._export_tray = list(indices)
+        selected = dlg.selected()  # list[BaseDefectMatches]
+        # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지).
+        self._export_tray = list(selected)
         self._update_add_export_button()
-        if not indices:
+        if not selected:
             self.banner.show_message("출력할 사진이 없습니다.", "info")
             return
+
+        # 컬럼(compare layer)은 담긴 스냅샷들에 등장하는 비교 layer 의 합집합(등장 순서).
+        compare_union: list[str] = []
+        for m in selected:
+            for r in m.results:
+                if r.compare_layer not in compare_union:
+                    compare_union.append(r.compare_layer)
 
         default_dir = str(self.settings.exports_path)
         Path(default_dir).mkdir(parents=True, exist_ok=True)
@@ -1308,7 +1273,6 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        selected = [self.matches[i] for i in indices]
         # openpyxl 은 출력 시에만 필요 → 시작 비용을 줄이기 위해 지연 임포트.
         from app.export.excel_report import export_excel
         try:
@@ -1316,7 +1280,7 @@ class MainWindow(QMainWindow):
                 path,
                 lot_name=self.lot_index.lot_name,
                 base_layer=self.top.base_layer(),
-                compare_layers=self.top.compare_layers(),
+                compare_layers=compare_union or self.top.compare_layers(),
                 tolerance=self.top.tolerance(),
                 selected=selected,
                 thumb_cache=self.thumb_cache,

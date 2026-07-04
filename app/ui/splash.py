@@ -30,11 +30,12 @@ def make_splash() -> QSplashScreen:
     p.setFont(title)
     p.drawText(pm.rect().adjusted(0, -34, 0, -34), Qt.AlignCenter, config.APP_NAME)
 
+    # 버전은 제목 바로 밑에
     p.setPen(QColor(theme.TEXT_DIM))
     sub = QFont("Segoe UI", 10)
     p.setFont(sub)
     p.drawText(
-        pm.rect().adjusted(0, 36, 0, 36),
+        pm.rect().adjusted(0, -8, 0, -8),
         Qt.AlignCenter,
         f"v{__version__}",
     )

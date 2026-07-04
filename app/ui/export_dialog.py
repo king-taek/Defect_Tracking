@@ -36,19 +36,36 @@ class ExportTrayDialog(QDialog):
 
     def __init__(
         self,
-        entries: list[tuple[int, BaseDefectMatches]],
+        entries: list[BaseDefectMatches],
         thumb_cache: Optional[ThumbnailCache] = None,
+        all_matched: Optional[list[BaseDefectMatches]] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        # 담긴 항목: [(base_index, BaseDefectMatches), ...]. 제거 시 _kept 에서 뺀다.
-        self._entries = list(entries)
-        self._kept: list[int] = [idx for idx, _ in self._entries]
+        # 담긴 항목(스냅샷). base image_path 로 중복 제거하며 유지한다.
+        self._kept: list[BaseDefectMatches] = []
+        self._keys: set[str] = set()
+        for m in entries:
+            self._add(m)
+        # 이번 LOT 의 매칭 있는 기준 사진(전체 추가 버튼용).
+        self._all_matched = list(all_matched or [])
         self._thumb_cache = thumb_cache
         self.setWindowTitle("결과 출력 — 담은 사진")
         self.setMinimumSize(620, 540)
         self._build()
         self._populate()
+
+    @staticmethod
+    def _key(item: BaseDefectMatches) -> str:
+        return str(item.base.image_path)
+
+    def _add(self, item: BaseDefectMatches) -> bool:
+        k = self._key(item)
+        if k in self._keys:
+            return False
+        self._keys.add(k)
+        self._kept.append(item)
+        return True
 
     def _build(self) -> None:
         outer = QVBoxLayout(self)
@@ -60,6 +77,12 @@ class ExportTrayDialog(QDialog):
         self.title.setObjectName("title")
         head.addWidget(self.title)
         head.addStretch()
+        self.btn_add_all = QPushButton("이번 LOT 전체(매치) 추가")
+        self.btn_add_all.setObjectName("mini")
+        self.btn_add_all.setToolTip("이번 자재(LOT)에서 매칭이 있는 기준 사진을 모두 담습니다.")
+        self.btn_add_all.clicked.connect(self._add_all_matched)
+        self.btn_add_all.setEnabled(bool(self._all_matched))
+        head.addWidget(self.btn_add_all)
         self.btn_clear = QPushButton("전체 비우기")
         self.btn_clear.setObjectName("mini")
         self.btn_clear.setToolTip("담은 사진을 모두 뺍니다.")
@@ -87,8 +110,9 @@ class ExportTrayDialog(QDialog):
         self._scroll.setWidget(self._host)
         outer.addWidget(self._scroll, 1)
 
-        self._empty = QLabel("담은 사진이 없습니다. 창을 닫고 '출력에 추가'로 먼저 담아 주세요.")
+        self._empty = QLabel("담은 사진이 없습니다. '이번 LOT 전체(매치) 추가'로 담거나 창을 닫고 '＋ 출력에 추가'로 담아 주세요.")
         self._empty.setObjectName("dim")
+        self._empty.setWordWrap(True)
         self._empty.setAlignment(Qt.AlignCenter)
         self._empty.setVisible(False)
         outer.addWidget(self._empty)
@@ -112,21 +136,15 @@ class ExportTrayDialog(QDialog):
 
     def _populate(self) -> None:
         self._clear_grid()
-        kept_set = set(self._kept)
-        shown = 0
-        for idx, item in self._entries:
-            if idx not in kept_set:
-                continue
-            self._grid.addWidget(
-                self._make_card(idx, item), shown // _COLUMNS, shown % _COLUMNS
-            )
-            shown += 1
+        for i, item in enumerate(self._kept):
+            self._grid.addWidget(self._make_card(item), i // _COLUMNS, i % _COLUMNS)
+        shown = len(self._kept)
         self.title.setText(f"담은 사진 — 총 {shown}장")
         self._empty.setVisible(shown == 0)
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(shown > 0)
         self.btn_clear.setEnabled(shown > 0)
 
-    def _make_card(self, idx: int, item: BaseDefectMatches) -> QWidget:
+    def _make_card(self, item: BaseDefectMatches) -> QWidget:
         base = item.base
         px = _THUMB_PX
         card = QFrame()
@@ -172,7 +190,7 @@ class ExportTrayDialog(QDialog):
             "QPushButton:hover { background:#b00020; border:1px solid #ffffff; }"
         )
         btn_x.move(px - 28, 4)
-        btn_x.clicked.connect(lambda _=0, i=idx: self._remove(i))
+        btn_x.clicked.connect(lambda _=0, k=self._key(item): self._remove(k))
         lay.addWidget(thumb, alignment=Qt.AlignHCenter)
 
         n_match = sum(1 for r in item.results if r.is_match)
@@ -188,15 +206,23 @@ class ExportTrayDialog(QDialog):
         lay.addWidget(cap, alignment=Qt.AlignHCenter)
         return card
 
-    def _remove(self, idx: int) -> None:
-        if idx in self._kept:
-            self._kept.remove(idx)
+    def _remove(self, key: str) -> None:
+        self._kept = [m for m in self._kept if self._key(m) != key]
+        self._keys.discard(key)
         self._populate()
 
     def _clear_all(self) -> None:
         self._kept = []
+        self._keys = set()
         self._populate()
 
-    def selected_indices(self) -> list[int]:
-        """최종 출력 대상 base index 목록(담긴 순서 유지)."""
+    def _add_all_matched(self) -> None:
+        added = 0
+        for m in self._all_matched:
+            if self._add(m):
+                added += 1
+        self._populate()
+
+    def selected(self) -> list[BaseDefectMatches]:
+        """최종 출력 대상 스냅샷 목록(담긴 순서 유지)."""
         return list(self._kept)

@@ -221,56 +221,36 @@ class CompareGrid(QWidget):
                 self._layer_order.append(layer)
                 self._grid.addWidget(cell, r, c)
 
-    def _repack(self, visible_layers: list[str]) -> None:
-        """보이는 layer 셀만 2열 그리드에 빈칸 없이 다시 배치하고 나머지는 숨긴다.
-
-        위젯은 삭제하지 않고 재사용(위치만 이동)하므로 탐색 중 깜빡임이 적다.
-        """
-        # 레이아웃에서 모든 셀을 분리(위젯은 self 에 부모로 남아 살아 있음).
-        while self._grid.count():
-            self._grid.takeAt(0)
-        visible_set = set(visible_layers)
-        for layer, cell in self._cells.items():
-            if layer not in visible_set:
-                cell.setVisible(False)
-        for i, layer in enumerate(visible_layers):
-            cell = self._cells.get(layer)
-            if cell is None:
-                continue
-            cell.setVisible(True)
-            self._grid.addWidget(cell, i // 2, i % 2)
+    def _set_all_visible(self, visible: bool) -> None:
+        for cell in self._cells.values():
+            cell.setVisible(visible)
 
     def update_for_base(
         self, item: BaseDefectMatches, compare_layers: list[str]
     ) -> None:
-        """기준 defect 변경 시 셀 갱신 — 매칭된 비교 layer 셀만 표시(항목 2).
+        """기준 defect 변경 시 셀 갱신 — 고정 레이아웃 유지, 매칭 없는 비교 셀만 숨김(항목 8).
 
-        매칭이 없는 비교 layer 셀은 숨겨 빈칸을 없애고, 보이는 셀을 압축 재배치한다.
+        기준 사진은 항상 자기 레이아웃 슬롯에 그대로 두고(위치 이동 없음), 매칭된 비교
+        layer 셀만 보이고 매칭 없는 비교 셀은 숨겨 빈 슬롯으로 둔다.
         """
         base = item.base
-        visible: list[str] = []
         if self._base_layer in self._cells:
             self._cells[self._base_layer].show_base(base)
-            visible.append(self._base_layer)
+            self._cells[self._base_layer].setVisible(True)
 
-        # 비교 layer 는 grid 배치 순서를 유지하되 매칭된 것만 보인다.
-        ordered_compares = [l for l in self._layer_order if l != self._base_layer]
-        for layer in ordered_compares:
-            if layer not in compare_layers:
+        for layer, cell in self._cells.items():
+            if layer == self._base_layer:
                 continue
-            cell = self._cells.get(layer)
-            if cell is None:
-                continue
-            mr = item.for_layer(layer)
+            mr = item.for_layer(layer) if layer in compare_layers else None
             if mr and mr.is_match and mr.matched is not None:
                 info = f"매칭 O · 거리 {mr.distance:.1f} µm"
                 if mr.ambiguous:
                     info += " · ⚠동률 후보"
                 cell.show_record(mr.matched, info, matched=True, warn=mr.ambiguous)
-                visible.append(layer)
-            # 매칭 없음 → 셀을 숨긴다(_repack 에서 처리).
-
-        self._repack(visible)
+                cell.setVisible(True)
+            else:
+                # 매칭 없음(또는 미선택 비교) → 셀을 숨겨 빈 슬롯으로 둔다.
+                cell.setVisible(False)
 
     @staticmethod
     def _diag_text(mr) -> tuple[str, bool]:
@@ -283,8 +263,8 @@ class CompareGrid(QWidget):
         return "이 layer에 같은 die 사진 없음", False
 
     def show_empty(self, message: str) -> None:
-        # 모든 셀을 다시 보이게 배치한 뒤 안내 메시지를 표시한다.
-        self._repack(list(self._layer_order))
+        # 모든 셀을 다시 보이게 한 뒤 안내 메시지를 표시한다.
+        self._set_all_visible(True)
         for cell in self._cells.values():
             cell.image.show_message(message)
             cell.info.setText("")

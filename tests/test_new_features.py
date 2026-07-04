@@ -49,36 +49,46 @@ def test_filter_dropdown_removed(win):
     assert win._filter == "matched"
 
 
-def test_export_tray_add_and_clear(win):
+def test_export_tray_add_and_persist(win):
+    # 트레이는 BaseDefectMatches 스냅샷을 담고, layer/자재가 바뀌어도 유지된다(항목 1).
     win._goto(0)
     assert win._export_tray == []
+    p0 = str(win.matches[0].base.image_path)
     win._add_current_to_export()
-    assert win._export_tray == [0]
-    # 중복 담기는 무시
-    win._add_current_to_export()
-    assert win._export_tray == [0]
+    assert [str(m.base.image_path) for m in win._export_tray] == [p0]
+    win._add_current_to_export()  # 중복 무시
+    assert len(win._export_tray) == 1
     win._goto(1)
     win._add_current_to_export()
-    assert win._export_tray == [0, 1]
+    assert len(win._export_tray) == 2
     assert "(2)" in win.btn_add_export.text()
-    # 기준 layer 변경 시 트레이 초기화
+    # 기준 layer 를 바꿔도 담은 것이 유지된다.
     win.top.cmb_base.setCurrentText("LYB4")
     for _ in range(5):
         QCoreApplication.processEvents()
-    assert win._export_tray == []
+    assert len(win._export_tray) == 2
 
 
-def test_export_tray_dialog_remove(win, app):
+def test_export_tray_dialog_remove_and_add_all(win, app):
     from app.ui.export_dialog import ExportTrayDialog
 
-    entries = [(i, win.matches[i]) for i in range(min(3, len(win.matches)))]
-    dlg = ExportTrayDialog(entries, win.thumb_cache)
-    assert set(dlg.selected_indices()) == {e[0] for e in entries}
-    remove_idx = entries[0][0]
-    dlg._remove(remove_idx)
-    assert remove_idx not in dlg.selected_indices()
+    entries = [win.matches[i] for i in range(min(3, len(win.matches)))]
+    all_matched = [m for m in win.matches if win._match_status(m) != "none"]
+    dlg = ExportTrayDialog(entries, win.thumb_cache, all_matched=all_matched)
+    assert {str(m.base.image_path) for m in dlg.selected()} == {
+        str(m.base.image_path) for m in entries
+    }
+    # 개별 제거
+    key0 = str(entries[0].base.image_path)
+    dlg._remove(key0)
+    assert key0 not in {str(m.base.image_path) for m in dlg.selected()}
+    # '이번 LOT 전체(매치) 추가' → 매치 있는 것이 모두 담김(중복 제거)
+    dlg._add_all_matched()
+    assert {str(m.base.image_path) for m in dlg.selected()} == {
+        str(m.base.image_path) for m in all_matched
+    }
     dlg._clear_all()
-    assert dlg.selected_indices() == []
+    assert dlg.selected() == []
 
 
 # ---- 항목 2: 매치 없는 셀 숨김(re-pack) ----

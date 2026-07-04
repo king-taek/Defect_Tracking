@@ -144,6 +144,11 @@ class SettingsDialog(QDialog):
         footer.setObjectName("dim")
         outer.addWidget(footer)
 
+        credit = QLabel(config.CREDITS)
+        credit.setObjectName("dim")
+        credit.setStyleSheet("font-size:10px;")
+        outer.addWidget(credit)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("저장")
         buttons.button(QDialogButtonBox.Cancel).setText("취소")

@@ -405,12 +405,11 @@ class HeatmapDialog(QDialog):
 
         prod = config.active_product()
         valid = None
-        caption = prod.name if prod.source == "db" else ""
+        caption = prod.name if prod.source == "db" else ""  # 제품명만(‘모양 정합’ 미표기)
         if prod.die_map and observed:
             align = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
             if align.overlap >= _ALIGN_MIN_OVERLAP:
                 valid = wafermap_align.shifted_die_map(prod.die_map, align)
-                caption = f"{prod.name} · 모양 정합 {align.overlap * 100:.0f}%"
         paint_valid = (valid | observed) if valid else None
         if paint_valid is not None:
             # 내용 bounding box 로 정규화(맵이 여백에 떠 보이거나 잘리지 않게).

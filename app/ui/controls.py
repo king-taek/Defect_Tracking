@@ -191,8 +191,8 @@ class SideBar(QFrame):
         footer.addWidget(self.btn_export, 1)
         outer.addLayout(footer)
 
-        # 제작 크레딧(항상 보이는 사이드바 하단)
-        credit = QLabel(config.CREDITS)
+        # 제작 크레딧(항상 보이는 사이드바 하단) — 두 줄로 표기.
+        credit = QLabel(config.CREDITS.replace(", ", "\n"))
         credit.setObjectName("dim")
         credit.setWordWrap(True)
         credit.setStyleSheet("font-size:9px;")
