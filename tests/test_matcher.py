@@ -136,6 +136,26 @@ def test_large_systematic_offset_auto_corrected():
     assert all(m.for_layer("LYB4").is_match for m in matches)
 
 
+def test_die_pitch_scale_offset_not_applied():
+    """die pitch 급(예: +37247)으로 '일관된' 오프셋은 실제 정합오차가 아니라 die
+    라벨링 불일치로 보고 보정을 적용하지 않는다(회귀 — 먼 die 오매칭 방지)."""
+    bases = [
+        _rec("LYA4", "W1", 1, 1, 1000.0, 0.0),
+        _rec("LYA4", "W1", 3, 3, 1000.0, 0.0),
+        _rec("LYA4", "W1", 5, 5, 1000.0, 0.0),
+        _rec("LYA4", "W1", 1, 5, 1000.0, 0.0),
+    ]
+    cmps = [
+        _rec("LYB4", "W1", 1, 1, 1000.0 + 37247.7, 0.0, name="a.jpg"),
+        _rec("LYB4", "W1", 3, 3, 1000.0 + 37247.7, 0.0, name="b.jpg"),
+        _rec("LYB4", "W1", 5, 5, 1000.0 + 37247.7, 0.0, name="c.jpg"),
+        _rec("LYB4", "W1", 1, 5, 1000.0 + 37247.7, 0.0, name="d.jpg"),
+    ]
+    matches, offsets = match_all_with_offsets(bases, ["LYB4"], {"LYB4": cmps}, tolerance=100.0)
+    assert offsets["LYB4"].count == 0  # 상한 초과로 보정 미적용
+    assert not any(m.for_layer("LYB4").is_match for m in matches)
+
+
 def test_inconsistent_offsets_not_applied():
     """표본이 흩어지면(MAD>tolerance) 보정하지 않아 큰 거리는 매칭되지 않는다."""
     bases = [
