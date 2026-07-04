@@ -136,6 +136,46 @@ def test_large_systematic_offset_auto_corrected():
     assert all(m.for_layer("LYB4").is_match for m in matches)
 
 
+def test_reference_gate_uses_per_axis_not_euclidean():
+    """정답 도구(Module_Compare)는 축별 게이트라, 대각선 방향으로 유클리드
+    거리는 tolerance 를 넘어도 각 축이 tolerance 이내면 통과시킨다 — 현재
+    모드(유클리드)는 이 경우 거절한다."""
+    base = _rec("LYA4", "W1", 4, 5, 1000.0, 2000.0)
+    cmp = _rec("LYB4", "W1", 4, 5, 1090.0, 2090.0)  # dx=dy=90, hypot≈127.3 > 100
+
+    out = match_base_against_layers(base, ["LYB4"], {"LYB4": [cmp]}, tolerance=100.0)
+    assert not out.for_layer("LYB4").is_match  # 현재 모드: 유클리드 127.3 > 100 → 실패
+
+    out_ref = match_base_against_layers(
+        base, ["LYB4"], {"LYB4": [cmp]}, tolerance=100.0, reference_gate=True
+    )
+    assert out_ref.for_layer("LYB4").is_match  # 정답 모드: |90|<=100 축별 통과
+
+
+def test_reference_gate_does_not_auto_correct_beyond_tolerance():
+    """정답 도구 모드는 tolerance 보다 큰 계통적 오프셋을 자동으로 구제하지 않는다
+    (같은 +150 시나리오가 test_large_systematic_offset_auto_corrected 에선 매치되지만
+    reference_gate=True 에선 매치되지 않아야 함 — 사용자가 보고한 버그의 근본 수정)."""
+    bases = [
+        _rec("LYA4", "W1", 1, 1, 1000.0, 0.0),
+        _rec("LYA4", "W1", 3, 3, 1000.0, 0.0),
+        _rec("LYA4", "W1", 5, 5, 1000.0, 0.0),
+        _rec("LYA4", "W1", 1, 5, 1000.0, 0.0),
+    ]
+    cmps = [
+        _rec("LYB4", "W1", 1, 1, 1150.0, 0.0, name="a.jpg"),
+        _rec("LYB4", "W1", 3, 3, 1150.0, 0.0, name="b.jpg"),
+        _rec("LYB4", "W1", 5, 5, 1150.0, 0.0, name="c.jpg"),
+        _rec("LYB4", "W1", 1, 5, 1150.0, 0.0, name="d.jpg"),
+    ]
+    matches, offsets = match_all_with_offsets(
+        bases, ["LYB4"], {"LYB4": cmps}, tolerance=100.0, reference_gate=True
+    )
+    # offset 표본 자체는 모드와 무관하게 여전히 추정된다(게이트에만 안 쓰일 뿐).
+    assert offsets["LYB4"].count == 4 and round(offsets["LYB4"].dx) == -150
+    assert not any(m.for_layer("LYB4").is_match for m in matches)
+
+
 def test_die_pitch_scale_offset_not_applied():
     """die pitch 급(예: +37247)으로 '일관된' 오프셋은 실제 정합오차가 아니라 die
     라벨링 불일치로 보고 보정을 적용하지 않는다(회귀 — 먼 die 오매칭 방지)."""

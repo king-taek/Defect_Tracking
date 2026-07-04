@@ -14,6 +14,14 @@
     실제 정합오차가 아니라 die 라벨링 불일치로 보고 보정을 적용하지 않는다 — 그렇지
     않으면 서로 다른 die 를 매칭으로 잘못 보고하게 된다.
 
+**정답 도구 모드(reference_gate=True)**: 정답 VBA 도구(`AOI Data Viewer` 원본,
+`Module_Compare.AOIMapCompare`)를 직접 디코딩해 확인한 실제 알고리즘은 위와 다르다 —
+raw(보정 전) dx,dy 로 **축별** 게이트(`Abs(dx)<=limit And Abs(dy)<=limit`)를 먼저
+통과한 후보만 인정하고, offset(median)은 그 통과한 후보가 여럿일 때 최근접을 고르는
+tie-break 로만 쓰인다. offset 으로 raw tolerance 를 넘는 후보를 구제하는 로직 자체가
+없다. 이 모드는 기본 동작(위 문단)을 대체하지 않고 `reference_gate=True`로 별도
+계산해 나란히 비교할 수 있게 한다(`app/ui/main_window.py`의 "정답 도구와 비교" 기능).
+
 대량 이미지에서도 빠르도록 비교 layer record 를 (wafer, col, row) 키로 한 번만
 인덱싱한다. 모든 계산은 메모리에서만 수행하며 원본 파일을 수정하지 않는다.
 """
@@ -195,12 +203,21 @@ def _select_match(
     candidates: list[DefectRecord],
     tolerance: float,
     offset: LayerOffset,
+    *,
+    reference_gate: bool = False,
 ) -> tuple[DefectRecord | None, float | None, bool]:
-    """정합오차(offset)를 보정한 잔차 기준으로 최적 후보를 고른다.
+    """후보 중 최적 매치를 고른다 — 게이트 방식은 reference_gate 로 고른다.
 
-    잔차 = hypot(dx-offset.dx, dy-offset.dy) <= tolerance 인 후보 중 잔차 최소.
-    반환 distance 는 보정 전 실제 거리(raw)로 보고한다(사용자에게 실제 분리량 표시).
-    offset 이 (0,0) 이면 raw 거리 기준 최근접과 동일하게 동작한다.
+    - reference_gate=False(기본): 잔차 = hypot(dx-offset.dx, dy-offset.dy) <=
+      tolerance 인 후보 중 잔차 최소(정합오차가 tolerance 보다 커도 일관되면 보정).
+    - reference_gate=True(정답 도구): raw dx,dy 가 **축별로** tolerance 이내인
+      후보만 인정하고(`Module_Compare.AOIMapCompare` 의 `Abs(dx)<=limit And
+      Abs(dy)<=limit`과 동일), 그 안에서 offset 보정 잔차가 최소인 것을 tie-break
+      로 고른다 — offset 이 raw tolerance 를 넘는 후보를 구제하는 일은 없다.
+
+    반환 distance 는 두 모드 모두 보정 전 실제 거리(raw)로 보고한다(사용자에게
+    실제 분리량 표시). offset 이 (0,0) 이면 두 모드 모두 raw 거리 기준 최근접과
+    동일하게 동작한다.
     """
     if not base.ok:
         return None, None, False
@@ -213,9 +230,12 @@ def _select_match(
             continue
         dx = base.x - c.x  # type: ignore[operator]
         dy = base.y - c.y  # type: ignore[operator]
-        resid = math.hypot(dx - offset.dx, dy - offset.dy)
-        if resid > tolerance:
+        if reference_gate:
+            if abs(dx) > tolerance or abs(dy) > tolerance:
+                continue
+        elif math.hypot(dx - offset.dx, dy - offset.dy) > tolerance:
             continue
+        resid = math.hypot(dx - offset.dx, dy - offset.dy)  # tie-break/모호 판정 공통
         resids.append(resid)
         if best_resid is None or resid < best_resid:
             best_resid = resid
@@ -235,6 +255,8 @@ def _build_result(
     tolerance: float,
     offset: LayerOffset,
     failed_count: int,
+    *,
+    reference_gate: bool = False,
 ) -> MatchResult:
     """미리 수집한 후보(candidates)로 한 layer 의 매칭 결과를 만든다.
 
@@ -247,7 +269,9 @@ def _build_result(
     failed_in_die = 0
     ambiguous = False
     if base.ok:
-        matched, dist, ambiguous = _select_match(base, candidates, tolerance, offset)
+        matched, dist, ambiguous = _select_match(
+            base, candidates, tolerance, offset, reference_gate=reference_gate
+        )
         if matched is None:
             nearest, nearest_dist = find_nearest(base, candidates)
             failed_in_die = failed_count
@@ -274,6 +298,7 @@ def match_base_against_layers(
     fail_index: FailIndex | None = None,
     offsets: dict[str, LayerOffset] | None = None,
     die_tol: int = DEFAULT_DIE_TOL,
+    reference_gate: bool = False,
 ) -> BaseDefectMatches:
     """기준 defect 1개를 모든 비교 layer 와 매칭.
 
@@ -294,7 +319,10 @@ def match_base_against_layers(
         offset = (offsets or {}).get(layer, LayerOffset())
         failed_count = fidx.get(layer, {}).get(_norm_wafer(base.wafer_id), 0)
         result.results.append(
-            _build_result(base, layer, candidates, tolerance, offset, failed_count)
+            _build_result(
+                base, layer, candidates, tolerance, offset, failed_count,
+                reference_gate=reference_gate,
+            )
         )
     return result
 
@@ -308,11 +336,14 @@ def match_all_with_offsets(
     index: DieIndex | None = None,
     fail_index: FailIndex | None = None,
     die_tol: int = DEFAULT_DIE_TOL,
+    reference_gate: bool = False,
 ) -> tuple[list[BaseDefectMatches], dict[str, LayerOffset]]:
     """매칭 결과 목록과 비교 layer 별 전역 정합오차를 함께 반환한다.
 
     각 (base, layer) 후보를 **한 번만** 수집해 정합오차 추정과 매칭에 함께 쓴다
     (이전엔 두 패스에서 각각 수집 → 중복 제거로 대량 이미지에서 빨라진다).
+    `reference_gate=True`면 정답 도구 방식(축별 raw 게이트 + offset 은 tie-break
+    로만)으로 매칭한다 — offset 표본 자체(median 추정)는 두 모드가 공유한다.
     """
     idx = index if index is not None else build_die_index(records_by_layer, compare_layers)
     fidx = (
@@ -354,7 +385,8 @@ def match_all_with_offsets(
             failed_count = fidx.get(layer, {}).get(wafer, 0)
             result.results.append(
                 _build_result(
-                    base, layer, row[layer], tolerance, offsets[layer], failed_count
+                    base, layer, row[layer], tolerance, offsets[layer], failed_count,
+                    reference_gate=reference_gate,
                 )
             )
         matches.append(result)
@@ -366,9 +398,12 @@ def match_all(
     compare_layers: list[str],
     records_by_layer: dict[str, list[DefectRecord]],
     tolerance: float,
+    *,
+    reference_gate: bool = False,
 ) -> list[BaseDefectMatches]:
     """기준 layer 의 모든 defect 에 대해 매칭 결과 목록을 만든다(정합오차 보정 포함)."""
     matches, _ = match_all_with_offsets(
-        base_records, compare_layers, records_by_layer, tolerance
+        base_records, compare_layers, records_by_layer, tolerance,
+        reference_gate=reference_gate,
     )
     return matches

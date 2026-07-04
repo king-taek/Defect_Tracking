@@ -2,8 +2,36 @@
 
 import pytest
 
+from app import config
 from app.models import ParseStatus
 from app.parsers import camtek_ini
+
+# 아래 CASES 의 기대값은 문서 Section 13.3.9~13.3.13 이 쓴 pitch/offset 기준으로
+# 계산돼 있다 — 실제 DEVA 기본 제품값(AOIDeviceDB "DEVA Live" 실측)과는 별개이므로,
+# 이 문서 예시 상수로 고정한 임시 제품을 활성화해 기본값 변경에 영향받지 않게 한다.
+_DOC_PRODUCT_KEY = "_DOC_EXAMPLE_DEVA"
+
+
+@pytest.fixture(autouse=True)
+def _doc_example_product():
+    prev = config.active_product().key
+    config.PRODUCTS[_DOC_PRODUCT_KEY] = config.ProductConfig(
+        key=_DOC_PRODUCT_KEY,
+        name="문서 예시(Section 13.3)",
+        camtek_pitch_x=37247.7,
+        camtek_pitch_y=44905.4,
+        camtek_col_offset=2,
+        camtek_row_base=7,
+        kla_package_x_count=7,
+        kla_package_y_count=6,
+    )
+    config.set_active_product(_DOC_PRODUCT_KEY)
+    try:
+        yield
+    finally:
+        config.set_active_product(prev)
+        config.PRODUCTS.pop(_DOC_PRODUCT_KEY, None)
+
 
 # (원본이름, X, Y, Col, Row, 기대 col, row, x_int, y_int)
 CASES = [

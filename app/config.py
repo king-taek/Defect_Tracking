@@ -66,12 +66,15 @@ PRODUCTS: dict[str, ProductConfig] = {
     "DEVAINT": ProductConfig(
         key="DEVAINT",
         name="DEVA Live",
-        camtek_pitch_x=37247.7,
-        camtek_pitch_y=44905.4,
+        # AOIDeviceDB.xlsx "DEVA Live" 시트 실측값(정답 도구 원본 기준).
+        # "DEVA"(다른 시트, Y=5/23-die)과 혼동하지 말 것 — 실제 운영 KLARF
+        # SampleTestPlan(YINDEX -3~+2, 30쌍)과 일치하는 건 "DEVA Live"(Y=6/30-die).
+        camtek_pitch_x=37170.0,
+        camtek_pitch_y=44830.0,
         camtek_col_offset=2,
         camtek_row_base=7,
         kla_package_x_count=7,
-        kla_package_y_count=5,
+        kla_package_y_count=6,
     ),
 }
 DEFAULT_PRODUCT = "DEVAINT"

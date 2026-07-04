@@ -49,6 +49,7 @@ from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui.nomatch_gallery import NoMatchGalleryDialog
 from app.ui.notifications import NotificationBanner
+from app.ui.reference_diff_dialog import ReferenceDiffDialog
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.ui.wafer_map import WaferMapWidget
@@ -79,6 +80,9 @@ class MainWindow(QMainWindow):
         self._match_idx = None
         self._match_fail = None
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
+        # 정답 도구(reference_gate) 모드로도 매칭해 현재 모드와 비교(사용자 요청).
+        self._matches_reference: list[BaseDefectMatches] = []
+        self._reference_diff: list[tuple[int, BaseDefectMatches, BaseDefectMatches]] = []
         # 보기 필터: matched(기본, 매칭 0인 후보 제외) / all / unmatched / full
         self._filter = "matched"
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
@@ -197,6 +201,17 @@ class MainWindow(QMainWindow):
         self.btn_nomatch.clicked.connect(self._open_nomatch_gallery)
         self.btn_nomatch.setEnabled(False)
         strip_row.addWidget(self.btn_nomatch, 0, Qt.AlignVCenter)
+        # 정답 도구(원본 AOI Data Viewer VBA reference_gate) 모드와 결과가 다른
+        # 기준 사진을 모아 보는 버튼 — 차이가 있을 때만 활성화.
+        self.btn_ref_diff = QPushButton("정답 도구\n비교")
+        self.btn_ref_diff.setFixedSize(96, 96)
+        self.btn_ref_diff.setToolTip(
+            "정답 VBA 도구(원본 AOI Data Viewer) 방식으로도 매칭을 계산해, 현재 결과와 "
+            "다른 기준 사진이 있으면 모아 봅니다."
+        )
+        self.btn_ref_diff.clicked.connect(self._open_reference_diff)
+        self.btn_ref_diff.setEnabled(False)
+        strip_row.addWidget(self.btn_ref_diff, 0, Qt.AlignVCenter)
         # 웨이퍼 맵 + 캡션(디바이스/정합 안내)을 세로로 묶는다.
         wafer_box = QVBoxLayout()
         wafer_box.setContentsMargins(0, 0, 0, 0)
@@ -623,6 +638,8 @@ class MainWindow(QMainWindow):
         """기준 layer 미선택 시 대기 화면: 매칭·탐색·스트립·맵을 비우고 선택을 안내한다."""
         self.base_records = []
         self.matches = []
+        self._matches_reference = []
+        self._reference_diff = []
         self._view_cache = None
         self.current = -1
         self.strip.set_items([], [])
@@ -632,6 +649,7 @@ class MainWindow(QMainWindow):
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
         self._update_nomatch_button()
+        self._update_reference_diff_button()
         rec = self._recommended_base()
         hint = f"  (추천: {rec})" if rec else ""
         self.grid.show_empty(f"기준 layer 를 선택하세요.{hint}")
@@ -702,8 +720,46 @@ class MainWindow(QMainWindow):
             self.base_records, compare_layers, rbl, tolerance,
             index=idx, fail_index=fidx,
         )
+        # 정답 도구(reference_gate) 모드로도 계산해 현재 결과와 비교(사용자 요청).
+        self._matches_reference, _ = matcher.match_all_with_offsets(
+            self.base_records, compare_layers, rbl, tolerance,
+            index=idx, fail_index=fidx, reference_gate=True,
+        )
+        self._reference_diff = self._compute_reference_diff()
+        self._update_reference_diff_button()
         self._view_cache = None  # 매칭이 바뀌면 필터 결과 캐시 무효화
         self._update_match_summary()
+
+    def _compute_reference_diff(
+        self,
+    ) -> list[tuple[int, BaseDefectMatches, BaseDefectMatches]]:
+        """현재 모드와 정답 도구 모드의 매칭 결과가 다른(layer 별 matched 가 다른)
+        기준 사진만 골라낸다."""
+        diff: list[tuple[int, BaseDefectMatches, BaseDefectMatches]] = []
+        for i, (cur, ref) in enumerate(zip(self.matches, self._matches_reference)):
+            for cur_r in cur.results:
+                ref_r = ref.for_layer(cur_r.compare_layer)
+                cur_matched = cur_r.matched.image_path if cur_r.is_match else None
+                ref_matched = (
+                    ref_r.matched.image_path if ref_r and ref_r.is_match else None
+                )
+                if cur_matched != ref_matched:
+                    diff.append((i, cur, ref))
+                    break
+        return diff
+
+    def _update_reference_diff_button(self) -> None:
+        """정답 도구 비교 버튼의 카운트·활성 상태를 갱신한다."""
+        n = len(self._reference_diff)
+        self.btn_ref_diff.setText(f"정답 도구\n비교 {n}" if n else "정답 도구\n비교")
+        self.btn_ref_diff.setEnabled(n > 0)
+
+    def _open_reference_diff(self) -> None:
+        if not self._reference_diff:
+            self.banner.show_message("현재/정답 도구 모드 결과가 모두 같습니다.", "info")
+            return
+        dlg = ReferenceDiffDialog(self._reference_diff, self.thumb_cache, self._goto, self)
+        dlg.exec()
 
     def _get_match_indices(self, compare_layers, rbl):
         """(lot, 비교 layer 집합) 기준으로 die/실패 인덱스를 캐시·재사용한다."""

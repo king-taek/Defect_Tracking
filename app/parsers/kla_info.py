@@ -10,9 +10,10 @@
 
 zeroX/zeroY 는 info 파일의 `SampleTestPlan` 블록(그 lot/step 에서 실제 관측된
 XINDEX/YINDEX 최소값)에서 우선 계산한다 — 제품 설정(PackageX/Y÷2)은 이 블록이
-없을 때만 쓰는 폴백이다. 제품 설정값은 lot/step 마다 실측과 어긋날 수 있어
-(예: DEVA 은 PackageY=5 라 zeroY=2 로 설정돼 있었지만 실측 YINDEX 범위는
--3~+2 로 zeroY=3 이 맞았다), info 파일 자신의 실측값이 더 신뢰할 수 있다.
+없을 때만 쓰는 폴백이다. 제품 설정값은 디바이스 DB 시트를 잘못 참조하는 등으로
+실측과 어긋날 수 있어(정답 VBA 도구/AOIDeviceDB.xlsx 로 확인한 DEVA 사례 —
+"DEVA"과 "DEVA Live" 두 시트가 있는데 후자가 실제 운영 값(PackageY=6, zeroY=3)),
+info 파일 자신의 실측값이 더 신뢰할 수 있다.
 
 원본 info/이미지 파일은 read-only 로만 읽는다.
 """

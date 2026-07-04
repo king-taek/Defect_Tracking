@@ -3,10 +3,13 @@
 원본 이미지 이름(예: 253715.91797.c.-1104740629.1)에 ".jpeg" 를 붙여 INI section 을 찾고,
 해당 section 의 X/Y(없으면 FaultX/FaultY)와 Col/Row 로 위치 정보를 계산한다.
 
-  col = Col - 2
-  row = 7 - Row
-  x   = X - Col * 37247.7
-  y   = Y - Row * 44905.4
+  col = Col - camtek_col_offset
+  row = camtek_row_base - Row
+  x   = X - Col * camtek_pitch_x
+  y   = Y - Row * camtek_pitch_y
+
+(상수는 활성 제품 프로파일(`config.active_product()`)에서 온다 — 기본 DEVA 은
+col_offset=2, row_base=7, pitch_x=37170.0, pitch_y=44830.0.)
 
 원본 INI 는 read-only 로만 읽는다.
 """

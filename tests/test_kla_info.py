@@ -15,15 +15,14 @@ DefectList
 
 
 def test_kla_worked_example():
-    """문서 정답: W5929249XYD6_0_1_23_2.jpg -> 3_3_4629_5351
-    col = XINDEX(0) + zeroX(3) = 3
-    row = YINDEX(1) + zeroY(2) = 3   (PackageY=5, zeroY=5÷2=2)
+    """col = XINDEX(0) + zeroX(3) = 3
+    row = YINDEX(1) + zeroY(3) = 4   ("DEVA Live" 실측: PackageY=6, zeroY=6÷2=3)
     """
     parsed = kla_info.parse_info_text(SAMPLE_INFO)
     res = kla_info.convert_from_parsed(parsed, "W5929249XYD6_0_1_23_2.jpg")
     assert res.status == ParseStatus.OK
     assert res.col == 3
-    assert res.row == 3
+    assert res.row == 4
     assert round(res.x) == 4629
     assert round(res.y) == 5351
 
@@ -113,7 +112,7 @@ def test_kla_filename_fallback_by_xindex_yindex():
     res = kla_info.convert_from_parsed(parsed, "W6460170XYB4_-2_0_23_1.jpg")
     assert res.status == ParseStatus.OK
     assert res.col == 1   # -2 + 3 (zeroX)
-    assert res.row == 2   # 0 + 2 (zeroY)
+    assert res.row == 3   # 0 + 3 (zeroY)
     assert round(res.x) == 8653
     assert round(res.y) == 39318  # round(44905.301 - 5587.609)
 
@@ -141,7 +140,9 @@ DefectList
 def test_sample_test_plan_derives_zero_offsets():
     """실측 SampleTestPlan(XINDEX -3~3, YINDEX -3~0)으로 zeroX=3, zeroY=3 계산.
 
-    제품 설정값(zeroY=2)을 썼다면 YINDEX=-3 은 row=-1(음수)로 실패했을 die.
+    info 파일 자체의 실측값에서 계산되며, 제품 설정값과 우연히 같더라도 그건
+    설정값을 참조한 게 아니라 SampleTestPlan 에서 독립적으로 유도된 것이다
+    (parsed.sample_zero 가 None 이 아님으로 확인).
     """
     parsed = kla_info.parse_info_text(SAMPLE_TEST_PLAN_INFO)
     assert parsed.sample_zero == (3, 3)
@@ -152,13 +153,13 @@ def test_sample_test_plan_derives_zero_offsets():
 
 
 def test_sample_test_plan_absent_falls_back_to_config():
-    """SampleTestPlan 이 없는 info 는 제품 설정값(zeroX=3, zeroY=2)으로 폴백."""
+    """SampleTestPlan 이 없는 info 는 제품 설정값(zeroX=3, zeroY=3)으로 폴백."""
     parsed = kla_info.parse_info_text(SAMPLE_INFO)
     assert parsed.sample_zero is None
     res = kla_info.convert_from_parsed(parsed, "W5929249XYD6_0_1_23_2.jpg")
     assert res.status == ParseStatus.OK
     assert res.col == 3
-    assert res.row == 3
+    assert res.row == 4
 
 
 def test_kla_class_zero_filename_reports_as_unclassified_candidate():
