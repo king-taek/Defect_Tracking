@@ -103,16 +103,14 @@ def test_grid_hides_unmatched_cells(win):
     assert len(visible2) >= 2
 
 
-# ---- 항목 7: 썸네일 확대율 ----
+# ---- 썸네일 확대율: 5× 고정, 조절 UI 없음 ----
 
-def test_thumbnail_zoom_label_and_ratio(win):
-    # 기본 0.20(≈5×)
+def test_thumbnail_zoom_fixed_5x_no_button(win):
+    # 중앙 20%(≈5×) 고정.
     assert abs(win._thumbnail_center_ratio() - 0.20) < 1e-6
-    assert "≈5×" in win.btn_thumb_zoom.text()
-    # 배율을 바꾸면 설정과 라벨이 갱신
-    win.settings.thumbnail_center_ratio = 0.1
-    win._update_thumb_zoom_label()
-    assert "≈10×" in win.btn_thumb_zoom.text()
+    # 조절 버튼/메서드가 제거됐다.
+    assert not hasattr(win, "btn_thumb_zoom")
+    assert not hasattr(win, "_adjust_thumbnail_zoom")
 
 
 # ---- 항목 4·5: 히트맵 다이얼로그 ----
@@ -129,26 +127,29 @@ def test_heatmap_dialog_constructs_and_selects(win, app):
     # 밀도 그룹이 채워지고 웨이퍼맵 격자가 잡힌다.
     assert dlg._map._cols >= 1 and dlg._map._rows >= 1
     assert dlg._groups, "defect 밀도 그룹이 있어야 한다"
-    # 첫 셀 선택 → 상세 목록 구성 + 담기 동작
+    # 첫 셀 선택 → 상세 목록 구성(행 stretch 외 1개 이상) + 담기 동작
     key = next(iter(dlg._groups))
     dlg._on_cell_clicked(key)
-    assert dlg._detail_grid.count() > 0
+    assert dlg._detail_box.count() >= 2  # 행 위젯 + stretch
     dlg._add_all_current()
     assert added, "이 위치 전체 담기가 트레이 콜백을 호출해야 한다"
 
 
-def test_heatmap_preset_switch(win, app):
-    from app.ui.heatmap_dialog import HeatmapDialog, _PRESETS
+def test_heatmap_all_wafers_aggregates(win, app):
+    from app.ui.heatmap_dialog import HeatmapDialog, _ALL_WAFERS
 
     dlg = HeatmapDialog(
         win.matches, win.top.base_layer(), win.top.compare_layers(),
         win.thumb_cache, lambda idxs: None, win.settings,
     )
-    for i in range(len(_PRESETS)):
-        dlg._on_preset_changed(i)
-        assert dlg._preset_idx == i
-    # 마지막 프리셋이 설정에 저장된다.
-    assert win.settings.heatmap_layout == len(_PRESETS) - 1
+    # '전체' wafer 항목이 콤보 맨 앞에 있고, 선택 시 모든 wafer 를 집계한다.
+    assert dlg.cmb_wafer.itemText(0) == _ALL_WAFERS
+    dlg._on_wafer_changed(_ALL_WAFERS)
+    all_entries = dlg._current_entries()
+    total = sum(1 for m in win.matches
+                if m.base.col is not None and m.base.row is not None
+                and m.base.col >= 0 and m.base.row >= 0)
+    assert len(all_entries) == total
 
 
 def test_heatmap_subdivide_small_die_count(app):

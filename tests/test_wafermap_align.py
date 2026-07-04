@@ -31,6 +31,40 @@ def test_alignment_empty_inputs():
     assert wafermap_align.align_observed_to_diemap({(0, 0)}, frozenset()).overlap == 0.0
 
 
+def test_sparse_observed_centered_within_shape():
+    """성긴 관측 die(디바이스 모양의 일부)여도 윤곽이 defect 옆으로 밀리지 않아야 한다.
+
+    회귀: 동점 translation 을 임의로 고르면 윤곽(valid)이 관측 die 옆으로 shift 되어
+    보였다. 이제 관측을 모양 안에 중앙 정렬하는 이동을 결정론적으로 골라야 한다.
+    """
+    # 큰 원반형 die_map: 11x11 격자에서 중심 반경 안쪽만 존재.
+    cx = cy = 5
+    die_map = frozenset(
+        (c, r) for c in range(11) for r in range(11)
+        if (c - cx) ** 2 + (r - cy) ** 2 <= 25
+    )
+    # 관측은 그 모양의 정확한 부분집합(가운데 근처 3개) — 동일 좌표계(shift 0).
+    observed = {(5, 5), (5, 4), (6, 5)}
+    al = wafermap_align.align_observed_to_diemap(observed, die_map)
+    # 올바른 정합은 이동 0 — 관측이 이미 die_map 부분집합이므로.
+    assert (al.dcol, al.drow) == (0, 0)
+    assert al.overlap == 1.0
+    # 옮긴 die_map 이 관측을 모두 포함(윤곽 안에 defect 이 놓임).
+    shifted = wafermap_align.shifted_die_map(die_map, al)
+    assert observed <= shifted
+
+
+def test_sparse_alignment_is_deterministic():
+    """같은 입력이면 항상 같은 이동(해시 순서 의존 제거)."""
+    die_map = frozenset((c, r) for c in range(9) for r in range(9))
+    observed = {(4, 4), (4, 5), (5, 4)}
+    results = {
+        wafermap_align.align_observed_to_diemap(set(observed), die_map)
+        for _ in range(5)
+    }
+    assert len(results) == 1
+
+
 def test_match_product_for_path_builtin():
     # 기본 제품 DEVAINT 는 경로에 'DEVAINT' 가 있으면 인식된다.
     key, score = config.match_product_for_path("/data/204. DEVAINT.226 (PKG)")

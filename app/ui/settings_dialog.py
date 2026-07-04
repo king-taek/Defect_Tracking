@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -70,17 +69,14 @@ class SettingsDialog(QDialog):
         self.ed_output.setPlaceholderText("(비우면 작업공간/exports 사용)")
         form.addRow("출력 폴더", self._with_browse(self.ed_output, self._pick_output))
 
-        self.ed_log_dir = QLineEdit(self._settings.log_dir)
-        self.ed_log_dir.setPlaceholderText("(비우면 작업공간/logs 사용)")
-        form.addRow("로그 저장 경로", self._with_browse(self.ed_log_dir, self._pick_log_dir))
-
-        self.spn_tol = QDoubleSpinBox()
-        self.spn_tol.setRange(0.0, 100000.0)
-        self.spn_tol.setDecimals(1)
-        self.spn_tol.setSingleStep(10.0)
-        self.spn_tol.setSuffix(" µm")
-        self.spn_tol.setValue(self._settings.tolerance or config.DEFAULT_TOLERANCE)
-        form.addRow("기본 허용 오차", self.spn_tol)
+        # 로그 저장 경로는 개발자 모드(CONDER_DEV)에서만 노출한다.
+        self.ed_log_dir = None
+        if config.dev_mode():
+            self.ed_log_dir = QLineEdit(self._settings.log_dir)
+            self.ed_log_dir.setPlaceholderText("(비우면 작업공간/logs 사용)")
+            form.addRow(
+                "로그 저장 경로", self._with_browse(self.ed_log_dir, self._pick_log_dir)
+            )
 
         # 디바이스 DB 파일(AOIDeviceDB.xlsx) — 있으면 제품 목록을 확장한다.
         self.ed_device_db = QLineEdit(self._settings.device_db_path)
@@ -124,13 +120,14 @@ class SettingsDialog(QDialog):
         upd_lay.addWidget(self.lbl_update, 1)
         form.addRow("업데이트", upd_host)
 
-        # 진단 로그(parse_failures.md 등)가 있는 폴더 열기 — 위치를 못 찾는 문제 해소.
-        self.btn_logs = QPushButton("로그 폴더 열기")
-        self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")
-        self.btn_logs.clicked.connect(self._open_logs)
-        form.addRow("진단/로그", self.btn_logs)
+        # 진단/로그 폴더 열기 — 개발자 모드(CONDER_DEV)에서만 노출한다.
+        if config.dev_mode():
+            self.btn_logs = QPushButton("로그 폴더 열기")
+            self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")
+            self.btn_logs.clicked.connect(self._open_logs)
+            form.addRow("진단/로그", self.btn_logs)
 
-        # 단축키·도움말 보기(상단 밴드에서 이동) — 보기 필터/상태 범례 포함.
+        # 단축키·도움말 보기(상단 밴드에서 이동).
         self.btn_help = QPushButton("단축키 · 도움말 보기")
         self.btn_help.clicked.connect(self._open_help)
         form.addRow("도움말", self.btn_help)
@@ -251,17 +248,18 @@ class SettingsDialog(QDialog):
     def _on_accept(self) -> None:
         workspace = self.ed_workspace.text().strip()
         output = self.ed_output.text().strip()
-        log_dir = self.ed_log_dir.text().strip()
+        log_dir = self.ed_log_dir.text().strip() if self.ed_log_dir is not None else ""
         if not workspace:
             self._error("작업공간 폴더를 지정하세요.")
             return
         # 원본 보호: 작업공간/출력/로그 경로가 현재 LOT 내부면 차단.
         if self._current_lot:
-            targets = (
+            targets = [
                 (workspace, "작업공간"),
                 (output or workspace, "출력"),
-                (log_dir or workspace, "로그"),
-            )
+            ]
+            if self.ed_log_dir is not None:
+                targets.append((log_dir or workspace, "로그"))
             for target, label in targets:
                 if conflicting_source(target, [self._current_lot]) is not None:
                     self._error(
@@ -289,8 +287,8 @@ class SettingsDialog(QDialog):
         """다이얼로그 입력을 반영한 설정(저장은 호출 측)."""
         self._settings.workspace = self.ed_workspace.text().strip()
         self._settings.output_folder = self.ed_output.text().strip()
-        self._settings.log_dir = self.ed_log_dir.text().strip()
-        self._settings.tolerance = self.spn_tol.value()
+        if self.ed_log_dir is not None:  # 개발자 모드에서만 로그 경로 편집
+            self._settings.log_dir = self.ed_log_dir.text().strip()
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
         self._settings.device_db_path = self.ed_device_db.text().strip()

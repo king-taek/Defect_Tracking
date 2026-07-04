@@ -50,7 +50,6 @@ from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui.nomatch_gallery import NoMatchGalleryDialog
 from app.ui.notifications import NotificationBanner
-from app.ui.reference_diff_dialog import ReferenceDiffDialog
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.ui.wafer_map import WaferMapWidget
@@ -81,9 +80,6 @@ class MainWindow(QMainWindow):
         self._match_idx = None
         self._match_fail = None
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
-        # 정답 도구(reference_gate) 모드로도 매칭해 현재 모드와 비교(사용자 요청).
-        self._matches_reference: list[BaseDefectMatches] = []
-        self._reference_diff: list[tuple[int, BaseDefectMatches, BaseDefectMatches]] = []
         # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
         # 출력 담기 트레이(항목 1): 현재 matches 기준 base index 목록. 기준/새 LOT 시 초기화.
@@ -154,8 +150,9 @@ class MainWindow(QMainWindow):
         main.setContentsMargins(10, 10, 10, 10)
         main.setSpacing(8)
 
-        self.banner = NotificationBanner()
-        main.addWidget(self.banner)
+        # 알림 배너는 레이아웃에 넣지 않고 창 위 오버레이로 띄운다(표시 시 UI 가 밀리지 않음).
+        self.banner = NotificationBanner(root)
+        self.banner.hide()
 
         # 좌측 사이드바 | 우측(짧은 상단 + 큰 그리드) — 수평 스플리터
         self.splitter = QSplitter(Qt.Horizontal)
@@ -204,17 +201,6 @@ class MainWindow(QMainWindow):
         self.btn_nomatch.clicked.connect(self._open_nomatch_gallery)
         self.btn_nomatch.setEnabled(False)
         strip_row.addWidget(self.btn_nomatch, 0, Qt.AlignVCenter)
-        # 정답 도구(원본 AOI Data Viewer VBA reference_gate) 모드와 결과가 다른
-        # 기준 사진을 모아 보는 버튼 — 차이가 있을 때만 활성화.
-        self.btn_ref_diff = QPushButton("정답 도구\n비교")
-        self.btn_ref_diff.setFixedSize(96, 96)
-        self.btn_ref_diff.setToolTip(
-            "정답 VBA 도구(원본 AOI Data Viewer) 방식으로도 매칭을 계산해, 현재 결과와 "
-            "다른 기준 사진이 있으면 모아 봅니다."
-        )
-        self.btn_ref_diff.clicked.connect(self._open_reference_diff)
-        self.btn_ref_diff.setEnabled(False)
-        strip_row.addWidget(self.btn_ref_diff, 0, Qt.AlignVCenter)
         # defect 히트맵 보기(항목 4) — 웨이퍼맵에 defect 밀도를 표시하고 위치별 비교.
         self.btn_heatmap = QPushButton("히트맵\n보기")
         self.btn_heatmap.setFixedSize(96, 96)
@@ -256,21 +242,11 @@ class MainWindow(QMainWindow):
         self.btn_add_export.clicked.connect(self._add_current_to_export)
         self.btn_add_export.setEnabled(False)
         self.nav.add_widget(self.btn_add_export)
-        # 상단 썸네일 확대율 표시 + 조절(항목 7)
-        self.btn_thumb_zoom = QPushButton("")
-        self.btn_thumb_zoom.setObjectName("mini")
-        self.btn_thumb_zoom.setToolTip(
-            "상단 매치 썸네일의 확대율을 조절합니다.\n"
-            "사진 중앙 일부만 잘라 확대해 보여주며, 값이 작을수록 더 크게 확대됩니다."
-        )
-        self.btn_thumb_zoom.clicked.connect(self._adjust_thumbnail_zoom)
-        self.nav.add_widget(self.btn_thumb_zoom)
         self.lbl_view = QLabel("")
         self.lbl_view.setObjectName("dim")
         self.nav.add_widget(self.lbl_view)
         band_layout.addWidget(self.nav)
         right_layout.addWidget(top_band)
-        self._update_thumb_zoom_label()
 
         # 진행바 + 중단 버튼(스캔 중에만 표시)
         progress_row = QHBoxLayout()
@@ -319,6 +295,13 @@ class MainWindow(QMainWindow):
         main.addWidget(self.splitter, 1)
 
         self.setCentralWidget(root)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        # 오버레이 배너를 창 크기에 맞춰 상단 중앙에 유지한다.
+        if getattr(self, "banner", None) is not None:
+            self.banner.reposition()
+            self.banner.raise_()
 
     def _install_shortcuts(self) -> None:
         QShortcut(QKeySequence(Qt.Key_Right), self, activated=self._next)
@@ -556,8 +539,8 @@ class MainWindow(QMainWindow):
         status += ")"
         self.nav.set_status(status)
         self.nav.set_status_tooltip(self._failure_summary(failed))
-        # 좌표 추출 실패 진단 리포트를 단일 md 로 갱신(개발용, 항상 최신 1개).
-        report_path = self._write_diag_report(index)
+        # 좌표 추출 실패 진단 리포트는 개발자 모드(CONDER_DEV)에서만 파일로 남긴다.
+        report_path = self._write_diag_report(index) if config.dev_mode() else None
         if failed:
             self.banner.show_message(
                 f"{len(failed)}개 이미지의 좌표를 추출하지 못했습니다(상태표시줄에 상세).",
@@ -661,8 +644,6 @@ class MainWindow(QMainWindow):
         """기준 layer 미선택 시 대기 화면: 매칭·탐색·스트립·맵을 비우고 선택을 안내한다."""
         self.base_records = []
         self.matches = []
-        self._matches_reference = []
-        self._reference_diff = []
         self._view_cache = None
         self.current = -1
         self.strip.set_items([], [])
@@ -672,7 +653,6 @@ class MainWindow(QMainWindow):
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
         self._update_nomatch_button()
-        self._update_reference_diff_button()
         self._clear_export_tray()
         rec = self._recommended_base()
         hint = f"  (추천: {rec})" if rec else ""
@@ -747,46 +727,8 @@ class MainWindow(QMainWindow):
             self.base_records, compare_layers, rbl, tolerance,
             index=idx, fail_index=fidx,
         )
-        # 정답 도구(reference_gate) 모드로도 계산해 현재 결과와 비교(사용자 요청).
-        self._matches_reference, _ = matcher.match_all_with_offsets(
-            self.base_records, compare_layers, rbl, tolerance,
-            index=idx, fail_index=fidx, reference_gate=True,
-        )
-        self._reference_diff = self._compute_reference_diff()
-        self._update_reference_diff_button()
         self._view_cache = None  # 매칭이 바뀌면 필터 결과 캐시 무효화
         self._update_match_summary()
-
-    def _compute_reference_diff(
-        self,
-    ) -> list[tuple[int, BaseDefectMatches, BaseDefectMatches]]:
-        """현재 모드와 정답 도구 모드의 매칭 결과가 다른(layer 별 matched 가 다른)
-        기준 사진만 골라낸다."""
-        diff: list[tuple[int, BaseDefectMatches, BaseDefectMatches]] = []
-        for i, (cur, ref) in enumerate(zip(self.matches, self._matches_reference)):
-            for cur_r in cur.results:
-                ref_r = ref.for_layer(cur_r.compare_layer)
-                cur_matched = cur_r.matched.image_path if cur_r.is_match else None
-                ref_matched = (
-                    ref_r.matched.image_path if ref_r and ref_r.is_match else None
-                )
-                if cur_matched != ref_matched:
-                    diff.append((i, cur, ref))
-                    break
-        return diff
-
-    def _update_reference_diff_button(self) -> None:
-        """정답 도구 비교 버튼의 카운트·활성 상태를 갱신한다."""
-        n = len(self._reference_diff)
-        self.btn_ref_diff.setText(f"정답 도구\n비교 {n}" if n else "정답 도구\n비교")
-        self.btn_ref_diff.setEnabled(n > 0)
-
-    def _open_reference_diff(self) -> None:
-        if not self._reference_diff:
-            self.banner.show_message("현재/정답 도구 모드 결과가 모두 같습니다.", "info")
-            return
-        dlg = ReferenceDiffDialog(self._reference_diff, self.thumb_cache, self._goto, self)
-        dlg.exec()
 
     def _open_heatmap(self) -> None:
         if not self.matches:
@@ -872,45 +814,11 @@ class MainWindow(QMainWindow):
         self.settings.base_layer = self.top.base_layer()
         self.settings.compare_layers = self.top.compare_layers()
 
-    # ------------------------------------------------- 썸네일 확대율(항목 7)
-    def _thumbnail_center_ratio(self) -> float:
-        """상단 썸네일 중앙 crop 비율(설정값, 0.02~1.0 로 clamp)."""
-        r = getattr(self.settings, "thumbnail_center_ratio", None)
-        if r is None:
-            r = config.THUMBNAIL_CENTER_RATIO
-        return max(0.02, min(1.0, float(r)))
-
-    def _update_thumb_zoom_label(self) -> None:
-        ratio = self._thumbnail_center_ratio()
-        zoom = config.zoom_from_ratio(ratio)
-        self.btn_thumb_zoom.setText(f"🔍 중앙 {ratio * 100:.0f}% · ≈{zoom}×")
-
-    def _adjust_thumbnail_zoom(self) -> None:
-        """썸네일 확대율(중앙 crop 배율)을 사용자에게 물어 조절한다."""
-        cur_zoom = config.zoom_from_ratio(self._thumbnail_center_ratio())
-        value, ok = QInputDialog.getInt(
-            self,
-            "썸네일 확대율",
-            "상단 매치 썸네일 확대율(×)을 입력하세요.\n"
-            f"현재: 약 {cur_zoom}× (값이 클수록 더 크게 확대).\n"
-            "권장 1~20 (예: 5 = 사진 중앙 20% 를 잘라 확대).",
-            value=cur_zoom,
-            minValue=1,
-            maxValue=50,
-        )
-        if not ok:
-            return
-        self.settings.thumbnail_center_ratio = round(1.0 / max(1, value), 4)
-        try:
-            self.settings.save()
-        except OSError:
-            pass
-        self._update_thumb_zoom_label()
-        # 새 배율로 상단 썸네일 재생성(캐시 키에 배율이 포함되어 자동 구분됨).
-        if self.base_records:
-            self._start_thumbnails()
-        self.banner.show_message(f"썸네일 확대율을 약 {value}× 로 바꿨습니다.", "success",
-                                 timeout_ms=2000)
+    # ------------------------------------------------- 썸네일 확대율
+    @staticmethod
+    def _thumbnail_center_ratio() -> float:
+        """상단 썸네일 중앙 crop 비율 — 5× 고정(사진 중앙 20%)."""
+        return config.THUMBNAIL_CENTER_RATIO
 
     # ------------------------------------------------- 출력 담기 트레이(항목 1)
     def _add_current_to_export(self) -> None:

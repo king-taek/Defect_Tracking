@@ -349,44 +349,6 @@ def test_session_mark_toggle_via_window(win):
     assert win.session.is_marked(str(base.image_path)) is False
 
 
-def test_reference_diff_button_and_dialog(win):
-    """현재 모드와 정답 도구(reference_gate) 모드 결과가 갈리면 비교 버튼이
-    활성화되고, 다이얼로그가 그 항목들만 모아 보여준다."""
-    from app.models import BaseDefectMatches, MatchResult
-    from app.ui.reference_diff_dialog import ReferenceDiffDialog
-
-    assert not win.btn_ref_diff.isEnabled()  # 평소(현재/정답 동일)엔 비활성
-
-    layer = win.top.compare_layers()[0]
-    base = win.matches[0].base
-    stand_in = win.matches[1].base  # 실제 DefectRecord 아무거나(matched 표시용)
-
-    cur_diverging = BaseDefectMatches(
-        base=base,
-        results=[MatchResult(compare_layer=layer, base=base, matched=stand_in, distance=5000.0)],
-    )
-    ref_diverging = BaseDefectMatches(
-        base=base,
-        results=[MatchResult(compare_layer=layer, base=base, matched=None, distance=None)],
-    )
-    win.matches = [cur_diverging] + list(win.matches[1:])
-    win._matches_reference = [ref_diverging] + list(win._matches_reference[1:])
-    win._reference_diff = win._compute_reference_diff()
-    win._update_reference_diff_button()
-
-    assert len(win._reference_diff) == 1
-    assert win.btn_ref_diff.isEnabled()
-    assert win.btn_ref_diff.text().endswith("1")
-
-    navigated = {}
-    dlg = ReferenceDiffDialog(
-        win._reference_diff, win.thumb_cache, lambda i: navigated.setdefault("i", i)
-    )
-    assert dlg._grid.count() == 1
-    dlg._on_thumb_clicked(0)
-    assert navigated.get("i") == 0
-
-
 def test_wafer_map_updates(win):
     item = win.matches[0]
     win._update_wafer_map(item)
@@ -568,10 +530,10 @@ def test_settings_dialog_constructs(app, tmp_path):
     s = AppSettings(workspace=str(tmp_path / "ws"))
     dlg = SettingsDialog(s, current_lot=None)
     dlg.ed_workspace.setText(str(tmp_path / "ws2"))
-    dlg.spn_tol.setValue(150.0)
     dlg.chk_update.setChecked(False)
     out = dlg.updated_settings()
-    assert out.tolerance == 150.0
+    # 기준 오차는 설정에서 제거됨(사이드바에서만 조절).
+    assert not hasattr(dlg, "spn_tol")
     assert out.auto_update_check is False
     assert out.workspace == str(tmp_path / "ws2")
 

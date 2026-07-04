@@ -166,6 +166,18 @@ def kla_zero_y() -> int:
 
 APP_NAME = "Defect Layer Tracker"
 
+# 제작 크레딧(UI 곳곳 표기용 단일 출처)
+CREDITS = "Designed by JinHan Kim, Developed by HyunTaek Lim"
+
+
+def dev_mode() -> bool:
+    """개발자 모드 여부(환경변수 CONDER_DEV). 일반 사용자에겐 로그/진단 UI 를 숨긴다.
+
+    참(1/true/on/yes)일 때만 파일 로그 생성·진단 리포트·설정의 로그 경로 노출을 켠다.
+    """
+    val = os.environ.get("CONDER_DEV", "").strip().lower()
+    return val in ("1", "true", "on", "yes", "y")
+
 # 자동 업데이트 대상 저장소(메인 브랜치를 가져와 적용)
 UPDATE_OWNER = "king-taek"
 UPDATE_REPO = "defect_tracking"
@@ -180,16 +192,9 @@ UPDATE_BRANCH = "main"
 DEFAULT_TOLERANCE = 100.0
 
 # 상단 썸네일은 사진 중앙 일부 구간만 확대 (Section 8.6) - 중앙 비율
-# 0.20 = 중앙 20% 를 잘라 ≈5× 확대(값이 작을수록 더 크게 확대). 사용자 설정으로 조절 가능.
+# 0.20 = 중앙 20% 를 잘라 ≈5× 확대(고정).
 THUMBNAIL_CENTER_RATIO = 0.20
 THUMBNAIL_SIZE = 140
-
-
-def zoom_from_ratio(ratio: float) -> int:
-    """중앙 crop 비율(0<r≤1)을 대략적인 확대 배율로 환산(표시용). 0.20→5, 0.10→10."""
-    if ratio <= 0:
-        return 1
-    return max(1, round(1.0 / ratio))
 
 # Layer 비교 그리드 기본 배치 (Section 8.4). 2열 그리드, 위에서 아래로.
 DEFAULT_LAYER_GRID = [

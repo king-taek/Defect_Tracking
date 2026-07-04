@@ -38,6 +38,14 @@ def make_splash() -> QSplashScreen:
         Qt.AlignCenter,
         f"v{__version__}",
     )
+    # 제작 크레딧(시작 화면)
+    credit = QFont("Segoe UI", 9)
+    p.setFont(credit)
+    p.drawText(
+        pm.rect().adjusted(0, 58, 0, 58),
+        Qt.AlignCenter,
+        config.CREDITS,
+    )
     p.end()
 
     splash = QSplashScreen(pm)

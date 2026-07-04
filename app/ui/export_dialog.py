@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -25,9 +26,9 @@ from PySide6.QtWidgets import (
 from app.models import BaseDefectMatches
 from app.thumbnails import ThumbnailCache
 from app.ui import theme
-from app.ui.widgets import ClickableThumb
 
-_COLUMNS = 4
+_COLUMNS = 3
+_THUMB_PX = 180  # 카드 썸네일 크기(크게)
 
 
 class ExportTrayDialog(QDialog):
@@ -73,7 +74,11 @@ class ExportTrayDialog(QDialog):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
+        # 흰 배경 제거 → 다이얼로그(테마) 배경이 비치게.
+        self._scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._scroll.viewport().setAutoFillBackground(False)
         self._host = QWidget()
+        self._host.setStyleSheet("background: transparent;")
         self._grid = QGridLayout(self._host)
         self._grid.setContentsMargins(4, 4, 4, 4)
         self._grid.setHorizontalSpacing(10)
@@ -122,45 +127,65 @@ class ExportTrayDialog(QDialog):
         self.btn_clear.setEnabled(shown > 0)
 
     def _make_card(self, idx: int, item: BaseDefectMatches) -> QWidget:
+        base = item.base
+        px = _THUMB_PX
         card = QFrame()
-        card.setFixedWidth(134)
+        card.setFixedWidth(px + 20)
         card.setObjectName("cell")
         card.setStyleSheet(
             f"QFrame#cell {{ background:{theme.BG_ELEV};"
             f" border:1px solid {theme.NEON_SOFT}; border-radius:8px; }}"
         )
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(4, 4, 4, 6)
+        lay.setContentsMargins(6, 6, 6, 8)
         lay.setSpacing(4)
 
-        # 상단: 제거(✕) 버튼
-        top = QHBoxLayout()
-        top.addStretch()
-        btn_x = QPushButton("✕")
-        btn_x.setObjectName("mini")
-        btn_x.setFixedSize(22, 22)
-        btn_x.setToolTip("이 사진을 출력 목록에서 뺍니다.")
-        btn_x.clicked.connect(lambda _=0, i=idx: self._remove(i))
-        top.addWidget(btn_x)
-        lay.addLayout(top)
-
-        base = item.base
-        thumb = ClickableThumb(idx)
-        thumb.set_caption(f"{base.wafer_id}\n({base.col},{base.row})")
+        # 큰 썸네일 + 그 위에 오버레이된 제거(✕) 버튼
+        thumb = QLabel()
+        thumb.setAlignment(Qt.AlignCenter)
+        thumb.setFixedSize(px, int(px * 0.78))
+        thumb.setStyleSheet(
+            f"background:{theme.BG}; border:1px solid {theme.NEON_SOFT};"
+            f" border-radius:6px; color:{theme.TEXT_DIM}; font-size:10px;"
+        )
         if self._thumb_cache is not None:
-            path = self._thumb_cache.get_center_thumbnail(base.image_path)
-            thumb.set_image(str(path) if path else None)
-        thumb.setCursor(Qt.ArrowCursor)
+            path = self._thumb_cache.get_full_thumbnail(base.image_path, max_size=px)
+            if path is not None:
+                pix = QPixmap(str(path))
+                if not pix.isNull():
+                    thumb.setPixmap(pix.scaled(
+                        px, int(px * 0.78), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    ))
+                else:
+                    thumb.setText("이미지 없음")
+            else:
+                thumb.setText("이미지 없음")
+        # ✕ 오버레이: 썸네일 우상단, 대비가 큰 반투명 어두운 배경 + 밝은 X.
+        btn_x = QPushButton("✕", thumb)
+        btn_x.setFixedSize(24, 24)
+        btn_x.setCursor(Qt.PointingHandCursor)
+        btn_x.setToolTip("이 사진을 출력 목록에서 뺍니다.")
+        btn_x.setStyleSheet(
+            "QPushButton { color:#ffffff; background:rgba(17,21,28,0.72);"
+            " border:1px solid rgba(255,255,255,0.55); border-radius:12px;"
+            " font-size:13px; font-weight:700; padding:0; }"
+            "QPushButton:hover { background:#b00020; border:1px solid #ffffff; }"
+        )
+        btn_x.move(px - 28, 4)
+        btn_x.clicked.connect(lambda _=0, i=idx: self._remove(i))
         lay.addWidget(thumb, alignment=Qt.AlignHCenter)
 
         n_match = sum(1 for r in item.results if r.is_match)
-        info = QLabel(f"매칭 {n_match}/{len(item.results)}  ·  pos {base.position_key}")
-        info.setObjectName("dim")
-        info.setStyleSheet("font-size:9px;")
-        info.setWordWrap(True)
-        info.setAlignment(Qt.AlignCenter)
-        info.setFixedWidth(124)
-        lay.addWidget(info)
+        cap = QLabel(
+            f"wafer {base.wafer_id} · die({base.col},{base.row})\n"
+            f"매칭 {n_match}/{len(item.results)} · pos {base.position_key}"
+        )
+        cap.setObjectName("dim")
+        cap.setStyleSheet("font-size:10px;")
+        cap.setWordWrap(True)
+        cap.setAlignment(Qt.AlignCenter)
+        cap.setFixedWidth(px)
+        lay.addWidget(cap, alignment=Qt.AlignHCenter)
         return card
 
     def _remove(self, idx: int) -> None:

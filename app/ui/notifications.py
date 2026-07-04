@@ -140,10 +140,22 @@ class NotificationBanner(QFrame):
         self._collapse.setStartValue(self.maximumHeight())
         self._collapse.setEndValue(target)
         self._group.start()
+        # 오버레이로 부모 위에 떠서 표시 — 레이아웃을 밀지 않아 화면이 흔들리지 않는다.
+        self.reposition()
+        self.raise_()
 
         self._auto_hide.stop()
         if timeout_ms > 0:
             self._auto_hide.start(timeout_ms)
+
+    def reposition(self) -> None:
+        """부모 위 상단 중앙에 배너를 배치한다(오버레이). 부모 크기 변화 시 호출."""
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        w = min(760, max(320, parent.width() - 40))
+        self.setFixedWidth(w)
+        self.move((parent.width() - w) // 2, 12)
 
     def dismiss(self) -> None:
         self._auto_hide.stop()

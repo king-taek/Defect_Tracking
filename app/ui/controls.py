@@ -191,6 +191,14 @@ class SideBar(QFrame):
         footer.addWidget(self.btn_export, 1)
         outer.addLayout(footer)
 
+        # 제작 크레딧(항상 보이는 사이드바 하단)
+        credit = QLabel(config.CREDITS)
+        credit.setObjectName("dim")
+        credit.setWordWrap(True)
+        credit.setStyleSheet("font-size:9px;")
+        credit.setAlignment(Qt.AlignHCenter)
+        outer.addWidget(credit)
+
         # 업데이트 버튼은 사이드바에서 제거(설정 다이얼로그로 이동). 호환용 더미 참조.
         self.btn_update = None
         self._update_available = False
