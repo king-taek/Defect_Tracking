@@ -194,6 +194,33 @@ QListWidget::item {{ padding: 10px; border-radius: 8px; min-height: 30px; }}
 QListWidget::item:hover {{ background: {NEON_SOFT}; }}
 QListWidget::item:selected {{ background: {NEON_DIM}; color: {TEXT}; }}
 
+/* ---- 아이템 뷰(트리/리스트/테이블) — 어두운 테마 통일(흰 배경 방지) ---- */
+QTreeView, QListView, QTableView, QColumnView {{
+    background-color: {BG_ELEV};
+    alternate-background-color: {BG_ELEV};
+    color: {TEXT};
+    border: 1px solid {NEON_SOFT};
+    border-radius: 8px;
+    outline: none;
+}}
+QTreeView::item, QListView::item, QTableView::item {{
+    padding: 3px 6px; border-radius: 6px;
+}}
+QTreeView::item:hover, QListView::item:hover, QTableView::item:hover {{
+    background: {NEON_SOFT};
+}}
+QTreeView::item:selected, QListView::item:selected, QTableView::item:selected {{
+    background: {NEON_DIM}; color: {TEXT};
+}}
+QTreeView::branch {{ background: transparent; }}
+QHeaderView::section {{
+    background-color: {BG_PANEL};
+    color: {TEXT_DIM};
+    border: none;
+    border-bottom: 1px solid {NEON_SOFT};
+    padding: 4px 6px;
+}}
+
 /* ---- 스플리터 손잡이(넓고 차분하게) ---- */
 QSplitter::handle {{ background: transparent; }}
 QSplitter::handle:horizontal {{ width: 10px; }}

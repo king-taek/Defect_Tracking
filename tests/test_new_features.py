@@ -275,12 +275,23 @@ def test_grid_rollback_base_top_left(win):
 
 
 def test_folder_picker_constructs(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from PySide6.QtWidgets import QFileSystemModel
+    from app.ui.folder_picker import FolderPickerDialog, _NoIconProvider
 
     (tmp_path / "sub").mkdir()
     dlg = FolderPickerDialog(str(tmp_path), recent=[str(tmp_path)])
     dlg._go_to(str(tmp_path / "sub"))
     assert dlg.selected_path() == str(tmp_path / "sub")
+    # 성능: 파일시스템 워처 없음 + 빈 아이콘 프로바이더(네트워크 드라이브 렉 방지).
+    assert dlg.model.testOption(QFileSystemModel.DontWatchForChanges) is True
+    assert isinstance(dlg.model.iconProvider(), _NoIconProvider)
+
+
+def test_theme_styles_item_views():
+    # 트리/리스트 뷰가 전역 테마로 어둡게 스타일링된다(흰 배경 방지).
+    from app.ui import theme
+    assert "QTreeView" in theme.STYLESHEET
+    assert "QHeaderView::section" in theme.STYLESHEET
 
 
 def test_heatmap_subdivide_small_die_count(app):
