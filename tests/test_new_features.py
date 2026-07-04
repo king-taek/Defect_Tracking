@@ -152,6 +152,51 @@ def test_heatmap_all_wafers_aggregates(win, app):
     assert len(all_entries) == total
 
 
+def test_wafer_map_bbox_normalized_no_margin_or_clip(win, app):
+    """웨이퍼맵이 좌표 원점과 무관하게 bounding box (0,0) 기준으로 그려진다.
+
+    회귀: 정합 shift 로 내용 min 이 양수면 왼쪽/위 여백(떠 보임), 음수면 좌·상단 잘림이
+    생겼다. 이제 origin 정규화로 그려지는 셀이 항상 (0,0)부터 시작하고 잘리지 않아야 한다.
+    """
+    from app import config
+    from app.config import ProductConfig
+    from app.models import BaseDefectMatches, DefectRecord, MatchResult
+    from pathlib import Path
+
+    dm = {(c, r) for c in range(7) for r in range(6) if 1 <= c <= 5 or 1 <= r <= 4}
+    config.PRODUCTS["TESTDISC_NORM"] = ProductConfig(
+        key="TESTDISC_NORM", name="Test Disc", camtek_pitch_x=1, camtek_pitch_y=1,
+        kla_package_x_count=7, kla_package_y_count=6, die_map=frozenset(dm), source="db",
+    )
+    prod0 = config.active_product().key
+
+    def mk(col, row):
+        b = DefectRecord(image_path=Path("/b.jpg"), wafer_id="W1", layer="LYA4",
+                         layer_folder="LYA4", col=col, row=row, x=0.0, y=0.0)
+        return BaseDefectMatches(base=b, results=[MatchResult(compare_layer="LYB4", base=b, matched=b)])
+
+    try:
+        config.set_active_product("TESTDISC_NORM")
+        for off in [(0, 0), (3, 2), (-2, -1), (10, 7)]:
+            obs = [(c + off[0], r + off[1]) for c, r in list(dm)[:8]]
+            win.matches = [mk(c, r) for c, r in obs]
+            win.current = 0
+            win._align_cache.clear()
+            win._update_wafer_map(win.matches[0])
+            wm = win.wafer_map
+            oc, orr = wm._origin_col, wm._origin_row
+            content = set(wm._valid) if wm._valid else set(wm._states)
+            assert content, f"offset {off}: 그릴 내용이 있어야 한다"
+            # 그려지는 최소 셀이 (0,0)에 오고(여백 0), 모두 격자 안(잘림 0)이어야 한다.
+            assert min(c - oc for c, _ in content) == 0
+            assert min(r - orr for _, r in content) == 0
+            assert all(0 <= c - oc < wm._cols and 0 <= r - orr < wm._rows for c, r in content)
+    finally:
+        config.set_active_product(prod0)
+        config.PRODUCTS.pop("TESTDISC_NORM", None)
+        win._align_cache.clear()
+
+
 def test_heatmap_subdivide_small_die_count(app):
     """die 개수가 적으면 웨이퍼맵이 하위셀 분할 모드가 된다."""
     from app.ui.heatmap_dialog import HeatmapDialog

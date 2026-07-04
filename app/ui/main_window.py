@@ -1072,19 +1072,33 @@ class MainWindow(QMainWindow):
         elif prod.source == "db":
             caption = prod.name
 
-        # 격자 크기는 관측 die 와 valid(디바이스 모양)를 모두 덮도록 산정.
-        all_dies = set(observed)
-        if valid:
-            all_dies |= valid
-        max_col = max((c for c, _ in all_dies), default=0)
-        max_row = max((r for _, r in all_dies), default=0)
-        cols = max(prod.kla_package_x_count, max_col + 1)
-        rows = max(prod.kla_package_y_count, max_row + 1)
         current = (item.base.col, item.base.row)
         # 실제 관측(매칭)된 die 는 DB 고정 모양(valid) 밖이어도 항상 그린다 — 그렇지 않으면
         # 정합 후 모양 밖으로 나온 새 die 가 격자만 커지고 색칠 없이 사라져 보인다.
         paint_valid = (valid | observed) if valid is not None else None
-        self.wafer_map.set_data(cols, rows, states, current, valid=paint_valid)
+
+        if paint_valid is not None:
+            # 디바이스 모양: 실제로 그려지는 셀(paint_valid = valid∪observed)의 bounding box
+            # 로 격자를 정규화한다. 좌표계 원점이 wafer 마다 달라도 맵이 여백에 떠 보이거나
+            # 좌·상단이 잘리지 않는다. (current 는 여기서 제외 — 음수 좌표로 걸러진 die 가
+            # 헛여백을 만들지 않도록. 유효한 current 는 이미 paint_valid 안에 있다.)
+            content = set(paint_valid)
+            min_col = min(c for c, _ in content)
+            min_row = min(r for _, r in content)
+            max_col = max(c for c, _ in content)
+            max_row = max(r for _, r in content)
+            cols = max_col - min_col + 1
+            rows = max_row - min_row + 1
+            origin = (min_col, min_row)
+        else:
+            # 사각 폴백: 원점 (0,0) + 패키지 크기(관측 max 로 확장).
+            max_col = max((c for c, _ in observed), default=0)
+            max_row = max((r for _, r in observed), default=0)
+            cols = max(prod.kla_package_x_count, max_col + 1)
+            rows = max(prod.kla_package_y_count, max_row + 1)
+            origin = (0, 0)
+
+        self.wafer_map.set_data(cols, rows, states, current, valid=paint_valid, origin=origin)
         self.lbl_wafer.setText(caption)
         self.wafer_map.setToolTip(
             "웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동"

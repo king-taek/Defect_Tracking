@@ -38,6 +38,11 @@ class WaferMapWidget(QWidget):
         self._states: dict[tuple[int, int], str] = {}
         self._current: Optional[tuple[int, int]] = None
         self._valid: Optional[frozenset] = None  # 존재하는 die (None 이면 전체 사각)
+        # 그리기 원점(실좌표) — 내용 bounding box 의 좌상단을 (0,0) 픽셀에 맞춘다.
+        # states/valid/current 는 실좌표 그대로 두고 그리기·클릭만 이 오프셋을 적용해,
+        # 좌표계 원점이 wafer 마다 달라도 맵이 떠 보이거나 잘리지 않게 한다.
+        self._origin_col = 0
+        self._origin_row = 0
         self.setToolTip("웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동")
         self.setMinimumSize(40, 40)
 
@@ -48,12 +53,14 @@ class WaferMapWidget(QWidget):
         states: dict[tuple[int, int], str],
         current: Optional[tuple[int, int]] = None,
         valid: Optional[frozenset] = None,
+        origin: tuple[int, int] = (0, 0),
     ) -> None:
         self._cols = max(0, cols)
         self._rows = max(0, rows)
         self._states = states
         self._current = current
         self._valid = valid if valid else None
+        self._origin_col, self._origin_row = origin
         self.setFixedSize(
             max(40, self._cols * (_CELL + _GAP) + _GAP),
             max(40, self._rows * (_CELL + _GAP) + _GAP),
@@ -66,8 +73,9 @@ class WaferMapWidget(QWidget):
         self.update()
 
     def _cell_rect(self, col: int, row: int) -> QRect:
-        x = _GAP + col * (_CELL + _GAP)
-        y = _GAP + row * (_CELL + _GAP)
+        """실좌표(col,row)를 원점 오프셋을 적용한 픽셀 사각형으로."""
+        x = _GAP + (col - self._origin_col) * (_CELL + _GAP)
+        y = _GAP + (row - self._origin_row) * (_CELL + _GAP)
         return QRect(x, y, _CELL, _CELL)
 
     def paintEvent(self, event):  # noqa: N802
@@ -75,8 +83,10 @@ class WaferMapWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, False)
         empty = QColor(theme.BG_ELEV)
         border = QColor(theme.NEON_SOFT)
-        for row in range(self._rows):
-            for col in range(self._cols):
+        for dr in range(self._rows):
+            row = dr + self._origin_row
+            for dc in range(self._cols):
+                col = dc + self._origin_col
                 # 디바이스 die 배치(valid)가 주어지면 존재하는 die 만 그린다(실제 모양).
                 if self._valid is not None and (col, row) not in self._valid:
                     continue
@@ -88,7 +98,8 @@ class WaferMapWidget(QWidget):
                 painter.drawRect(rect)
         if self._current is not None:
             cc, cr = self._current
-            if 0 <= cc < self._cols and 0 <= cr < self._rows:
+            if (self._origin_col <= cc < self._origin_col + self._cols
+                    and self._origin_row <= cr < self._origin_row + self._rows):
                 painter.setPen(QPen(QColor(theme.BASE_GLOW), 2))
                 painter.drawRect(self._cell_rect(cc, cr).adjusted(0, 0, -1, -1))
         painter.end()
@@ -97,8 +108,10 @@ class WaferMapWidget(QWidget):
         if event.button() != Qt.LeftButton:
             return
         pos = event.position().toPoint()
-        col = (pos.x() - _GAP) // (_CELL + _GAP)
-        row = (pos.y() - _GAP) // (_CELL + _GAP)
-        if 0 <= col < self._cols and 0 <= row < self._rows:
+        dc = (pos.x() - _GAP) // (_CELL + _GAP)
+        dr = (pos.y() - _GAP) // (_CELL + _GAP)
+        if 0 <= dc < self._cols and 0 <= dr < self._rows:
+            col = int(dc) + self._origin_col
+            row = int(dr) + self._origin_row
             if (col, row) in self._states:
-                self.die_clicked.emit(int(col), int(row))
+                self.die_clicked.emit(col, row)

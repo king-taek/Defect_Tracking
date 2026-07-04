@@ -55,27 +55,15 @@ def align_observed_to_diemap(
             votes[(oc - dc, orow - dr)] += 1
 
     # 동점(같은 최다 득표) translation 이 여럿일 수 있다 — 관측 die 가 성기면 작은
-    # cluster 가 큰 디바이스 모양 안 여러 위치에 똑같이 맞아 overlap 이 같아진다.
-    # 해시 순서로 임의 선택하면 윤곽이 defect 셀 옆으로 밀려 보인다(회귀 버그).
-    # → 최다 득표 후보 중 **관측 중심과 shifted die_map 중심이 가장 가까운**(die 를
-    #   모양 안에 중앙 정렬하는) 이동을 결정론적으로 고른다. 동률이면 |dcol|+|drow| 최소.
+    # cluster 가 큰(dense) 디바이스 모양 안 여러 위치에 똑같이 맞아 overlap 이 같아진다.
+    # 해시 순서로 임의 선택하면 윤곽이 defect 셀 옆으로 밀려 보이고, 관측 중심으로 맞추면
+    # 오히려 이미 제자리인 die 를 밀어버린다(관측이 die_map 부분집합일 때 shift 0 이 정답인데
+    # centroid 로 (-1,1) 등을 고름). 두 좌표계는 원점을 공유하도록 설계됐으므로, 최다 득표
+    # 후보 중 **이동 크기(|dcol|+|drow|)가 가장 작은**(= 원 좌표를 최대한 보존하는) 것을
+    # 결정론적으로 고른다. 이상적(부분집합) 경우 shift 0 을 되찾는다.
     best_votes = max(votes.values())
     candidates = [s for s, c in votes.items() if c == best_votes]
-    if len(candidates) == 1:
-        sdc, sdr = candidates[0]
-    else:
-        obs_cx = sum(c for c, _ in observed) / len(observed)
-        obs_cy = sum(r for _, r in observed) / len(observed)
-        dm_cx = sum(c for c, _ in die_map) / len(die_map)
-        dm_cy = sum(r for _, r in die_map) / len(die_map)
-        # shifted die_map 중심 = die_map 중심 + s. 관측 중심과 최소 거리인 s 를 원한다.
-        ideal = (obs_cx - dm_cx, obs_cy - dm_cy)
-
-        def _key(s: Die) -> tuple:
-            dist2 = (s[0] - ideal[0]) ** 2 + (s[1] - ideal[1]) ** 2
-            return (dist2, abs(s[0]) + abs(s[1]), s)
-
-        sdc, sdr = min(candidates, key=_key)
+    sdc, sdr = min(candidates, key=lambda s: (abs(s[0]) + abs(s[1]), s))
 
     # 전체 관측 기준 겹침 비율 산정(표본이 아닌 전체로 신뢰도 측정).
     shifted = {(ci + sdc, ri + sdr) for ci, ri in die_map}

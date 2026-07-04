@@ -80,6 +80,9 @@ class HeatmapWaferMap(QWidget):
         self._density: dict[HeatKey, int] = {}
         self._max_count = 1
         self._selected: Optional[HeatKey] = None
+        # 그리기 원점(실좌표) — 내용 bounding box 좌상단을 (0,0) 픽셀에 맞춘다(맵 떠보임/잘림 방지).
+        self._origin_col = 0
+        self._origin_row = 0
         self.setToolTip("defect 밀도 — 색이 진할수록 defect 이 많음. 위치를 클릭하세요.")
 
     def _die_w(self) -> int:
@@ -95,6 +98,7 @@ class HeatmapWaferMap(QWidget):
         valid: Optional[frozenset],
         subdivide: bool,
         density: dict[HeatKey, int],
+        origin: tuple[int, int] = (0, 0),
     ) -> None:
         self._cols = max(0, cols)
         self._rows = max(0, rows)
@@ -103,6 +107,7 @@ class HeatmapWaferMap(QWidget):
         self._density = density
         self._max_count = max(density.values(), default=1)
         self._selected = None
+        self._origin_col, self._origin_row = origin
         dw, dh = self._die_w(), self._die_h()
         self.setFixedSize(
             max(40, self._cols * (dw + self._GAP) + self._GAP),
@@ -116,15 +121,18 @@ class HeatmapWaferMap(QWidget):
 
     def _die_origin(self, col: int, row: int) -> tuple[int, int]:
         dw, dh = self._die_w(), self._die_h()
-        return self._GAP + col * (dw + self._GAP), self._GAP + row * (dh + self._GAP)
+        return (self._GAP + (col - self._origin_col) * (dw + self._GAP),
+                self._GAP + (row - self._origin_row) * (dh + self._GAP))
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
         border = QColor(theme.NEON_SOFT)
         die_border = QColor(theme.BASE_GLOW)
-        for row in range(self._rows):
-            for col in range(self._cols):
+        for dr in range(self._rows):
+            row = dr + self._origin_row
+            for dc in range(self._cols):
+                col = dc + self._origin_col
                 if self._valid is not None and (col, row) not in self._valid:
                     continue
                 ox, oy = self._die_origin(col, row)
@@ -157,7 +165,8 @@ class HeatmapWaferMap(QWidget):
         if self._selected is None:
             return
         key = self._selected
-        if not (0 <= key.col < self._cols and 0 <= key.row < self._rows):
+        if not (self._origin_col <= key.col < self._origin_col + self._cols
+                and self._origin_row <= key.row < self._origin_row + self._rows):
             return
         ox, oy = self._die_origin(key.col, key.row)
         painter.setPen(QPen(QColor(theme.NEON), 2))
@@ -173,10 +182,12 @@ class HeatmapWaferMap(QWidget):
             return
         pos = event.position().toPoint()
         dw, dh = self._die_w(), self._die_h()
-        col = (pos.x() - self._GAP) // (dw + self._GAP)
-        row = (pos.y() - self._GAP) // (dh + self._GAP)
-        if not (0 <= col < self._cols and 0 <= row < self._rows):
+        dc = (pos.x() - self._GAP) // (dw + self._GAP)
+        dr = (pos.y() - self._GAP) // (dh + self._GAP)
+        if not (0 <= dc < self._cols and 0 <= dr < self._rows):
             return
+        col = int(dc) + self._origin_col
+        row = int(dr) + self._origin_row
         ox, oy = self._die_origin(int(col), int(row))
         if self._subdivide:
             sc = min(heatmap.SUB_COLS - 1, max(0, (pos.x() - ox) // self._SUBCELL_PX))
@@ -400,13 +411,22 @@ class HeatmapDialog(QDialog):
             if align.overlap >= _ALIGN_MIN_OVERLAP:
                 valid = wafermap_align.shifted_die_map(prod.die_map, align)
                 caption = f"{prod.name} · 모양 정합 {align.overlap * 100:.0f}%"
-        all_dies = set(observed) | (valid or set())
-        max_col = max((c for c, _ in all_dies), default=0)
-        max_row = max((r for _, r in all_dies), default=0)
-        cols = max(prod.kla_package_x_count, max_col + 1)
-        rows = max(prod.kla_package_y_count, max_row + 1)
         paint_valid = (valid | observed) if valid else None
-        self._map.set_data(cols, rows, paint_valid, subdivide, density)
+        if paint_valid is not None:
+            # 내용 bounding box 로 정규화(맵이 여백에 떠 보이거나 잘리지 않게).
+            content = set(paint_valid) | observed
+            min_col = min(c for c, _ in content)
+            min_row = min(r for _, r in content)
+            cols = max(c for c, _ in content) - min_col + 1
+            rows = max(r for _, r in content) - min_row + 1
+            origin = (min_col, min_row)
+        else:
+            max_col = max((c for c, _ in observed), default=0)
+            max_row = max((r for _, r in observed), default=0)
+            cols = max(prod.kla_package_x_count, max_col + 1)
+            rows = max(prod.kla_package_y_count, max_row + 1)
+            origin = (0, 0)
+        self._map.set_data(cols, rows, paint_valid, subdivide, density, origin=origin)
 
         sub_txt = " · die 4×5 분할" if subdivide else ""
         n_def = sum(density.values())
