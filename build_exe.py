@@ -6,7 +6,7 @@
     pip install -r requirements.txt pyinstaller
     python build_exe.py
 
-산출물: dist/ConderCompare.exe
+산출물: dist/Defect Tracker.exe
 
 주의: 이 빌드는 GUI 동작에 PySide6 런타임을 포함한다. 좌표 변환/매칭/원본 보호 로직은
 빌드와 무관하게 동일하게 동작한다.
@@ -32,7 +32,7 @@ def main() -> int:
         "--onefile",
         "--windowed",
         "--name",
-        "ConderCompare",
+        "Defect Tracker",
         "--add-data",
         f"data{os.sep}AOIDeviceDB.xlsx{sep}data",
         "main.py",

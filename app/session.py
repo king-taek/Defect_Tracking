@@ -12,7 +12,7 @@ import os
 import re
 from pathlib import Path
 
-_log = logging.getLogger("conder.session")
+_log = logging.getLogger("defect_tracker.session")
 
 
 def _safe_name(name: str) -> str:

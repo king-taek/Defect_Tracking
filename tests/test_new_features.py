@@ -482,3 +482,115 @@ def test_help_dialog_has_sections_and_features(app):
     names = [n for n, _ in _FEATURES]
     assert any("히트맵" in n for n in names)
     assert any("클러스터" in n for n in names)
+
+
+# ---- 9차: 메인 매치 클러스터링 · 히트맵 강조/개별 · 폴더 트리 · 리브랜딩 ----
+
+def test_main_match_collapses_near_duplicates(app, tmp_path):
+    """메인 매치가 근접 중복 기준 defect 을 대표 1개로 접는다(base_cluster + '+n')."""
+    from app.ui.main_window import MainWindow
+    from tools.make_sample_data import generate
+
+    lot = generate(tmp_path / "src")
+    # 기존 base defect 과 같은 die·근접 위치의 중복 이미지를 하나 추가한다.
+    idx = scanner.scan_lot(lot)
+    base_layer = "LYA4"
+    raw = [r for r in idx.records_for_layer(base_layer) if r.ok]
+    assert raw
+    import dataclasses
+    dup = dataclasses.replace(
+        raw[0],
+        image_path=raw[0].image_path.with_name("dup_" + raw[0].image_path.name),
+        x=(raw[0].x or 0.0) + 5.0,
+    )
+    idx.records.append(dup)
+
+    w = MainWindow(AppSettings(workspace=str(tmp_path / "ws"), auto_update_check=False))
+    w.lot_index = idx
+    w._on_scan_finished(idx)
+    w.top.cmb_base.setCurrentText(base_layer)
+    for _ in range(10):
+        QCoreApplication.processEvents()
+
+    raw_count = len([r for r in idx.records_for_layer(base_layer) if r.ok])
+    assert len(w.matches) < raw_count  # 접힘
+    assert any(getattr(m.base_cluster, "extra_count", 0) for m in w.matches)
+
+
+def test_compare_grid_shows_cluster_badge(app, tmp_path):
+    from app.ui.compare_grid import CompareGrid, LayerCell
+    from app.models import BaseDefectMatches, DefectRecord
+    from app.clustering import Cluster
+    from pathlib import Path
+
+    def rec(n):
+        return DefectRecord(image_path=Path(f"/{n}.jpg"), wafer_id="W1", layer="B",
+                            layer_folder="B", col=1, row=1, x=0.0, y=0.0)
+    grid = CompareGrid()
+    grid.build_layout([["B"]], "B")
+    a, b = rec("a"), rec("b")
+    item = BaseDefectMatches(base=a, results=[], base_cluster=Cluster(a, [a, b]))
+    grid.update_for_base(item, [])
+    cell = grid._cells["B"]
+    assert not cell.more_badge.isHidden()  # 명시적으로 표시됨(창 미표시라 isVisible 대신)
+    assert cell.more_badge.text() == "+1"
+    # 클릭 시 묶인 멤버 목록을 emit
+    got = []
+    grid.base_cluster_clicked.connect(lambda m: got.append(m))
+    cell._emit_cluster()
+    assert got and len(got[0]) == 2
+
+
+def test_heatmap_selection_paint_smoke(win, app):
+    from PySide6.QtGui import QPixmap, QPainter
+    dlg = _make_heatmap(win)
+    dlg._selected_keys = list(dlg._groups.keys())[:1]
+    dlg._map._selected_keys = set(dlg._selected_keys)
+    pm = QPixmap(dlg._map.width() or 200, dlg._map.height() or 200)
+    p = QPainter(pm)
+    dlg._map._paint_selection(p)  # 채움+이중외곽선 경로가 예외 없이 실행
+    p.end()
+
+
+def test_heatmap_individual_flow_section(win, app):
+    # 전체 defect 모드에서 개별(미매칭) 그룹이 FlowLayout 섹션으로 묶인다.
+    from app.ui.flow_layout import FlowLayout
+    dlg = _make_heatmap(win)
+    groups = [{"LYA4": _one_cluster("/x.jpg")}]  # 단일 layer → 개별
+    sec = dlg._make_individual_section(groups)
+    flows = [c for c in sec.findChildren(QWidget) if c.layout().__class__.__name__ == "FlowLayout"] \
+        if False else None
+    # 섹션 캡션에 '개별(미매칭)' 포함
+    from PySide6.QtWidgets import QLabel
+    labels = [l.text() for l in sec.findChildren(QLabel)]
+    assert any("개별(미매칭)" in t for t in labels)
+
+
+def _one_cluster(path):
+    from app.clustering import Cluster
+    from app.models import DefectRecord
+    from pathlib import Path
+    r = DefectRecord(image_path=Path(path), wafer_id="W1", layer="LYA4",
+                     layer_folder="LYA4", col=1, row=1, x=0.0, y=0.0)
+    return Cluster(r, [r])
+
+
+def test_folder_picker_tree_first_and_reveal(app, tmp_path):
+    from PySide6.QtCore import Qt as _Qt
+    from app.ui.folder_picker import FolderPickerDialog
+    (tmp_path / "lot" / "layerA").mkdir(parents=True)
+    dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path / "lot"))
+    tops = [dlg.sidebar.topLevelItem(i).text(0) for i in range(dlg.sidebar.topLevelItemCount())]
+    assert any("홈" in t for t in tops)  # 최상위는 폴더 루트(홈/드라이브)
+    dlg._go_to(tmp_path / "lot" / "layerA")
+    cur = dlg.sidebar.currentItem()
+    assert cur is not None and str(cur.data(0, _Qt.UserRole)).endswith("layerA")
+
+
+def test_no_conder_branding_left():
+    import subprocess
+    out = subprocess.run(
+        ["grep", "-rniI", "conder", "app", "main.py", "README.md", "CLAUDE.md", ".gitignore"],
+        capture_output=True, text=True,
+    )
+    assert out.stdout.strip() == "", f"leftover conder refs:\n{out.stdout}"

@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_log = logging.getLogger("conder.device_db")
+_log = logging.getLogger("defect_tracker.device_db")
 
 _PKG_KEYS = ("X", "Y", "X1", "Y1")
 

@@ -69,7 +69,7 @@ class SettingsDialog(QDialog):
         self.ed_output.setPlaceholderText("(비우면 작업공간/exports 사용)")
         form.addRow("출력 폴더", self._with_browse(self.ed_output, self._pick_output))
 
-        # 로그 저장 경로는 개발자 모드(CONDER_DEV)에서만 노출한다.
+        # 로그 저장 경로는 개발자 모드(DEFECT_TRACKER_DEV)에서만 노출한다.
         self.ed_log_dir = None
         if config.dev_mode():
             self.ed_log_dir = QLineEdit(self._settings.log_dir)
@@ -120,7 +120,7 @@ class SettingsDialog(QDialog):
         upd_lay.addWidget(self.lbl_update, 1)
         form.addRow("업데이트", upd_host)
 
-        # 진단/로그 폴더 열기 — 개발자 모드(CONDER_DEV)에서만 노출한다.
+        # 진단/로그 폴더 열기 — 개발자 모드(DEFECT_TRACKER_DEV)에서만 노출한다.
         if config.dev_mode():
             self.btn_logs = QPushButton("로그 폴더 열기")
             self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")

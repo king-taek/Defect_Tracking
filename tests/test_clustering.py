@@ -103,3 +103,41 @@ def test_cross_layer_different_wafer_not_matched():
     c2 = cluster_records([_rec("b", "L2", 1, 1, 0.0, 0.0, wafer="W2")])
     groups = cross_layer_groups({"L1": c1, "L2": c2}, tolerance=100.0)
     assert len(groups) == 2
+
+
+# ---- 9차: collapse_matches (메인 매치 클러스터링) ----
+
+def _bdm(name, x, matched_c=None, wafer="W1"):
+    from app.models import BaseDefectMatches, MatchResult
+    b = _rec(name, "B", 1, 1, x, 0.0, wafer)
+    mr = MatchResult(compare_layer="C", base=b, matched=matched_c,
+                     distance=(2.0 if matched_c else None))
+    return BaseDefectMatches(base=b, results=[mr])
+
+
+def test_collapse_matches_folds_near_duplicates():
+    from app.clustering import collapse_matches
+    c = _rec("cx", "C", 1, 1, 22.0, 0.0)
+    a = _bdm("a", 0.0, matched_c=None)      # 대표(이름순), 개별로는 미매칭
+    b = _bdm("b", 20.0, matched_c=c)        # 근접(<50), C 매칭
+    far = _bdm("z", 500.0, matched_c=None)
+    out = collapse_matches([a, b, far])
+    assert len(out) == 2
+    rep = out[0]
+    assert rep.base.image_path.name == "a.jpg"      # 이름순 대표
+    assert rep.base_cluster.extra_count == 1        # +1 근접중복
+    assert rep.for_layer("C").is_match              # 멤버 b 의 매치가 병합됨
+    assert out[1].base.image_path.name == "z.jpg"   # 멀리 있는 건 그대로
+
+
+def test_collapse_matches_empty():
+    from app.clustering import collapse_matches
+    assert collapse_matches([]) == []
+
+
+def test_collapse_matches_no_duplicates_preserves_all():
+    from app.clustering import collapse_matches
+    items = [_bdm("a", 0.0), _bdm("b", 200.0), _bdm("c", 400.0)]
+    out = collapse_matches(items)
+    assert len(out) == 3
+    assert all((m.base_cluster is None) or m.base_cluster.extra_count == 0 for m in out)

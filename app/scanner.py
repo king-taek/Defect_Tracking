@@ -28,7 +28,7 @@ ProgressCb = Optional[Callable[[str, int, int], None]]
 CancelCb = Optional[Callable[[], bool]]  # True 면 스캔을 협조적으로 중단
 
 _INI_HINT = "colorimagegrabinginfo"
-_log = logging.getLogger("conder.scanner")
+_log = logging.getLogger("defect_tracker.scanner")
 
 # wafer 스캔 병렬 워커 수(네트워크 I/O 바운드 → CPU 수보다 넉넉히).
 _SCAN_WORKERS = max(4, min(16, (os.cpu_count() or 4) * 2))

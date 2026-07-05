@@ -25,7 +25,7 @@ from app import config
 from app.models import ParseStatus
 from app.safety import read_only_bytes
 
-_log = logging.getLogger("conder.parsers.ini")
+_log = logging.getLogger("defect_tracker.parsers.ini")
 
 
 @dataclass

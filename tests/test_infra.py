@@ -143,7 +143,7 @@ def test_setup_logging_idempotent(tmp_path):
     n = len(logger.handlers)
     logging_config.setup_logging(log_dir)  # 두 번째 호출
     assert len(logger.handlers) == n  # 핸들러 중복 추가 안 됨
-    assert (log_dir / "conder.log").exists()
+    assert (log_dir / "defect_tracker.log").exists()
 
 
 def test_log_dir_path_falls_back_to_workspace_logs(tmp_path):

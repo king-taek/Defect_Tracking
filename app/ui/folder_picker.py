@@ -265,24 +265,28 @@ class FolderPickerDialog(QDialog):
 
     def _reload_sidebar(self) -> None:
         self.sidebar.clear()
+        self._root_nodes = []  # (path, node) — 현재 위치 트리 동기화용 루트
+        root = self.sidebar.invisibleRootItem()
+        # 폴더 트리 위주: 홈 + 드라이브를 최상위 폴더 노드로 직접 노출(탐색기처럼).
+        home = self._make_dir_node(root, "🏠 홈", str(Path.home()))
+        self._root_nodes.append((str(Path.home()), home))
+        for d in QDir.drives():
+            p = d.absoluteFilePath()
+            self._root_nodes.append((p, self._make_dir_node(root, "💾 " + p, p)))
+        # 즐겨찾기·최근은 맨 아래 접이식 소형 그룹(기본 접힘).
         favs = [f for f in getattr(self.settings, "favorite_folders", []) if Path(f).exists()]
         if favs:
             grp = self._make_group_node("★ 즐겨찾기")
             for f in favs:
                 self._make_dir_node(grp, "★ " + (Path(f).name or f), f)
-            grp.setExpanded(True)
+            grp.setExpanded(False)
         recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
         if recents:
             grp = self._make_group_node("↻ 최근")
             for f in recents:
                 self._make_dir_node(grp, "📁 " + (Path(f).name or f), f)
-            grp.setExpanded(True)
-        drives = self._make_group_node("💻 드라이브 · 홈")
-        self._make_dir_node(drives, "🏠 홈", str(Path.home()))
-        for d in QDir.drives():
-            p = d.absoluteFilePath()
-            self._make_dir_node(drives, "💾 " + p, p)
-        drives.setExpanded(True)
+            grp.setExpanded(False)
+        self._reveal_in_tree(self._cur)
 
     def _on_tree_expanded(self, node: QTreeWidgetItem) -> None:
         if node.data(0, self._LOADED):
@@ -293,6 +297,45 @@ class FolderPickerDialog(QDialog):
             for name in self._list_subdirs(Path(path)):
                 self._make_dir_node(node, "📁 " + name, str(Path(path) / name))
         node.setData(0, self._LOADED, True)
+
+    def _reveal_in_tree(self, path: Path) -> None:
+        """현재 경로를 포함하는 루트를 찾아 세그먼트마다 지연 확장하며 그 노드를 선택·스크롤."""
+        roots = getattr(self, "_root_nodes", None)
+        if not roots:
+            return
+        target = Path(path)
+        best = None  # 가장 깊은(구체적인) 접두 루트
+        for rp, node in roots:
+            rpp = Path(rp)
+            if target == rpp or rpp in target.parents:
+                if best is None or len(str(rpp)) > len(str(Path(best[0]))):
+                    best = (rp, node)
+        if best is None:
+            return
+        rp, node = best
+        node.setExpanded(True)  # itemExpanded → 지연 로딩(동기)
+        try:
+            rel = target.relative_to(Path(rp))
+        except ValueError:
+            rel = Path()
+        cur = node
+        for part in rel.parts:
+            child = self._find_child_by_name(cur, part)
+            if child is None:
+                break
+            cur = child
+            cur.setExpanded(True)
+        self.sidebar.setCurrentItem(cur)
+        self.sidebar.scrollToItem(cur)
+
+    @staticmethod
+    def _find_child_by_name(parent: QTreeWidgetItem, name: str) -> Optional[QTreeWidgetItem]:
+        for i in range(parent.childCount()):
+            ch = parent.child(i)
+            p = ch.data(0, Qt.UserRole)
+            if p and Path(p).name == name:
+                return ch
+        return None
 
     def _on_tree_clicked(self, node: QTreeWidgetItem, _col: int = 0) -> None:
         path = node.data(0, Qt.UserRole)
@@ -311,6 +354,7 @@ class FolderPickerDialog(QDialog):
         self._rebuild_crumbs()
         self.btn_back.setEnabled(bool(self._history))
         self.btn_up.setEnabled(path.parent != path)
+        self._reveal_in_tree(path)  # 좌측 폴더 트리를 현재 위치로 확장·강조
         # 현재 폴더 자체를 후보로 삼아 자동 검증(자재로 바로 들어오면 즉시 확인).
         self._set_candidate(path)
 

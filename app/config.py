@@ -171,11 +171,11 @@ CREDITS = "Designed by JinHan Kim, Developed by HyunTaek Lim"
 
 
 def dev_mode() -> bool:
-    """개발자 모드 여부(환경변수 CONDER_DEV). 일반 사용자에겐 로그/진단 UI 를 숨긴다.
+    """개발자 모드 여부(환경변수 DEFECT_TRACKER_DEV). 일반 사용자에겐 로그/진단 UI 를 숨긴다.
 
     참(1/true/on/yes)일 때만 파일 로그 생성·진단 리포트·설정의 로그 경로 노출을 켠다.
     """
-    val = os.environ.get("CONDER_DEV", "").strip().lower()
+    val = os.environ.get("DEFECT_TRACKER_DEV", "").strip().lower()
     return val in ("1", "true", "on", "yes", "y")
 
 # 자동 업데이트 대상 저장소(메인 브랜치를 가져와 적용)
@@ -217,7 +217,7 @@ def default_workspace() -> Path:
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME")
     if not base:
         base = str(Path.home())
-    return Path(base) / "ConderCompare"
+    return Path(base) / "DefectTracker"
 
 
 def bundled_device_db_path() -> Path | None:
@@ -330,7 +330,7 @@ class AppSettings:
                 known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
                 return cls(**{k: v for k, v in raw.items() if k in known})
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                logging.getLogger("conder.config").warning(
+                logging.getLogger("defect_tracker.config").warning(
                     "settings.json 을 읽지 못해 기본값을 사용합니다: %s", exc
                 )
         return cls(workspace=str(ws))

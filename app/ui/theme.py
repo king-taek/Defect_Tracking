@@ -293,7 +293,7 @@ def _make_arrow(direction: str, color: str, size: int = 12) -> str:
     p.drawPolygon(QPolygon(pts))
     p.end()
 
-    out_dir = Path(tempfile.gettempdir()) / "conder_theme"
+    out_dir = Path(tempfile.gettempdir()) / "defect_tracker_theme"
     out_dir.mkdir(parents=True, exist_ok=True)
     safe = color.lstrip("#")
     path = out_dir / f"arrow_{direction}_{safe}_{size}.png"

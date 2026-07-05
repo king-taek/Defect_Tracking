@@ -192,6 +192,9 @@ def export_excel(
                 lines.append("기준 ★")
                 lines.append(f"위치 {base.position_key}")
                 lines.append(Path(base.image_path).name)
+                extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
+                if extra:
+                    lines.append(f"+{extra} 근접중복")
             elif rec is not None:
                 lines.append(f"매칭 O (거리 {dist:.1f})" if dist is not None else "매칭 O")
                 lines.append(f"위치 {rec.position_key}")

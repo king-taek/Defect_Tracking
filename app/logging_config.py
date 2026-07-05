@@ -4,7 +4,7 @@
 있도록 파일 로그를 남긴다. 로그는 항상 지정된 로그 디렉터리(원본 폴더 밖)에만 기록한다.
 
   - 콘솔: WARNING 이상(개발/터미널 실행 시)
-  - 파일: DEBUG 이상, `<log_dir>/conder.log` (회전: 25MB×5)
+  - 파일: DEBUG 이상, `<log_dir>/defect_tracker.log` (회전: 25MB×5)
 
 원본 보호 원칙에 따라 로그 파일은 절대 원본 LOT 폴더에 쓰지 않는다.
 """
@@ -18,19 +18,19 @@ from pathlib import Path
 from typing import Optional
 
 _CONFIGURED = False
-_ROOT_NAME = "conder"
+_ROOT_NAME = "defect_tracker"
 _MAX_LOG_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
 def get_logger(name: str = _ROOT_NAME) -> logging.Logger:
-    """`conder.*` 네임스페이스 로거를 반환한다."""
+    """`defect_tracker.*` 네임스페이스 로거를 반환한다."""
     if name == _ROOT_NAME or name.startswith(_ROOT_NAME + "."):
         return logging.getLogger(name)
     return logging.getLogger(f"{_ROOT_NAME}.{name}")
 
 
 def setup_logging(log_dir: Optional[Path] = None, level: int = logging.DEBUG) -> logging.Logger:
-    """루트 `conder` 로거를 1회 구성한다(중복 핸들러 방지).
+    """루트 `defect_tracker` 로거를 1회 구성한다(중복 핸들러 방지).
 
     log_dir 이 주어지고 쓰기 가능하면 회전 파일 핸들러를 그 디렉터리에 바로 추가한다
     (하위에 별도 "logs" 폴더를 만들지 않음 — 호출자가 최종 로그 디렉터리를 넘긴다).
@@ -64,7 +64,7 @@ def _attach_file_handler(logger: logging.Logger, log_dir: Path) -> None:
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(
-            log_dir / "conder.log",
+            log_dir / "defect_tracker.log",
             maxBytes=_MAX_LOG_SIZE,
             backupCount=5,
             encoding="utf-8",

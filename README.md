@@ -43,7 +43,7 @@
   Ctrl+A/D(비교 전체/해제)·Ctrl+O(폴더)·Ctrl+E(출력)·F5(재스캔)·**F1(도움말)**.
 - **성능** — wafer 병렬 스캔·썸네일 병렬화·인접 이미지 프리페치·매칭 인덱스 캐시,
   비동기 이미지 로딩 + LRU 캐시(네트워크 경로 탐색 시 UI 멈춤 최소화).
-- **관측성/안정성** — 파일 로깅(`workspace/logs/conder.log`), 설정 원자적 저장,
+- **관측성/안정성** — 파일 로깅(`workspace/logs/defect_tracker.log`), 설정 원자적 저장,
   스캔 접근오류(권한/네트워크) 비차단 안내, 시작 시 스플래시(로딩 표시).
 - **부드러운 다크 UI** — 저채도 슬레이트 테마, 비차단 알림 배너, 창 크기·허용오차·선택 기억,
   고DPI 선명도, 빠른 폴더 재선택 시 옛 결과 무시.
@@ -93,14 +93,14 @@ python -m tools.make_sample_data ./_sample  # 지정 폴더에 생성
 
 ```bash
 pip install -r requirements.txt pyinstaller
-python build_exe.py        # -> dist/ConderCompare.exe
+python build_exe.py        # -> dist/Defect Tracker.exe
 ```
 
 ---
 
 ## 출력/캐시 위치 (원본 밖)
 
-기본 작업공간: `%LOCALAPPDATA%\ConderCompare\`
+기본 작업공간: `%LOCALAPPDATA%\DefectTracker\`
 - `cache/` — 썸네일 캐시
 - `exports/` — Excel 결과
 - `settings.json` — 사용자 설정(마지막 LOT, 허용 오차 등)

@@ -30,7 +30,7 @@ from app import config
 from app.models import ParseStatus
 from app.safety import read_only_bytes
 
-_log = logging.getLogger("conder.parsers.kla")
+_log = logging.getLogger("defect_tracker.parsers.kla")
 
 # DefectList 필드 순서(문서 Section 13.2.5.2):
 # DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE ...

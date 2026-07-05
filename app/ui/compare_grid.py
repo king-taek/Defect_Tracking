@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QMenu,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -38,6 +39,7 @@ class LayerCell(QFrame):
     record_clicked = Signal(object)  # DefectRecord
     mark_requested = Signal(object)  # 기준 record 마킹 토글
     note_requested = Signal(object)  # 기준 record 메모 편집
+    cluster_clicked = Signal(object)  # 근접중복 '+n' 클릭 → 묶인 base 목록(list[DefectRecord])
 
     def __init__(
         self,
@@ -73,6 +75,15 @@ class LayerCell(QFrame):
         self.badge.setText(f"★ {self.layer} (기준)" if self.is_base else self.layer)
         self.badge.adjustSize()
         self.badge.move(10, 10)
+
+        # 근접중복 '+n' 배지(기준 셀에서만) — 클릭 시 묶인 defect 전체 보기.
+        self._cluster_members: list = []
+        self.more_badge = QPushButton("", self.image)
+        self.more_badge.setObjectName("mini")
+        self.more_badge.setCursor(Qt.PointingHandCursor)
+        self.more_badge.setToolTip("이 자리에 근접(<50)해 하나로 묶인 defect 을 모두 봅니다.")
+        self.more_badge.clicked.connect(self._emit_cluster)
+        self.more_badge.hide()
 
         # 이미지 아래 작은 진단/부가정보 줄(wafer명 노출 X — 상세는 tooltip)
         self.info = QLabel("")
@@ -119,12 +130,35 @@ class LayerCell(QFrame):
         if not self.is_base:
             self._apply_style(active=matched)
 
-    def show_base(self, rec: DefectRecord) -> None:
+    def show_base(self, rec: DefectRecord, extra: int = 0, members: Optional[list] = None) -> None:
         self._set_record(rec)
         self.image.show_path(rec.image_path, animated=True)
         # wafer명은 노출하지 않고 die 위치만 간단히(상세는 tooltip)
-        self._set_info(f"die ({rec.col}, {rec.row})")
+        info = f"die ({rec.col}, {rec.row})"
+        if extra:
+            info += f" · 근접중복 +{extra}"
+        self._set_info(info)
         self.badge.raise_()
+        # 근접중복 '+n' 배지 갱신(좌하단).
+        self._cluster_members = list(members or [])
+        if extra > 0:
+            self.more_badge.setText(f"+{extra}")
+            self.more_badge.adjustSize()
+            self.more_badge.move(10, self.image.height() - self.more_badge.height() - 10)
+            self.more_badge.show()
+            self.more_badge.raise_()
+        else:
+            self.more_badge.hide()
+
+    def _emit_cluster(self) -> None:
+        if self._cluster_members:
+            self.cluster_clicked.emit(self._cluster_members)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        # 이미지 크기 변화에 맞춰 '+n' 배지를 좌하단에 유지.
+        if self.more_badge.isVisible():
+            self.more_badge.move(10, self.image.height() - self.more_badge.height() - 10)
 
     def _set_record(self, rec: Optional[DefectRecord]) -> None:
         self._record = rec
@@ -179,6 +213,7 @@ class CompareGrid(QWidget):
     image_clicked = Signal(object)  # DefectRecord
     mark_requested = Signal(object)  # 기준 record 마킹 토글
     note_requested = Signal(object)  # 기준 record 메모 편집
+    base_cluster_clicked = Signal(object)  # 근접중복 '+n' → 묶인 base 목록
 
     def __init__(
         self, loader: Optional[ImageLoader] = None, parent: Optional[QWidget] = None
@@ -217,6 +252,7 @@ class CompareGrid(QWidget):
                 cell.record_clicked.connect(self.image_clicked)
                 cell.mark_requested.connect(self.mark_requested)
                 cell.note_requested.connect(self.note_requested)
+                cell.cluster_clicked.connect(self.base_cluster_clicked)
                 self._cells[layer] = cell
                 self._layer_order.append(layer)
                 self._grid.addWidget(cell, r, c)
@@ -249,7 +285,10 @@ class CompareGrid(QWidget):
         base = item.base
         visible: list[str] = []
         if self._base_layer in self._cells:
-            self._cells[self._base_layer].show_base(base)
+            cluster = getattr(item, "base_cluster", None)
+            extra = getattr(cluster, "extra_count", 0) or 0
+            members = list(getattr(cluster, "members", []) or [])
+            self._cells[self._base_layer].show_base(base, extra=extra, members=members)
             visible.append(self._base_layer)
 
         ordered_compares = [l for l in self._layer_order if l != self._base_layer]

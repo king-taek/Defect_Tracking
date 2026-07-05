@@ -15,7 +15,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from app import scanner
 from app.scanner import LotIndex
 
-_log = logging.getLogger("conder.workers")
+_log = logging.getLogger("defect_tracker.workers")
 
 # 썸네일 생성 병렬 워커 수(이미지 디코드+I/O 혼합).
 _THUMB_WORKERS = max(2, min(8, (os.cpu_count() or 4)))

@@ -6,7 +6,7 @@
 ## 절대 원칙
 - **원본 read-only**: 스캔 대상(자재/LOT) 폴더에는 어떤 것도 쓰지 않는다. 모든 산출물
   (캐시·결과·로그·세션·진단)은 워크스페이스(`AppSettings.workspace`, 기본
-  `%LOCALAPPDATA%\ConderCompare` / `~/ConderCompare`)에만 저장한다.
+  `%LOCALAPPDATA%\DefectTracker` / `~/DefectTracker`)에만 저장한다.
 - 순수 로직(파서/매처/정합/진단/버전)은 UI 와 분리하고 단위 테스트로 못 박는다.
 
 ## 버전 규칙 (중요 — 세션이 바뀌어도 반드시 지킬 것)

@@ -191,12 +191,21 @@ class HeatmapWaferMap(QWidget):
         return QRect(ox, oy, self._die_w(), self._die_h())
 
     def _paint_selection(self, painter) -> None:
-        painter.setPen(QPen(QColor(theme.NEON), 2))
+        # 선택 die 를 확실히 구별: 반투명 채움 + 굵고 밝은 이중 외곽선.
+        fill = QColor(theme.NEON)
+        fill.setAlpha(70)
+        outer = QColor(theme.NEON)
+        inner = QColor("#dbe8ff")  # 밝은 강조선(die 경계색과 대비)
         for key in self._selected_keys:
             if not (self._origin_col <= key.col < self._origin_col + self._cols
                     and self._origin_row <= key.row < self._origin_row + self._rows):
                 continue
-            painter.drawRect(self._key_rect(key).adjusted(0, 0, -1, -1))
+            rect = self._key_rect(key).adjusted(0, 0, -1, -1)
+            painter.fillRect(rect, fill)
+            painter.setPen(QPen(outer, 3))
+            painter.drawRect(rect)
+            painter.setPen(QPen(inner, 1))
+            painter.drawRect(rect.adjusted(2, 2, -2, -2))
         # 드래그 러버밴드
         if self._rubber_origin is not None and self._rubber_cur is not None:
             rb = QRect(self._rubber_origin, self._rubber_cur).normalized()
@@ -276,117 +285,13 @@ class HeatmapWaferMap(QWidget):
         self._emit_selection()
 
 
-def _load_thumb_holder(thumb_cache, image_path, px: int) -> QLabel:
-    """썸네일 이미지 QLabel(배지 없음). 로드 실패 시 '이미지 없음'."""
-    holder = QLabel()
-    holder.setAlignment(Qt.AlignCenter)
-    holder.setFixedSize(px, int(px * 0.78))
-    holder.setStyleSheet(
-        f"background:{theme.BG}; border:1px solid {theme.NEON_SOFT};"
-        f" border-radius:6px; color:{theme.TEXT_DIM}; font-size:10px;"
-    )
-    path = thumb_cache.get_full_thumbnail(image_path, max_size=px) \
-        if thumb_cache is not None else None
-    if path is not None:
-        pix = QPixmap(str(path))
-        if not pix.isNull():
-            holder.setPixmap(
-                pix.scaled(px, int(px * 0.78), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
-            holder.setToolTip(str(image_path))
-            return holder
-    holder.setText("이미지 없음")
-    return holder
-
-
-class _ClusterMembersPopup(QDialog):
-    """클러스터에 묶인 defect 사진 전체를 가로(줄바꿈)로 보여주는 작은 팝업."""
-
-    def __init__(self, records: list, layer: str, thumb_cache, open_viewer, parent=None):
-        super().__init__(parent)
-        from app.ui.flow_layout import FlowLayout
-
-        self.setWindowTitle(f"{layer} — 묶인 defect {len(records)}개")
-        self.setMinimumWidth(520)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
-        cap = QLabel("거리 50 미만으로 하나로 묶인 defect (클릭=원본)")
-        cap.setObjectName("dim")
-        outer.addWidget(cap)
-        host = QWidget()
-        flow = FlowLayout(host, margin=0, h_spacing=8, v_spacing=8)
-        for rec in records:
-            thumb = _ClickThumb(_load_thumb_holder(thumb_cache, rec.image_path, 150),
-                                rec, open_viewer)
-            flow.addWidget(thumb)
-        outer.addWidget(host)
-
-
-class _ClickThumb(QWidget):
-    """썸네일 홀더를 감싸 클릭 시 원본 뷰어를 여는 래퍼."""
-
-    def __init__(self, holder: QLabel, record, open_viewer, parent=None):
-        super().__init__(parent)
-        self._record = record
-        self._open_viewer = open_viewer
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(holder)
-        self.setCursor(Qt.PointingHandCursor)
-
-    def mousePressEvent(self, event):  # noqa: N802
-        if event.button() == Qt.LeftButton and self._record is not None:
-            self._open_viewer(self._record)
-
-
-class _ClusteredThumb(QWidget):
-    """대표 썸네일 + layer 배지 + (클러스터면) 좌하단 '+n' 버튼.
-
-    대표 클릭 → 원본 확대. '+n' 클릭 → 묶인 defect 전체 팝업.
-    """
-
-    def __init__(self, cluster: Cluster, layer: str, is_base: bool,
-                 thumb_cache, open_viewer, px: int, parent=None):
-        super().__init__(parent)
-        self._cluster = cluster
-        self._layer = layer
-        self._thumb_cache = thumb_cache
-        self._open_viewer = open_viewer
-        rep = cluster.representative
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        holder = _load_thumb_holder(thumb_cache, rep.image_path, px)
-        holder.setCursor(Qt.PointingHandCursor)
-        # 대표 클릭 → 뷰어
-        holder.mousePressEvent = self._on_rep_click  # type: ignore[assignment]
-        # layer 배지
-        badge = QLabel(("★ " + layer) if is_base else layer, holder)
-        badge.setObjectName("layerBadgeBase" if is_base else "layerBadge")
-        badge.adjustSize()
-        badge.move(5, 5)
-        badge.show()
-        # '+n' 오버레이 버튼(클러스터 여분)
-        if cluster.extra_count > 0:
-            more = QPushButton(f"+{cluster.extra_count}", holder)
-            more.setObjectName("mini")
-            more.setToolTip("이 자리에 근접(<50)해 하나로 묶인 defect 을 모두 봅니다.")
-            more.setCursor(Qt.PointingHandCursor)
-            more.adjustSize()
-            more.move(5, holder.height() - more.height() - 5)
-            more.clicked.connect(self._on_more)
-            more.show()
-        lay.addWidget(holder)
-
-    def _on_rep_click(self, event):
-        if event.button() == Qt.LeftButton:
-            self._open_viewer(self._cluster.representative)
-
-    def _on_more(self) -> None:
-        popup = _ClusterMembersPopup(
-            self._cluster.members, self._layer, self._thumb_cache, self._open_viewer, self
-        )
-        popup.exec()
+# 클러스터 표시 위젯은 공유 모듈로 이동(메인 매치와 공용). 하위 호환 별칭 유지.
+from app.ui.cluster_view import (  # noqa: E402
+    ClusteredThumb as _ClusteredThumb,
+    ClusterMembersPopup as _ClusterMembersPopup,
+    ClickThumb as _ClickThumb,
+    load_thumb_holder as _load_thumb_holder,
+)
 
 
 class HeatmapDialog(QDialog):
@@ -788,21 +693,53 @@ class HeatmapDialog(QDialog):
         self.lbl_detail.setText(f"{loc} — 매치 {len(clusters)}건 (defect {len(indices)}개)")
 
     def _build_all_detail(self, loc: str) -> None:
-        """전체 defect 모드 — 선택 layer 를 layer 간 교차 매칭(기준 종속 아님)해 그룹으로."""
+        """전체 defect 모드 — 선택 layer 를 layer 간 교차 매칭(기준 종속 아님)해 그룹으로.
+
+        교차매치 그룹(≥2 layer)은 전폭 행으로, 개별(미매칭, 1 layer)은 한 섹션에 가로(FlowLayout)
+        나열해 빈칸을 줄인다.
+        """
         by_layer: dict[str, list] = defaultdict(list)
         for lyr, rec in self._records_at_selection():
             by_layer[lyr].append(rec)
         layer_to_clusters = {lyr: cluster_records(recs) for lyr, recs in by_layer.items()}
         groups = cross_layer_groups(layer_to_clusters, self._tolerance)
-        matched_n = sum(1 for g in groups if len(g) >= 2)
-        indiv_n = sum(1 for g in groups if len(g) == 1)
-        for g in groups:
+        matched = [g for g in groups if len(g) >= 2]
+        individual = [g for g in groups if len(g) == 1]
+        for g in matched:
             self._detail_box.insertWidget(
                 self._detail_box.count() - 1, self._make_group_row(g)
             )
+        if individual:
+            self._detail_box.insertWidget(
+                self._detail_box.count() - 1, self._make_individual_section(individual)
+            )
         self.lbl_detail.setText(
-            f"{loc} — 교차매치 {matched_n}그룹 · 개별(미매칭) {indiv_n}개"
+            f"{loc} — 교차매치 {len(matched)}그룹 · 개별(미매칭) {len(individual)}개"
         )
+
+    def _make_individual_section(self, groups: list[dict]) -> QWidget:
+        """개별(미매칭) 단일-layer 그룹들을 layer 배지+대표(+n) 컴팩트 카드로 가로 나열."""
+        from app.ui.flow_layout import FlowLayout
+
+        box = QFrame()
+        box.setObjectName("cell")
+        box.setStyleSheet(
+            f"QFrame#cell {{ background:{theme.BG_ELEV};"
+            f" border:1px solid {theme.NEON_SOFT}; border-radius:8px; }}"
+        )
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(8, 6, 8, 8)
+        outer.setSpacing(4)
+        cap = QLabel(f"개별(미매칭) — {len(groups)}개")
+        cap.setStyleSheet(f"font-size:10px; font-weight:700; color:{theme.NOMATCH};")
+        outer.addWidget(cap)
+        host = QWidget()
+        flow = FlowLayout(host, margin=0, h_spacing=8, v_spacing=8)
+        for g in groups:
+            (layer, cluster), = g.items()
+            flow.addWidget(self._clustered_thumb(cluster, layer, layer == self._base_layer))
+        outer.addWidget(host)
+        return box
 
     @staticmethod
     def _key_label(key: HeatKey) -> str:

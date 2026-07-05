@@ -147,6 +147,9 @@ class BaseDefectMatches:
 
     base: DefectRecord
     results: list[MatchResult] = field(default_factory=list)
+    # 근접(<50) 중복 defect 을 대표 1개로 접었을 때, 묶인 전체 base 를 담는다(‘+n’ 표시용).
+    # None 이면 단독(중복 없음). app.clustering.Cluster 타입(순환 import 회피 위해 미주석).
+    base_cluster: object = None
 
     def for_layer(self, layer: str) -> Optional[MatchResult]:
         for r in self.results:

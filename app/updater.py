@@ -107,7 +107,7 @@ def fetch_remote_sha(
 ) -> Optional[str]:
     """GitHub API 로 브랜치 최신 커밋 sha 를 가져온다(public 무인증)."""
     url = _API.format(owner=owner, repo=repo, branch=branch)
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ConderCompare"}
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "Defect Tracker"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = Request(url, headers=headers)
@@ -165,7 +165,7 @@ def apply_via_git(
 
 # --------------------------------------------------------------- 적용(ZIP)
 def download_zip(url: str, dest: Path, opener=urlopen, timeout: float = 60.0) -> Path:
-    req = Request(url, headers={"User-Agent": "ConderCompare"})
+    req = Request(url, headers={"User-Agent": "Defect Tracker"})
     with opener(req, timeout=timeout) as resp, open(dest, "wb") as fh:
         shutil.copyfileobj(resp, fh)
     return dest
@@ -221,7 +221,7 @@ def apply_via_zip(
 ) -> tuple[bool, str]:
     """ZIP 을 받아 설치 폴더에 덮어쓰고 version.json 을 기록."""
     url = _ZIP.format(owner=owner, repo=repo, branch=branch)
-    tmpdir = Path(tempfile.mkdtemp(prefix="conder_update_"))
+    tmpdir = Path(tempfile.mkdtemp(prefix="defect_tracker_update_"))
     try:
         if progress:
             progress("새 버전 내려받는 중...")

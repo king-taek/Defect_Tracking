@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
-from app.models import DefectRecord
+from app.models import BaseDefectMatches, DefectRecord, MatchResult
 
 # 같은 defect 으로 볼 local 좌표 거리 임계값(미만이면 하나로 묶음).
 CLUSTER_RADIUS = 50.0
@@ -168,3 +168,58 @@ def cross_layer_groups(
         key=lambda g: min(str(c.representative.image_path) for c in g.values())
     )
     return groups
+
+
+def _merge_member_results(members: list[BaseDefectMatches]) -> list[MatchResult]:
+    """클러스터 멤버들의 비교 결과를 layer 별 best 매치로 병합한다.
+
+    각 layer 에 대해 매칭된 것(is_match) 중 거리 최소를 우선, 없으면 첫 후보를 쓴다.
+    → 대표가 개별로는 미매칭이어도 멤버가 매치했으면 그 매치가 반영된다.
+    """
+    order: list[str] = []
+    by_layer: dict[str, list[MatchResult]] = {}
+    for m in members:
+        for r in m.results:
+            if r.compare_layer not in by_layer:
+                by_layer[r.compare_layer] = []
+                order.append(r.compare_layer)
+            by_layer[r.compare_layer].append(r)
+    merged: list[MatchResult] = []
+    for layer in order:
+        cands = by_layer[layer]
+        matched = [c for c in cands if c.is_match]
+        if matched:
+            best = min(matched, key=lambda c: (c.distance if c.distance is not None else 1e18))
+        else:
+            best = cands[0]
+        merged.append(best)
+    return merged
+
+
+def collapse_matches(
+    matches: list[BaseDefectMatches], radius: float = CLUSTER_RADIUS
+) -> list[BaseDefectMatches]:
+    """근접(같은 wafer·die·거리<radius) 기준 defect 을 대표 1개로 접는다.
+
+    각 클러스터마다: 대표 base = `cluster.representative`(image_path 이름순, 결정론),
+    결과는 멤버들의 layer 별 best 매치로 병합, `base_cluster` 에 전체 멤버를 담는다.
+    반환 순서는 원래 등장 순서(클러스터 내 최소 index) 기준으로 안정 정렬.
+    """
+    if not matches:
+        return []
+    by_base = {id(m.base): m for m in matches}
+    index_of = {id(m.base): i for i, m in enumerate(matches)}
+    clusters = cluster_records([m.base for m in matches], radius)
+    collapsed: list[tuple[int, BaseDefectMatches]] = []
+    for cl in clusters:
+        member_matches = [by_base[id(b)] for b in cl.members]
+        results = _merge_member_results(member_matches)
+        bdm = BaseDefectMatches(
+            base=cl.representative,
+            results=results,
+            base_cluster=cl,
+        )
+        order_idx = min(index_of[id(b)] for b in cl.members)
+        collapsed.append((order_idx, bdm))
+    collapsed.sort(key=lambda t: t[0])
+    return [bdm for _, bdm in collapsed]

@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import __version__, config, layout, matcher, scanner, updater
+from app.clustering import collapse_matches
 from app.config import AppSettings
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import OriginalProtectionError, conflicting_source
@@ -68,7 +69,8 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
 
         self.lot_index: Optional[LotIndex] = None
-        self.base_records: list[DefectRecord] = []
+        self.base_records: list[DefectRecord] = []  # 대표(접힌) 기준 목록
+        self._base_records_raw: list[DefectRecord] = []  # 접기 전 raw 기준 목록
         self.matches: list[BaseDefectMatches] = []
         self.current = -1
         self._thumb_worker: Optional[ThumbnailWorker] = None
@@ -267,6 +269,7 @@ class MainWindow(QMainWindow):
         self.grid.image_clicked.connect(self._open_viewer)
         self.grid.mark_requested.connect(self._toggle_mark)
         self.grid.note_requested.connect(self._edit_note)
+        self.grid.base_cluster_clicked.connect(self._show_cluster_members)
         grid_host_layout.addWidget(self.grid)
         self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
@@ -534,7 +537,7 @@ class MainWindow(QMainWindow):
         status += ")"
         self.nav.set_status(status)
         self.nav.set_status_tooltip(self._failure_summary(failed))
-        # 좌표 추출 실패 진단 리포트는 개발자 모드(CONDER_DEV)에서만 파일로 남긴다.
+        # 좌표 추출 실패 진단 리포트는 개발자 모드(DEFECT_TRACKER_DEV)에서만 파일로 남긴다.
         report_path = self._write_diag_report(index) if config.dev_mode() else None
         if failed:
             self.banner.show_message(
@@ -638,19 +641,28 @@ class MainWindow(QMainWindow):
             return
         self._save_prefs()
 
-        self.base_records = [
+        # raw 기준 목록(근접 중복 접기 전) — 매칭 입력·재매칭에 사용. 접힌 대표는
+        # _compute_matches 가 self.base_records(=대표)로 재설정한다.
+        self._base_records_raw = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
         # 출력 트레이는 스냅샷이라 기준 layer/자재 변경에도 유지한다(초기화하지 않음).
         self._compute_matches()
 
-        # 썸네일 스트립(기준 layer 에만 의존 → 여기서만 재구성)
+        # 썸네일 스트립(대표 기준 1:1). 근접 중복이 접힌 자리는 캡션에 '+n' 표기.
         captions, tooltips = [], []
-        for r in self.base_records:
-            captions.append(f"{r.wafer_id}\n({r.col},{r.row})")
+        for m in self.matches:
+            r = m.base
+            extra = getattr(m.base_cluster, "extra_count", 0) or 0
+            cap = f"{r.wafer_id}\n({r.col},{r.row})"
+            if extra:
+                cap += f"  +{extra}"
+            captions.append(cap)
             tt = f"wafer {r.wafer_id} · die({r.col},{r.row}) · pos {r.position_key}"
             if r.defect_name:
                 tt += f" · {r.defect_name}"
+            if extra:
+                tt += f" · 근접중복 +{extra}"
             tooltips.append(tt)
         self.strip.set_items(captions, tooltips)
         self._start_thumbnails()
@@ -688,11 +700,14 @@ class MainWindow(QMainWindow):
         tolerance = self.top.tolerance()
         rbl = self.lot_index.records_by_layer()
         idx, fidx = self._get_match_indices(compare_layers, rbl)
-        # 인덱스를 재사용(허용오차만 변경 시 재인덱싱 없음) + 전역 정합오차 보정 매칭.
-        self.matches, self._layer_offsets = matcher.match_all_with_offsets(
-            self.base_records, compare_layers, rbl, tolerance,
+        # 오프셋 표본을 위해 raw 전체로 매칭한 뒤, 근접(<50) 중복을 대표 1개로 접는다.
+        all_matches, self._layer_offsets = matcher.match_all_with_offsets(
+            self._base_records_raw, compare_layers, rbl, tolerance,
             index=idx, fail_index=fidx,
         )
+        self.matches = collapse_matches(all_matches)
+        # 스트립·썸네일은 대표(접힌) 기준과 1:1 정합.
+        self.base_records = [m.base for m in self.matches]
         self._view_cache = None  # 매칭이 바뀌면 필터 결과 캐시 무효화
         self._update_match_summary()
 
@@ -1011,6 +1026,15 @@ class MainWindow(QMainWindow):
             dlg = ImageViewerDialog(record, self)
             dlg.exec()
 
+    def _show_cluster_members(self, members: list) -> None:
+        """기준 셀의 '+n' 클릭 — 근접(<50)으로 접힌 defect 전체를 팝업으로 보여준다."""
+        if not members:
+            return
+        from app.ui.cluster_view import ClusterMembersPopup
+        ClusterMembersPopup(
+            members, self.top.base_layer(), self.thumb_cache, self._open_viewer, self
+        ).exec()
+
     def _open_help(self) -> None:
         ShortcutsDialog(self).exec()
 
@@ -1089,7 +1113,7 @@ class MainWindow(QMainWindow):
             self._align_cache[key] = cached
             if cached.overlap < self._ALIGN_MIN_OVERLAP:
                 import logging
-                logging.getLogger("conder.wafermap").info(
+                logging.getLogger("defect_tracker.wafermap").info(
                     "die 정합 신뢰도 낮음 — wafer=%s product=%s overlap=%.2f",
                     wafer, prod.key, cached.overlap,
                 )
