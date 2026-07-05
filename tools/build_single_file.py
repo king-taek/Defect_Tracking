@@ -490,7 +490,7 @@ def build() -> str:
     parts: list[str] = []
     parts.append(
         "# =============================================================================\n"
-        "# Defect Layer Tracker — 단일 파일 배포본 (AUTO-GENERATED — 편집 금지)\n"
+        "# Defect Tracker — 단일 파일 배포본 (AUTO-GENERATED — 편집 금지)\n"
         "#\n"
         "# 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식\n"
         "# 소스이며, 이 파일을 직접 고치지 마세요. 재생성:\n"

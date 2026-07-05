@@ -112,7 +112,7 @@ def export_excel(
 
     # ---- 보고서 헤더 ----
     r = 1
-    title = ws.cell(row=r, column=1, value="Defect Layer Tracker 비교 결과 보고서")
+    title = ws.cell(row=r, column=1, value="Defect Tracker 비교 결과 보고서")
     title.font = Font(bold=True, color="FFFFFFFF", size=14)
     title.fill = PatternFill("solid", fgColor=_NAVY)
     title.alignment = Alignment(horizontal="left", vertical="center")

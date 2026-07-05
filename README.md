@@ -1,4 +1,4 @@
-# Defect Layer Tracker
+# Defect Tracker
 
 반도체/패키지 공정의 **review defect 이미지 비교 뷰어**입니다.
 기준 Layer 의 defect 위치를 기준으로 다른 Layer 에서 같은 위치의 defect 를 찾아 비교하고,

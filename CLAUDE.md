@@ -1,4 +1,4 @@
-# Defect Layer Tracker — 개발 지침
+# Defect Tracker — 개발 지침
 
 반도체 defect 이미지 비교 뷰어(PySide6 데스크톱 앱). 기준 layer 의 defect 위치를 기준으로
 다른 layer 에서 같은 위치의 defect 를 찾아 비교하고 결과를 Excel 로 출력한다.

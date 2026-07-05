@@ -1,5 +1,5 @@
 # =============================================================================
-# Defect Layer Tracker — 단일 파일 배포본 (AUTO-GENERATED — 편집 금지)
+# Defect Tracker — 단일 파일 배포본 (AUTO-GENERATED — 편집 금지)
 #
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
@@ -274,7 +274,7 @@ def kla_zero_y() -> int:
 # 애플리케이션 / 자동 업데이트
 # ---------------------------------------------------------------------------
 
-APP_NAME = "Defect Layer Tracker"
+APP_NAME = "Defect Tracker"
 
 # 제작 크레딧(UI 곳곳 표기용 단일 출처)
 CREDITS = "Designed by JinHan Kim, Developed by HyunTaek Lim"
@@ -5611,7 +5611,7 @@ def export_excel(
 
     # ---- 보고서 헤더 ----
     r = 1
-    title = ws.cell(row=r, column=1, value="Defect Layer Tracker 비교 결과 보고서")
+    title = ws.cell(row=r, column=1, value="Defect Tracker 비교 결과 보고서")
     title.font = Font(bold=True, color="FFFFFFFF", size=14)
     title.fill = PatternFill("solid", fgColor=_NAVY)
     title.alignment = Alignment(horizontal="left", vertical="center")
@@ -10504,7 +10504,7 @@ class MainWindow(QMainWindow):
 # =============================================================================
 # main.py   [진입점]
 # =============================================================================
-"""Defect Layer Tracker — 진입점.
+"""Defect Tracker — 진입점.
 
 원본 데이터를 절대 훼손하지 않는(read-only) defect 이미지 비교 뷰어.
 실행: python main.py
@@ -10569,7 +10569,7 @@ def main() -> int:
     # windowed(.exe) 모드에서는 stderr 가 없을 수 있으므로 안전하게 처리.
     if sys.stderr is not None:
         try:
-            print("Defect Layer Tracker 시작 중... (라이브러리 로딩, 잠시만 기다려 주세요)",
+            print("Defect Tracker 시작 중... (라이브러리 로딩, 잠시만 기다려 주세요)",
                   file=sys.stderr, flush=True)
         except (OSError, ValueError):
             pass

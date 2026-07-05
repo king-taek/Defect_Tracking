@@ -164,7 +164,7 @@ def kla_zero_y() -> int:
 # 애플리케이션 / 자동 업데이트
 # ---------------------------------------------------------------------------
 
-APP_NAME = "Defect Layer Tracker"
+APP_NAME = "Defect Tracker"
 
 # 제작 크레딧(UI 곳곳 표기용 단일 출처)
 CREDITS = "Designed by JinHan Kim, Developed by HyunTaek Lim"
