@@ -39,7 +39,6 @@ from app.models import BaseDefectMatches, DefectRecord
 from app.thumbnails import ThumbnailCache
 from app.ui import theme
 
-_ALIGN_MIN_OVERLAP = 0.6
 _ALL_WAFERS = "전체"
 _THUMB_PX = 150  # 상세 목록 썸네일 크기(고정)
 
@@ -566,15 +565,22 @@ class HeatmapDialog(QDialog):
         prod = config.active_product()
         valid = None
         caption = prod.name if prod.source == "db" else ""  # 제품명만(‘모양 정합’ 미표기)
-        if prod.die_map and observed:
-            # 정합은 관측 die 집합·제품이 같으면 재계산 불필요 → 캐시(매 refresh 비용 절감).
-            ckey = (prod.name, frozenset(observed))
-            align = self._hm_align_cache.get(ckey)
-            if align is None:
-                align = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
-                self._hm_align_cache[ckey] = align
-            if align.overlap >= _ALIGN_MIN_OVERLAP:
+        if prod.die_map:
+            # 디바이스 die_map 이 있으면 관측 defect 유무·정합 신뢰도와 무관하게 항상 그
+            # 모양으로 웨이퍼를 그린다(wafer 형태 유지). 관측 die 가 있으면 최적 평행이동을
+            # 적용해 die_map 을 관측 좌표계에 맞추고, 관측이 없으면 die_map 을 그대로 쓴다.
+            # (이전엔 정합 overlap 이 낮거나 관측이 없으면 valid=None 이 돼 웨이퍼가 통짜
+            #  사각형으로 무너지고 die 가 빠져 보였다.)
+            if observed:
+                # 정합은 관측 die 집합·제품이 같으면 재계산 불필요 → 캐시(매 refresh 비용 절감).
+                ckey = (prod.name, frozenset(observed))
+                align = self._hm_align_cache.get(ckey)
+                if align is None:
+                    align = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
+                    self._hm_align_cache[ckey] = align
                 valid = wafermap_align.shifted_die_map(prod.die_map, align)
+            else:
+                valid = set(prod.die_map)
         paint_valid = (valid | observed) if valid else None
         if paint_valid is not None:
             # 내용 bounding box 로 정규화(맵이 여백에 떠 보이거나 잘리지 않게).
