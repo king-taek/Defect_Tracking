@@ -98,6 +98,29 @@ python build_exe.py        # -> dist/Defect Tracker.exe
 
 ---
 
+## 단일 파일 배포본 (읽을 수 있는 하나의 `.py`)
+
+프로그램 전체(모든 `app/` 모듈 + `main.py`)를 **읽을 수 있는 단일 파일** 하나로 합쳐,
+구조와 기능을 한 파일로 열람·공유할 수 있습니다.
+
+```bash
+python tools/build_single_file.py     # -> single_file/defect_tracker.py 생성
+python bootstrap.py                    # 라이브러리 설치(최초 1회)
+python single_file/defect_tracker.py   # 실행
+```
+
+- **산출물이지 소스가 아닙니다.** 소스의 진실은 계속 `app/` + `main.py` 이며, 단일 파일은
+  자동 생성됩니다. 단일 파일을 직접 고치지 말고 `app/` 를 고친 뒤 재생성하세요.
+- 파일 맨 위에 모듈 맵(목차)과 위상순서 구획이 있어 구조가 한눈에 보입니다.
+- **실행 요건**: PySide6 GUI 데스크톱 앱이므로 실행에는 여전히 Python + PySide6 가 필요합니다
+  (`bootstrap.py` 로 설치). 브라우저 "웹 파이썬"(Pyodide 등)에서는 Qt 를 못 불러와 실행 불가.
+- 번들 `data/AOIDeviceDB.xlsx` 는 선택 사항이며 함께 배포되지 않습니다(없으면 내장 폴백).
+- **버전 갱신 순서**(app 코드 변경 시): `python tools/compute_version.py --write` →
+  `python tools/build_single_file.py` → `app/__init__.py` + 산출물을 같은 커밋에 포함.
+  `python tools/build_single_file.py --check` 는 커밋본이 최신인지만 확인합니다(테스트에서 강제).
+
+---
+
 ## 출력/캐시 위치 (원본 밖)
 
 기본 작업공간: `%LOCALAPPDATA%\DefectTracker\`
@@ -158,5 +181,7 @@ app/
                         widgets · image_loader · image_viewer · notifications · settings_dialog
                         wafer_map · compare_overlay · help_dialog · splash · flow_layout
 tools/make_sample_data.py  합성 데이터 생성기
+tools/build_single_file.py 단일 파일 배포본 생성기(app/ + main.py → single_file/defect_tracker.py)
+single_file/            생성된 단일 파일 배포본(산출물)
 tests/                  pytest
 ```
