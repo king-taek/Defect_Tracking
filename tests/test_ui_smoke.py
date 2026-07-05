@@ -246,10 +246,13 @@ def _set_filter(win, mode):
 
 
 def test_filter_traversal_skips(win):
-    # 허용오차 0 → 전부 미매칭(none).
+    from PySide6.QtTest import QTest
+    # 허용오차 0 → 전부 미매칭(none). 매칭은 디바운스(250ms)+백그라운드 → 조건까지 폴링 대기.
     win.top.spn_tol.setValue(0.0)
-    for _ in range(5):
-        QCoreApplication.processEvents()
+    for _ in range(30):
+        QTest.qWait(100)
+        if win.matches and {win._match_status(m) for m in win.matches} == {"none"}:
+            break
     statuses = {win._match_status(m) for m in win.matches}
     assert statuses == {"none"}
     # 기본 '매칭만' 필터: 모든 후보가 none 이면 빈 화면 대신 전체를 보인다(혼란 방지).

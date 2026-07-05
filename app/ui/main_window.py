@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThreadPool, QUrl
+from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -35,10 +35,9 @@ from PySide6.QtWidgets import (
 )
 
 from app import __version__, config, layout, matcher, scanner, updater
-from app.clustering import collapse_matches
 from app.config import AppSettings
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
-from app.safety import OriginalProtectionError, conflicting_source
+from app.safety import conflicting_source
 from app.scanner import LotIndex
 from app.session import SessionStore
 from app.thumbnails import ThumbnailCache
@@ -53,7 +52,8 @@ from app.ui.notifications import NotificationBanner
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.ui.wafer_map import WaferMapWidget
-from app.workers import ScanWorker, ThumbnailWorker
+from app.ui.busy_overlay import BusyOverlay
+from app.workers import ExportWorker, MatchWorker, ScanWorker, ThumbnailWorker
 
 
 class MainWindow(QMainWindow):
@@ -76,6 +76,8 @@ class MainWindow(QMainWindow):
         self._thumb_worker: Optional[ThumbnailWorker] = None
         self._scan_worker: Optional[ScanWorker] = None  # 진행 중 스캔(중단용)
         self._scan_token = 0  # stale 스캔/썸네일 결과 무시용
+        self._match_token = 0  # stale 매칭(중첩 요청) 결과 무시용
+        self._exporting = False  # Excel 출력 진행 중(중복 방지)
         # 매칭 인덱스 캐시(비교 layer 집합이 같으면 허용오차만 바뀔 때 재사용)
         self._match_sig: object = None
         self._match_idx = None
@@ -97,6 +99,13 @@ class MainWindow(QMainWindow):
 
         self._restore_geometry()
         self._build_ui()
+        # 무거운 작업(매칭·Excel 출력) 중 표시할 로딩 오버레이.
+        self.busy = BusyOverlay(self)
+        # 허용오차 스핀박스는 연속 변경되므로 재매칭을 디바운스한다.
+        self._tol_timer = QTimer(self)
+        self._tol_timer.setSingleShot(True)
+        self._tol_timer.setInterval(250)
+        self._tol_timer.timeout.connect(lambda: self._rematch(rebuild_grid=False))
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._maybe_check_update()
@@ -164,7 +173,7 @@ class MainWindow(QMainWindow):
         self.top.open_folder.connect(self._choose_folder)
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
         self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
-        self.top.tolerance_changed.connect(lambda _: self._rematch(rebuild_grid=False))
+        self.top.tolerance_changed.connect(lambda _: self._tol_timer.start())
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
@@ -629,7 +638,7 @@ class MainWindow(QMainWindow):
         self.grid.show_empty(f"기준 layer 를 선택하세요.{hint}")
         self._empty_label.setVisible(False)
 
-    # ------------------------------------------------------- 재계산(분리)
+    # ------------------------------------------------------- 재계산(비동기)
     def _rebuild_all(self) -> None:
         """새 LOT·기준 layer 변경: base 목록·썸네일·그리드 전체 재구성, 인덱스 0."""
         if self.lot_index is None:
@@ -640,16 +649,20 @@ class MainWindow(QMainWindow):
             self._show_base_prompt()
             return
         self._save_prefs()
-
-        # raw 기준 목록(근접 중복 접기 전) — 매칭 입력·재매칭에 사용. 접힌 대표는
-        # _compute_matches 가 self.base_records(=대표)로 재설정한다.
+        # raw 기준 목록(근접 중복 접기 전) — 매칭 입력·재매칭에 사용.
         self._base_records_raw = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
-        # 출력 트레이는 스냅샷이라 기준 layer/자재 변경에도 유지한다(초기화하지 않음).
-        self._compute_matches()
+        if not self._base_records_raw:
+            self.matches, self.base_records, self._view_cache = [], [], None
+            self._update_match_summary()
+            self._after_rebuild()
+            return
+        # 무거운 매칭은 백그라운드에서(로딩 오버레이), 완료되면 화면을 재구성한다.
+        self._start_match(self._after_rebuild)
 
-        # 썸네일 스트립(대표 기준 1:1). 근접 중복이 접힌 자리는 캡션에 '+n' 표기.
+    def _after_rebuild(self) -> None:
+        """매칭 완료 후: 스트립/썸네일/그리드/탐색 재구성(기준 layer·새 LOT)."""
         captions, tooltips = [], []
         for m in self.matches:
             r = m.base
@@ -681,11 +694,13 @@ class MainWindow(QMainWindow):
         self._update_add_export_button()
 
     def _rematch(self, rebuild_grid: bool) -> None:
-        """비교 토글/허용오차 변경: 재매칭. 현재 인덱스는 유지(범위 clamp)."""
-        if self.lot_index is None or not self.base_records:
+        """비교 토글/허용오차 변경: 재매칭(비동기). 현재 인덱스는 유지(범위 clamp)."""
+        if self.lot_index is None or not self._base_records_raw:
             return
         self._save_prefs()
-        self._compute_matches()
+        self._start_match(lambda: self._after_rematch(rebuild_grid))
+
+    def _after_rematch(self, rebuild_grid: bool) -> None:
         if rebuild_grid:
             self._rebuild_grid()
         if self.matches:
@@ -695,21 +710,43 @@ class MainWindow(QMainWindow):
             self.nav.set_index(0, 0)
         self._refresh_strip_marks()
 
-    def _compute_matches(self) -> None:
+    def _start_match(self, after) -> None:
+        """매칭을 백그라운드 워커로 실행하고, 완료되면 after() 를 UI 스레드에서 호출."""
         compare_layers = self.top.compare_layers()
         tolerance = self.top.tolerance()
         rbl = self.lot_index.records_by_layer()
         idx, fidx = self._get_match_indices(compare_layers, rbl)
-        # 오프셋 표본을 위해 raw 전체로 매칭한 뒤, 근접(<50) 중복을 대표 1개로 접는다.
-        all_matches, self._layer_offsets = matcher.match_all_with_offsets(
+        self._match_token += 1
+        token = self._match_token
+        self.busy.start("매칭 중…")
+        worker = MatchWorker(
             self._base_records_raw, compare_layers, rbl, tolerance,
             index=idx, fail_index=fidx,
         )
-        self.matches = collapse_matches(all_matches)
-        # 스트립·썸네일은 대표(접힌) 기준과 1:1 정합.
+        worker.signals.finished.connect(
+            lambda ms, offs, t=token, cb=after: self._on_match_done(ms, offs, t, cb)
+        )
+        worker.signals.error.connect(lambda msg, t=token: self._on_match_error(msg, t))
+        self._track_worker(worker, worker.signals.finished, worker.signals.error)
+        self.pool.start(worker)
+
+    def _on_match_done(self, matches, offsets, token: int, after) -> None:
+        if token != self._match_token:
+            return  # 오래된(중첩 요청) 결과 무시
+        self.matches = matches
+        self._layer_offsets = offsets
         self.base_records = [m.base for m in self.matches]
-        self._view_cache = None  # 매칭이 바뀌면 필터 결과 캐시 무효화
+        self._view_cache = None
         self._update_match_summary()
+        self.busy.stop()
+        if after is not None:
+            after()
+
+    def _on_match_error(self, msg: str, token: int) -> None:
+        if token != self._match_token:
+            return
+        self.busy.stop()
+        self.banner.show_message(f"매칭 실패: {msg}", "error")
 
     def _open_heatmap(self) -> None:
         if not self.matches:
@@ -1305,28 +1342,37 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        # openpyxl 은 출력 시에만 필요 → 시작 비용을 줄이기 위해 지연 임포트.
-        from app.export.excel_report import export_excel
-        try:
-            out = export_excel(
-                path,
-                lot_name=self.lot_index.lot_name,
-                base_layer=self.top.base_layer(),
-                compare_layers=compare_union or self.top.compare_layers(),
-                tolerance=self.top.tolerance(),
-                selected=selected,
-                thumb_cache=self.thumb_cache,
-                source_roots=[self.lot_index.lot_path],
-                notes=self.session.notes_map() if self.session else None,
-            )
-        except OriginalProtectionError as exc:
-            # 차단은 명확히 알려야 하므로 액션 가능한 배너로 안내
-            self.banner.show_message(str(exc).split("\n")[0], "error", timeout_ms=0)
+        # Excel 출력은 이미지 디코드+저장이 무거우므로 백그라운드에서(진행도 오버레이).
+        if self._exporting:
+            self.banner.show_message("이미 Excel 출력 중입니다.", "info")
             return
-        except Exception as exc:  # noqa: BLE001
-            self.banner.show_message(f"Excel 출력 중 오류: {exc}", "error", timeout_ms=0)
-            return
+        self._exporting = True
+        self.busy.start("Excel 출력 준비 중…", determinate=True)
+        kwargs = dict(
+            output_path=path,
+            lot_name=self.lot_index.lot_name,
+            base_layer=self.top.base_layer(),
+            compare_layers=compare_union or self.top.compare_layers(),
+            tolerance=self.top.tolerance(),
+            selected=selected,
+            thumb_cache=self.thumb_cache,
+            source_roots=[self.lot_index.lot_path],
+            notes=self.session.notes_map() if self.session else None,
+        )
+        worker = ExportWorker(kwargs)
+        worker.signals.progress.connect(self._on_export_progress)
+        worker.signals.finished.connect(self._on_export_done)
+        worker.signals.error.connect(self._on_export_error)
+        self._track_worker(worker, worker.signals.finished, worker.signals.error)
+        self.pool.start(worker)
 
+    def _on_export_progress(self, cur: int, total: int) -> None:
+        self.busy.set_message(f"Excel 출력 중…  {cur}/{total}")
+        self.busy.set_progress(cur, total)
+
+    def _on_export_done(self, out: str) -> None:
+        self._exporting = False
+        self.busy.stop()
         if self.settings.output_folder == "":
             self.settings.output_folder = str(Path(out).parent)
         self.settings.save()
@@ -1339,6 +1385,11 @@ class MainWindow(QMainWindow):
             ),
             timeout_ms=7000,
         )
+
+    def _on_export_error(self, msg: str) -> None:
+        self._exporting = False
+        self.busy.stop()
+        self.banner.show_message(f"Excel 출력 중 오류: {msg.splitlines()[0]}", "error", timeout_ms=0)
 
     # ------------------------------------------------------------ 종료
     def closeEvent(self, event):  # noqa: N802

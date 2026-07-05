@@ -94,10 +94,17 @@ def test_export_tray_dialog_remove_and_add_all(win, app):
 # ---- 항목 2: 매치 없는 셀 숨김(re-pack) ----
 
 def test_grid_hides_unmatched_cells(win):
+    from PySide6.QtTest import QTest
+
+    def _wait_status(target):
+        for _ in range(30):
+            QTest.qWait(100)
+            if win.matches and {win._match_status(m) for m in win.matches} == target:
+                return
     # 허용오차 0 → 모든 비교 매칭 실패 → 보이는 셀은 기준 하나뿐.
+    # 매칭은 디바운스(250ms)+백그라운드 워커 → 조건까지 폴링 대기.
     win.top.spn_tol.setValue(0.0)
-    for _ in range(5):
-        QCoreApplication.processEvents()
+    _wait_status({"none"})
     win._goto(0)
     grid = win.grid
     # isHidden(): 창을 show 하지 않아도 명시적 숨김 상태를 반영한다.
@@ -105,8 +112,7 @@ def test_grid_hides_unmatched_cells(win):
     assert visible == [grid._base_layer]
     # 큰 허용오차 → 비교도 매칭 → 비교 셀도 보인다.
     win.top.spn_tol.setValue(100000.0)
-    for _ in range(5):
-        QCoreApplication.processEvents()
+    _wait_status({"full"})
     win._goto(0)
     visible2 = {l for l, c in grid._cells.items() if not c.isHidden()}
     assert grid._base_layer in visible2
@@ -133,6 +139,7 @@ def test_heatmap_dialog_constructs_and_selects(win, app):
         win.matches, win.top.base_layer(), win.top.compare_layers(),
         win.thumb_cache, lambda idxs: added.extend(idxs), win.settings,
         current_wafer=win.matches[0].base.wafer_id,
+        records_by_layer=win.lot_index.records_by_layer(),
     )
     # 밀도 그룹이 채워지고 웨이퍼맵 격자가 잡힌다.
     assert dlg._map._cols >= 1 and dlg._map._rows >= 1
@@ -164,8 +171,8 @@ def test_heatmap_multi_select_union(win, app):
     assert dlg._map._multi is True
 
 
-def test_heatmap_show_all_includes_unmatched(win, app):
-    """'전체 defect 보기'는 매칭 없는 defect 도 records_by_layer 에서 수집한다."""
+def test_heatmap_investigation_collects_all_layers(win, app):
+    """상시 조사 모드: 선택 위치에서 체크된 layer 의 record 를 records_by_layer 에서 수집."""
     from app.ui.heatmap_dialog import HeatmapDialog
 
     rbl = win.lot_index.records_by_layer()
@@ -176,10 +183,10 @@ def test_heatmap_show_all_includes_unmatched(win, app):
     )
     key = next(iter(dlg._groups))
     dlg._on_selection_changed([key])
-    dlg.btn_show_all.setChecked(True)
-    # 선택 위치에서 선택 layer 의 record 를 실제로 수집한다(기준 defect 이 하나는 있음).
     recs = dlg._records_at_selection()
+    # 기준 defect 이 하나는 있고, 수집 layer 는 체크된 layer 집합에 속한다.
     assert any(lyr == dlg._base_layer for lyr, _ in recs)
+    assert all(lyr in dlg._selected_layers() for lyr, _ in recs)
 
 
 def test_heatmap_all_wafers_aggregates(win, app):
@@ -361,9 +368,11 @@ def test_heatmap_subdivide_small_die_count(app):
                             layer_folder="LYA4", col=col, row=row, x=x, y=y)
         return BaseDefectMatches(base=base)
 
-    # 4개 die(<50) → subdivide
+    # 4개 die(<50) → subdivide. 맵 density 는 records_by_layer(체크 layer) 기반이므로 전달.
     matches = [mk(0, 0, 0, 0), mk(0, 0, 90, 90), mk(1, 1, 0, 0), mk(2, 2, 0, 0)]
-    dlg = HeatmapDialog(matches, "LYA4", [], None, lambda idxs: None, AppSettings())
+    rbl = {"LYA4": [m.base for m in matches]}
+    dlg = HeatmapDialog(matches, "LYA4", [], None, lambda idxs: None, AppSettings(),
+                        records_by_layer=rbl)
     assert dlg._map._subdivide is True
 
 
@@ -385,40 +394,40 @@ def test_heatmap_default_wafer_is_all(win, app):
     assert dlg.cmb_wafer.currentText() == _ALL_WAFERS
 
 
-def test_heatmap_toggle_button_text_on_off(win, app):
+def test_heatmap_no_base_all_layer_checkboxes(win, app):
+    # 기준 별표 없음 · '전체 defect' 토글 없음 · 모든 layer 가 체크박스(기준 포함).
     dlg = _make_heatmap(win)
-    assert "OFF" in dlg.btn_show_all.text()
-    dlg.btn_show_all.setChecked(True)
-    assert "ON" in dlg.btn_show_all.text()
+    assert not hasattr(dlg, "btn_show_all")
+    assert dlg._base_layer in dlg._col_checks  # 기준도 체크박스로
+    assert all(cb.isChecked() for cb in dlg._col_checks.values())  # 기본 전체 체크
     dlg.btn_multi.setChecked(True)
     assert "ON" in dlg.btn_multi.text()
 
 
-def test_heatmap_show_all_map_density_is_superset(win, app):
-    # 전체 defect 모드의 맵 entries 는 매치만(기준 defect)보다 많다(다층 defect 포함).
+def test_heatmap_uncheck_layer_reduces_map_entries(win, app):
+    # 조사 모드: 맵 density 는 체크된 layer 전체 defect. layer 를 끄면 entries 가 준다.
     dlg = _make_heatmap(win)
-    base_n = len(dlg._map_entries())      # 매치만: 기준 defect
-    dlg._show_all = True
-    all_n = len(dlg._map_entries())        # 전체: 선택 layer 모든 defect
-    assert all_n >= base_n
-    assert all_n > base_n
+    full = len(dlg._map_entries())
+    # 비-기준 layer 하나 해제
+    others = [l for l in dlg._col_checks if l != dlg._base_layer]
+    if others:
+        dlg._col_checks[others[0]].setChecked(False)
+        assert len(dlg._map_entries()) < full
 
 
-def test_heatmap_matched_only_hides_unmatched(win, app):
+def test_heatmap_add_targets_are_matched(win, app):
     dlg = _make_heatmap(win)
     dlg._selected_keys = list(dlg._groups.keys())
-    dlg._show_all = False
     dlg._rebuild_detail()
-    # 담기 대상(=매치만 상세에 표시되는 기준)은 전부 매칭된 것.
-    assert dlg._add_targets == [bi for bi in dlg._add_targets if dlg._is_matched(bi)]
+    # '출력에 넣기' 대상은 선택 위치의 매칭된 메인 기준 defect.
     assert all(dlg._is_matched(bi) for bi in dlg._add_targets)
 
 
-def test_heatmap_map_caption_shows_mode(win, app):
+def test_heatmap_map_caption_has_counts(win, app):
     dlg = _make_heatmap(win)
-    assert "매치만" in dlg.lbl_map.text()
-    dlg.btn_show_all.setChecked(True)
-    assert "전체 defect" in dlg.lbl_map.text()
+    txt = dlg.lbl_map.text()
+    assert "die" in txt and "defect" in txt
+    assert "매치만" not in txt and "전체 defect" not in txt  # 모드 문구 제거됨
 
 
 def test_heatmap_drag_box_selects_without_multi(win, app):
@@ -438,9 +447,8 @@ def test_heatmap_drag_box_selects_without_multi(win, app):
     assert len(m._selected_keys) >= 1
 
 
-def test_heatmap_show_all_builds_cross_layer_detail(win, app):
+def test_heatmap_builds_cross_layer_detail(win, app):
     dlg = _make_heatmap(win)
-    dlg.btn_show_all.setChecked(True)
     keys = list(dlg._groups.keys())
     if not keys:
         return
@@ -593,7 +601,12 @@ def test_no_conder_branding_left():
         ["grep", "-rniI", "conder", "app", "main.py", "README.md", "CLAUDE.md", ".gitignore"],
         capture_output=True, text=True,
     )
-    assert out.stdout.strip() == "", f"leftover conder refs:\n{out.stdout}"
+    # 'Conder Scan' 은 사용자의 외부 스캔 폴더 이름(설정 scan_root_name 기본값)이라 브랜딩 잔재 아님.
+    leftover = [
+        ln for ln in out.stdout.splitlines()
+        if ln.strip() and "scan_root_name" not in ln and "Conder Scan" not in ln
+    ]
+    assert leftover == [], "leftover conder refs:\n" + "\n".join(leftover)
 
 
 def test_folder_picker_network_unc_root(app, tmp_path):
@@ -609,3 +622,93 @@ def test_folder_picker_network_unc_root(app, tmp_path):
     assert any(r.startswith("\\\\nas01") for r in roots)
     # 드라이브 라벨 생성이 예외 없이 동작.
     assert isinstance(FolderPickerDialog._drive_label("/"), str)
+
+
+# ---- 10차: 메뉴 테마 · 비동기 로딩 · 확대뷰 · 폴더 트리 다듬기 ----
+
+def test_theme_has_qmenu_rules():
+    from app.ui import theme
+    assert "QMenu" in theme.STYLESHEET
+    assert "QMenu::item" in theme.STYLESHEET
+
+
+def test_busy_overlay_start_stop(app):
+    from PySide6.QtWidgets import QWidget
+    from app.ui.busy_overlay import BusyOverlay
+    host = QWidget()
+    host.resize(400, 300)
+    b = BusyOverlay(host)
+    assert b.isHidden()
+    b.start("매칭 중…", determinate=True)
+    assert not b.isHidden()  # 표시됨(호스트 미표시라 isVisible 대신 isHidden 사용)
+    b.set_progress(2, 4)
+    b.stop()
+    assert b.isHidden()
+
+
+def test_match_worker_runs_and_collapses(app):
+    from app.workers import MatchWorker
+    from app.models import DefectRecord
+    from pathlib import Path
+
+    def rec(n, layer, x):
+        return DefectRecord(image_path=Path(f"/{n}.jpg"), wafer_id="W1", layer=layer,
+                            layer_folder=layer, col=1, row=1, x=x, y=0.0)
+    base = [rec("a", "B", 0.0), rec("b", "B", 20.0)]  # 근접 → 접힘
+    rbl = {"B": base, "C": [rec("c", "C", 5.0)]}
+    got = []
+    w = MatchWorker(base, ["C"], rbl, 100.0)
+    w.signals.finished.connect(lambda m, o: got.append(m))
+    w.run()  # 동기 실행(워커 로직 검증)
+    assert got and isinstance(got[0], list)
+    assert len(got[0]) < len(base)  # 근접 중복 접힘
+
+
+def test_export_excel_progress_callback(win, app, tmp_path):
+    from app.export.excel_report import export_excel
+    sel = [win.matches[i] for i in range(min(2, len(win.matches)))]
+    calls = []
+    export_excel(
+        tmp_path / "o.xlsx", lot_name="L", base_layer="LYA4",
+        compare_layers=win.top.compare_layers(), tolerance=100.0,
+        selected=sel, thumb_cache=win.thumb_cache,
+        source_roots=[str(win.lot_index.lot_path)],
+        progress=lambda c, t: calls.append((c, t)),
+    )
+    assert calls and calls[-1][1] == len(sel)
+
+
+def test_main_matching_is_async(win, app):
+    # 매칭이 백그라운드 워커로 수행되어도(디바운스/토큰) fixture 대기 후 matches 가 채워진다.
+    assert win.matches
+    assert hasattr(win, "busy") and hasattr(win, "_match_token")
+
+
+def test_heatmap_detail_thumbs_deferred(win, app):
+    dlg = _make_heatmap(win)
+    keys = list(dlg._groups.keys())
+    if not keys:
+        return
+    dlg._selected_keys = keys[:1]
+    dlg._rebuild_detail()
+    # 상세 썸네일은 지연 로딩 위젯으로 등록된다(백그라운드 캐시 후 채움).
+    assert isinstance(dlg._pending_thumbs, list)
+
+
+def test_image_viewer_scrollbars_off_and_anchor_zoom(app):
+    from PySide6.QtCore import Qt as _Qt
+    from app.ui.image_viewer import ImageViewerDialog
+    from app.models import DefectRecord
+    from pathlib import Path
+    d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
+                                       layer="L", layer_folder="L", col=1, row=1, x=0.0, y=0.0))
+    assert d._scroll.horizontalScrollBarPolicy() == _Qt.ScrollBarAlwaysOff
+    assert d._scroll.verticalScrollBarPolicy() == _Qt.ScrollBarAlwaysOff
+    d._zoom_at_cursor(1.2)  # null 이미지에서도 예외 없이 no-op
+
+
+def test_folder_picker_indent_and_explorer_button(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+    dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
+    assert dlg.sidebar.indentation() == 12
+    assert hasattr(dlg, "btn_explorer")

@@ -202,6 +202,21 @@ QListWidget::item {{ padding: 10px; border-radius: 8px; min-height: 30px; }}
 QListWidget::item:hover {{ background: {NEON_SOFT}; }}
 QListWidget::item:selected {{ background: {NEON_DIM}; color: {TEXT}; }}
 
+/* ---- 우클릭/드롭다운 메뉴 — 어두운 테마 통일(흰 배경 방지) ---- */
+QMenu {{
+    background-color: {BG_ELEV};
+    color: {TEXT};
+    border: 1px solid {NEON_SOFT};
+    border-radius: 8px;
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 6px 18px; border-radius: 6px; background: transparent;
+}}
+QMenu::item:selected {{ background: {NEON_DIM}; color: {TEXT}; }}
+QMenu::item:disabled {{ color: {TEXT_DIM}; }}
+QMenu::separator {{ height: 1px; background: {NEON_SOFT}; margin: 4px 8px; }}
+
 /* ---- 아이템 뷰(트리/리스트/테이블) — 어두운 테마 통일(흰 배경 방지) ---- */
 QTreeView, QListView, QTableView, QColumnView {{
     background-color: {BG_ELEV};

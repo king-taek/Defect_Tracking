@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Callable, Optional
 
-from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtCore import QRect, Qt, QThreadPool, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -191,25 +191,18 @@ class HeatmapWaferMap(QWidget):
         return QRect(ox, oy, self._die_w(), self._die_h())
 
     def _paint_selection(self, painter) -> None:
-        # 선택 die 를 확실히 구별: 반투명 채움 + 굵고 밝은 이중 외곽선.
-        fill = QColor(theme.NEON)
-        fill.setAlpha(70)
-        outer = QColor(theme.NEON)
-        inner = QColor("#dbe8ff")  # 밝은 강조선(die 경계색과 대비)
+        # 선택 die: 얇은(1px) 네온 녹색 외곽선만(채움 없음).
+        green = QColor("#39ff14")
+        painter.setPen(QPen(green, 1))
         for key in self._selected_keys:
             if not (self._origin_col <= key.col < self._origin_col + self._cols
                     and self._origin_row <= key.row < self._origin_row + self._rows):
                 continue
-            rect = self._key_rect(key).adjusted(0, 0, -1, -1)
-            painter.fillRect(rect, fill)
-            painter.setPen(QPen(outer, 3))
-            painter.drawRect(rect)
-            painter.setPen(QPen(inner, 1))
-            painter.drawRect(rect.adjusted(2, 2, -2, -2))
+            painter.drawRect(self._key_rect(key).adjusted(0, 0, -1, -1))
         # 드래그 러버밴드
         if self._rubber_origin is not None and self._rubber_cur is not None:
             rb = QRect(self._rubber_origin, self._rubber_cur).normalized()
-            painter.setPen(QPen(QColor(theme.NEON), 1, Qt.DashLine))
+            painter.setPen(QPen(green, 1, Qt.DashLine))
             painter.drawRect(rb)
 
     def _key_at(self, pos) -> Optional[HeatKey]:
@@ -325,7 +318,9 @@ class HeatmapDialog(QDialog):
         self._groups: dict[HeatKey, list[int]] = {}
         self._selected_keys: list[HeatKey] = []  # 현재 선택된 위치(단일/다중)
         self._add_targets: list[int] = []  # '이 위치 출력에 넣기' 대상(매칭된 기준)
-        self._show_all = False  # '전체 defect 보기' 토글
+        self._pending_thumbs: list = []  # 상세 지연 로딩 썸네일 위젯
+        self._thumb_token = 0            # stale 썸네일 로딩 무시
+        self._hm_align_cache: dict = {}  # observed→alignment 캐시(매 refresh 재계산 방지)
         self._xr = (0.0, 1.0)   # die 내부 local 좌표 범위(subcell 판정용)
         self._yr = (0.0, 1.0)
         self._subdivide = False
@@ -356,8 +351,16 @@ class HeatmapDialog(QDialog):
                     layers.append(r.compare_layer)
         return layers
 
-    def _selected_compare_layers(self) -> list[str]:
-        """상세 목록에 표시할 비교 layer(체크된 것). 기준은 항상 별도로 맨 앞에 표시."""
+    def _all_layers(self) -> list[str]:
+        """조사 대상 전체 layer — 메인 기준 + 비교 layer(중복 제거, 순서 유지)."""
+        out: list[str] = []
+        for lyr in [self._base_layer, *self._available_layers()]:
+            if lyr and lyr not in out:
+                out.append(lyr)
+        return out
+
+    def _selected_layers(self) -> list[str]:
+        """조사할(체크된) layer 목록. 기준 특별취급 없음."""
         return [lyr for lyr, cb in self._col_checks.items() if cb.isChecked()]
 
     def _wafer_ok(self, rec) -> bool:
@@ -379,17 +382,15 @@ class HeatmapDialog(QDialog):
         return out
 
     def _is_matched(self, bi: int) -> bool:
-        """선택된 비교 layer 중 하나 이상에서 매치되면 True."""
+        """메인 비교 layer 중 하나 이상에서 매치되면 True('출력에 넣기' 대상 판정)."""
         m = self.matches[bi]
-        return any((r := m.for_layer(lyr)) and r.is_match
-                   for lyr in self._selected_compare_layers())
+        return any((r := m.for_layer(lyr)) and r.is_match for lyr in self._compare_layers)
 
     def _all_defect_entries(self) -> list[tuple[int, object]]:
-        """선택 layer(기준+체크된 비교)의 모든 좌표 OK defect. 전체 defect 모드의 맵용."""
-        layers = [self._base_layer] + self._selected_compare_layers()
+        """체크된 layer 의 모든 좌표 OK defect(맵 density 용). 기준 특별취급 없음."""
         out: list[tuple[int, object]] = []
         k = 0
-        for lyr in layers:
+        for lyr in self._selected_layers():
             for rec in self._records_by_layer.get(lyr, []):
                 if not getattr(rec, "ok", False) or not self._wafer_ok(rec):
                     continue
@@ -398,8 +399,8 @@ class HeatmapDialog(QDialog):
         return out
 
     def _map_entries(self) -> list[tuple[int, object]]:
-        """모드에 따른 맵 density 계산용 entries(매치만=기준 defect, 전체=선택 layer 모든 defect)."""
-        return self._all_defect_entries() if self._show_all else self._base_entries()
+        """맵 density 계산용 entries — 상시 조사 모드(체크된 layer 전체 defect)."""
+        return self._all_defect_entries()
 
     # ---- UI 구성 -----------------------------------------------------
     def _build(self) -> None:
@@ -423,18 +424,14 @@ class HeatmapDialog(QDialog):
         bar.addWidget(self.cmb_wafer)
         outer.addLayout(bar)
 
-        # 표시 layer 필터(기준은 항상 표시, 비교 layer 는 체크로 on/off)
+        # 조사할 layer(기준 개념 없음): 모든 layer 를 체크박스로, 체크된 것들의 defect 을 교차 조사.
         col_row = QHBoxLayout()
         col_row.setSpacing(8)
-        col_row.addWidget(QLabel("표시 layer:"))
-        base_tag = QLabel(f"★ {self._base_layer}")
-        base_tag.setStyleSheet(f"color:{theme.BASE_GLOW}; font-weight:700;")
-        col_row.addWidget(base_tag)
+        col_row.addWidget(QLabel("조사할 layer:"))
         self._col_checks: dict[str, QCheckBox] = {}
-        default_cols = set(self._compare_layers)
-        for lyr in self._available_layers():
+        for lyr in self._all_layers():
             cb = QCheckBox(lyr)
-            cb.setChecked(lyr in default_cols or not default_cols)
+            cb.setChecked(True)  # 기본 전체 체크
             cb.stateChanged.connect(lambda _=0: self._on_layers_changed())
             self._col_checks[lyr] = cb
             col_row.addWidget(cb)
@@ -506,17 +503,6 @@ class HeatmapDialog(QDialog):
         )
         self.btn_multi.toggled.connect(self._on_multi_toggled)
         head.addWidget(self.btn_multi, 0)
-        # 전체 defect 보기(매칭 없는 것 포함, layer 간 교차 매칭) 토글
-        self.btn_show_all = QPushButton("전체 defect: OFF")
-        self.btn_show_all.setObjectName("mini")
-        self.btn_show_all.setCheckable(True)
-        self.btn_show_all.setToolTip(
-            "켜면 선택 위치의 모든 defect(선택 layer, 미매칭 포함)을 보여줍니다.\n"
-            "특정 기준 없이 layer 끼리 교차 매칭하고, 매칭 안 된 것은 개별 표시합니다.\n"
-            "웨이퍼맵 색도 전체 defect 밀도로 바뀝니다."
-        )
-        self.btn_show_all.toggled.connect(self._on_show_all_toggled)
-        head.addWidget(self.btn_show_all, 0)
         self.btn_add_all = QPushButton("이 위치 출력에 넣기")
         self.btn_add_all.setObjectName("mini")
         self.btn_add_all.setToolTip("선택 위치의 매칭된 기준 defect 을 출력 트레이에 담습니다.")
@@ -548,13 +534,6 @@ class HeatmapDialog(QDialog):
         self.btn_multi.setText(f"여러 다이 선택: {'ON' if on else 'OFF'}")
         self._map.set_multi(on)  # set_multi 가 selection_changed([]) 를 emit → 상세 초기화
 
-    def _on_show_all_toggled(self, on: bool) -> None:
-        self.btn_show_all.setText(f"전체 defect: {'ON' if on else 'OFF'}")
-        self._show_all = on
-        # 맵 density 도 모드에 따라 바뀌므로 맵을 다시 그린다(선택 위치는 유지).
-        self._refresh_map(preserve_selection=True)
-        self._rebuild_detail()
-
     def _on_layers_changed(self) -> None:
         # layer 체크 변경 → 맵(선택 layer 반영)·상세 실시간 갱신, 선택 위치 유지.
         self._refresh_map(preserve_selection=True)
@@ -578,7 +557,12 @@ class HeatmapDialog(QDialog):
         valid = None
         caption = prod.name if prod.source == "db" else ""  # 제품명만(‘모양 정합’ 미표기)
         if prod.die_map and observed:
-            align = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
+            # 정합은 관측 die 집합·제품이 같으면 재계산 불필요 → 캐시(매 refresh 비용 절감).
+            ckey = (prod.name, frozenset(observed))
+            align = self._hm_align_cache.get(ckey)
+            if align is None:
+                align = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
+                self._hm_align_cache[ckey] = align
             if align.overlap >= _ALIGN_MIN_OVERLAP:
                 valid = wafermap_align.shifted_die_map(prod.die_map, align)
         paint_valid = (valid | observed) if valid else None
@@ -604,10 +588,9 @@ class HeatmapDialog(QDialog):
 
         sub_txt = " · die 4×5 분할" if subdivide else ""
         n_def = sum(density.values())
-        mode_txt = "전체 defect" if self._show_all else "매치만"
         wafer_txt = "전체 wafer" if self._current_wafer == _ALL_WAFERS else f"wafer {self._current_wafer}"
         self.lbl_map.setText(
-            f"[{mode_txt}] · {wafer_txt} · die {die_count}개 · defect {n_def}개{sub_txt}"
+            f"{wafer_txt} · die {die_count}개 · defect {n_def}개{sub_txt}"
             + (f"\n{caption}" if caption else "")
         )
 
@@ -642,8 +625,8 @@ class HeatmapDialog(QDialog):
         return HeatKey(int(rec.col), int(rec.row))
 
     def _records_at_selection(self) -> list[tuple[str, object]]:
-        """선택 위치의 선택 layer(기준+체크 비교) 모든 defect record — (layer, record)."""
-        layers = [self._base_layer] + self._selected_compare_layers()
+        """선택 위치의 체크된 layer 모든 defect record — (layer, record)."""
+        layers = self._selected_layers()
         wafer = self._current_wafer
         key_set = set(self._selected_keys)
         out: list[tuple[str, object]] = []
@@ -666,34 +649,22 @@ class HeatmapDialog(QDialog):
 
     def _rebuild_detail(self) -> None:
         self._clear_detail()
-        # 매치만 모드는 매칭된 기준만 표시(미매칭 숨김, 항목 8). 담기 대상도 매칭된 것.
-        matched = [bi for bi in self._union_indices() if self._is_matched(bi)]
-        self._add_targets = matched
-        self.btn_add_all.setEnabled(bool(matched))
+        self._pending_thumbs = []  # 이번 상세의 지연 썸네일 모음(비동기 로딩)
+        # 상시 조사 모드: 체크된 layer 를 교차 매칭해 표시. '출력에 넣기' 대상은 선택 위치의
+        # 매칭된 메인 기준 defect(출력은 기준 layer 기반).
+        self._add_targets = [bi for bi in self._union_indices() if self._is_matched(bi)]
+        self.btn_add_all.setEnabled(bool(self._add_targets))
         if not self._selected_keys:
             self.lbl_detail.setText("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
             return
         n_loc = len(self._selected_keys)
         loc = (self._key_label(self._selected_keys[0]) if n_loc == 1 else f"{n_loc}개 위치")
-        if self._show_all:
-            self._build_all_detail(loc)
-        else:
-            self._build_matched_detail(loc, matched)
-
-    def _build_matched_detail(self, loc: str, indices: list[int]) -> None:
-        """매치만 모드 — 매칭된 기준 defect 만 근접 클러스터로 묶어 행으로."""
-        show_compares = self._selected_compare_layers()
-        rec_to_bi = {id(self.matches[bi].base): bi for bi in indices}
-        clusters = cluster_records([self.matches[bi].base for bi in indices])
-        for cl in clusters:
-            bi = rec_to_bi[id(cl.representative)]
-            self._detail_box.insertWidget(
-                self._detail_box.count() - 1, self._make_match_row(bi, show_compares, cl)
-            )
-        self.lbl_detail.setText(f"{loc} — 매치 {len(clusters)}건 (defect {len(indices)}개)")
+        self._build_all_detail(loc)
+        # 썸네일은 백그라운드로 캐시를 구운 뒤 채워, 클릭 즉시 목록이 뜨고 멈추지 않게 한다.
+        self._start_detail_thumbs()
 
     def _build_all_detail(self, loc: str) -> None:
-        """전체 defect 모드 — 선택 layer 를 layer 간 교차 매칭(기준 종속 아님)해 그룹으로.
+        """조사 모드 — 체크된 layer 를 layer 간 교차 매칭(기준 종속 아님)해 그룹으로.
 
         교차매치 그룹(≥2 layer)은 전폭 행으로, 개별(미매칭, 1 layer)은 한 섹션에 가로(FlowLayout)
         나열해 빈칸을 줄인다.
@@ -759,42 +730,32 @@ class HeatmapDialog(QDialog):
         return row, lay
 
     def _clustered_thumb(self, cluster: Cluster, layer: str, is_base: bool) -> QWidget:
-        return _ClusteredThumb(cluster, layer, is_base, self._thumb_cache,
-                               self._open_viewer, _THUMB_PX)
+        # 지연 로딩: 위젯은 즉시 만들고, 썸네일은 백그라운드로 캐시를 구운 뒤 채운다.
+        w = _ClusteredThumb(cluster, layer, is_base, self._thumb_cache,
+                            self._open_viewer, _THUMB_PX, defer=True)
+        self._pending_thumbs.append(w)
+        return w
 
-    def _make_match_row(self, bi: int, show_compares: list[str], base_cluster: Cluster) -> QWidget:
-        """매치만 행 — 기준(클러스터 대표+n) + 매칭된 비교 layer 사진만."""
-        item = self.matches[bi]
-        base = item.base
-        row, lay = self._row_frame()
-        head = QVBoxLayout()
-        head.setSpacing(4)
-        info = QLabel(f"wafer {base.wafer_id}\ndie({base.col},{base.row})\npos {base.position_key}")
-        info.setObjectName("dim")
-        info.setStyleSheet("font-size:10px;")
-        head.addWidget(info)
-        btn = QPushButton("＋ 담기")
-        btn.setObjectName("mini")
-        btn.setToolTip("이 defect 을 출력 트레이에 담습니다.")
-        btn.clicked.connect(lambda _=0, i=bi: self._on_add([i]))
-        head.addWidget(btn)
-        head.addStretch()
-        head_host = QWidget()
-        head_host.setFixedWidth(120)
-        head_host.setLayout(head)
-        lay.addWidget(head_host)
+    def _start_detail_thumbs(self) -> None:
+        """상세에 만든 지연 썸네일들을 백그라운드로 캐시 굽고 준비되는 대로 채운다."""
+        from app.workers import FullThumbWorker
+        pending = self._pending_thumbs
+        if not pending:
+            return
+        self._thumb_token += 1
+        token = self._thumb_token
+        items = [(i, str(w.rep_path), w._px) for i, w in enumerate(pending)]
+        worker = FullThumbWorker(self._thumb_cache, items)
 
-        lay.addWidget(self._clustered_thumb(base_cluster, self._base_layer, True))
-        for lyr in show_compares:
-            mr = item.for_layer(lyr)
-            if mr and mr.is_match and mr.matched is not None:
-                lay.addWidget(self._clustered_thumb(
-                    Cluster(representative=mr.matched, members=[mr.matched]), lyr, False))
-        lay.addStretch()
-        return row
+        def _fill(i, t=token, snap=pending):
+            if t == self._thumb_token and 0 <= i < len(snap):
+                snap[i].fill()
+
+        worker.signals.ready.connect(_fill)
+        QThreadPool.globalInstance().start(worker)
 
     def _make_group_row(self, group: dict) -> QWidget:
-        """전체 defect 행 — 그룹의 layer 별 대표(+n). 단독이면 개별(미매칭)."""
+        """조사 행 — 그룹의 layer 별 대표(+n). 단독이면 개별(미매칭)."""
         row, lay = self._row_frame()
         is_matched = len(group) >= 2
         rep0 = next(iter(group.values())).representative
@@ -816,7 +777,7 @@ class HeatmapDialog(QDialog):
         head_host.setLayout(head)
         lay.addWidget(head_host)
 
-        for lyr in [self._base_layer] + self._selected_compare_layers():
+        for lyr in self._selected_layers():
             if lyr in group:
                 lay.addWidget(self._clustered_thumb(group[lyr], lyr, lyr == self._base_layer))
         lay.addStretch()

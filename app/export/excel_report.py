@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Optional
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
@@ -63,6 +63,7 @@ def export_excel(
     thumb_cache: ThumbnailCache,
     source_roots: Iterable[str | Path],
     notes: dict[str, str] | None = None,
+    progress: Optional[Callable[[int, int], None]] = None,
 ) -> Path:
     """선택된 기준 defect 들의 비교 결과를 Excel 로 저장한다.
 
@@ -114,7 +115,10 @@ def export_excel(
     # 상단 컬럼 헤더 행은 두지 않는다 — 블록마다 'Layer' 행으로 이미 표기하므로 중복이다(항목 1).
 
     # ---- 각 기준 defect 블록 ----
+    _total = len(selected)
     for idx, item in enumerate(selected, start=1):
+        if progress is not None:
+            progress(idx, _total)
         base = item.base
 
         # 블록 제목

@@ -101,3 +101,115 @@ class ThumbnailWorker(QRunnable):
                     if result is not None and result[1] is not None:
                         self.signals.ready.emit(result[0], str(result[1]))
         self.signals.done.emit()
+
+
+class MatchSignals(QObject):
+    finished = Signal(object, object)  # matches(list[BaseDefectMatches]), offsets(dict)
+    error = Signal(str)
+
+
+class MatchWorker(QRunnable):
+    """매칭(match_all_with_offsets + collapse_matches)을 백그라운드에서 수행한다.
+
+    UI 스레드가 멈추지 않도록 무거운 2-패스 매칭 + 근접 클러스터링을 여기서 실행한다.
+    die 인덱스(index/fail_index)는 UI 에서 만들어(캐시 재사용) 넘겨받는다.
+    """
+
+    def __init__(self, base_records, compare_layers, records_by_layer, tolerance,
+                 index=None, fail_index=None):
+        super().__init__()
+        self.base_records = base_records
+        self.compare_layers = compare_layers
+        self.records_by_layer = records_by_layer
+        self.tolerance = tolerance
+        self.index = index
+        self.fail_index = fail_index
+        self.signals = MatchSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from app import matcher
+            from app.clustering import collapse_matches
+
+            all_matches, offsets = matcher.match_all_with_offsets(
+                self.base_records, self.compare_layers, self.records_by_layer,
+                self.tolerance, index=self.index, fail_index=self.fail_index,
+            )
+            matches = collapse_matches(all_matches)
+            self.signals.finished.emit(matches, offsets)
+        except Exception as exc:  # noqa: BLE001 - 워커 예외는 UI 로 전달
+            _log.exception("매칭 워커 실패")
+            self.signals.error.emit(str(exc))
+
+
+class ExportSignals(QObject):
+    progress = Signal(int, int)  # cur, total
+    finished = Signal(str)       # output path
+    error = Signal(str)
+
+
+class ExportWorker(QRunnable):
+    """Excel 출력을 백그라운드에서 수행한다(진행도 콜백 → progress 시그널)."""
+
+    def __init__(self, kwargs: dict):
+        super().__init__()
+        self.kwargs = kwargs
+        self.signals = ExportSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from app.export.excel_report import export_excel
+
+            path = export_excel(
+                progress=lambda c, t: self.signals.progress.emit(c, t), **self.kwargs
+            )
+            self.signals.finished.emit(str(path))
+        except Exception as exc:  # noqa: BLE001 - 워커 예외는 UI 로 전달
+            _log.exception("Excel 출력 워커 실패")
+            self.signals.error.emit(str(exc))
+
+
+class FullThumbSignals(QObject):
+    ready = Signal(int)  # index (해당 썸네일 캐시 준비됨)
+    done = Signal()
+
+
+class FullThumbWorker(QRunnable):
+    """전체 썸네일 캐시를 백그라운드에서 미리 굽는다(히트맵 상세 등 지연 로딩용).
+
+    실제 QPixmap 세팅은 UI 스레드에서(ready 시그널 후), 여기서는 디코드+저장만 한다.
+    """
+
+    def __init__(self, thumb_cache, items):  # items: list[(index, image_path, px)]
+        super().__init__()
+        self.thumb_cache = thumb_cache
+        self.items = items
+        self.signals = FullThumbSignals()
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @Slot()
+    def run(self) -> None:
+        def _warm(item):
+            i, path, px = item
+            if self._cancelled:
+                return None
+            try:
+                self.thumb_cache.get_full_thumbnail(path, max_size=px)
+            except Exception:  # noqa: BLE001 - 개별 실패는 건너뛴다
+                pass
+            return i
+
+        if self.items and self.thumb_cache is not None:
+            workers = min(_THUMB_WORKERS, len(self.items))
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                for i in ex.map(_warm, self.items):
+                    if self._cancelled:
+                        break
+                    if i is not None:
+                        self.signals.ready.emit(i)
+        self.signals.done.emit()

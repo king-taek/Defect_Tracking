@@ -269,6 +269,7 @@ class AppSettings:
     compare_layers: list[str] = field(default_factory=list)
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)
     favorite_folders: list[str] = field(default_factory=list)  # 즐겨찾기(고정) 상위 폴더
+    scan_root_name: str = "Conder Scan"  # 폴더 트리 최상위 고정: 이 이름의 폴더가 있는 드라이브
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(비면 번들 DB 자동 로드)
     thumbnail_center_ratio: float = THUMBNAIL_CENTER_RATIO  # 상단 썸네일 중앙 crop 비율(확대율)

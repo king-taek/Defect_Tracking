@@ -117,6 +117,9 @@ class ImageViewerDialog(QDialog):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(False)
         self._scroll.setAlignment(Qt.AlignCenter)
+        # 확대 시 스크롤바는 못 쓰므로(드래그로 이동) 숨긴다. value 이동은 계속 동작.
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._canvas = QLabel()
         self._canvas.setAlignment(Qt.AlignCenter)
         if self._image.isNull():
@@ -161,6 +164,28 @@ class ImageViewerDialog(QDialog):
             return
         self._apply_scale(scale=max(_MIN_SCALE, min(_MAX_SCALE, self._scale * factor)))
 
+    def _zoom_at_cursor(self, factor: float) -> None:
+        """마우스 커서 아래 지점을 고정한 채 확대/축소(휠 줌)."""
+        if self._image.isNull():
+            return
+        from PySide6.QtGui import QCursor
+        vp = self._scroll.viewport()
+        pos = vp.mapFromGlobal(QCursor.pos())
+        hbar = self._scroll.horizontalScrollBar()
+        vbar = self._scroll.verticalScrollBar()
+        old = self._scale
+        new = max(_MIN_SCALE, min(_MAX_SCALE, old * factor))
+        if new == old:
+            return
+        # 스케일 전, 커서 아래 콘텐츠 좌표
+        cx = hbar.value() + pos.x()
+        cy = vbar.value() + pos.y()
+        self._apply_scale(scale=new)
+        ratio = new / old
+        # 스케일 후 그 콘텐츠 좌표가 다시 커서 아래 오도록 스크롤 이동
+        hbar.setValue(round(cx * ratio - pos.x()))
+        vbar.setValue(round(cy * ratio - pos.y()))
+
     def _apply_scale(self, scale: Optional[float] = None, fit: bool = False) -> None:
         if self._image.isNull():
             return
@@ -190,7 +215,7 @@ class ImageViewerDialog(QDialog):
             return
         delta = event.angleDelta().y()
         if delta != 0:
-            self._zoom(1.2 if delta > 0 else 1 / 1.2)
+            self._zoom_at_cursor(1.2 if delta > 0 else 1 / 1.2)
             event.accept()
 
     # ---- 클릭-드래그 패닝(항목 6) --------------------------------------
@@ -202,7 +227,7 @@ class ImageViewerDialog(QDialog):
         if event.type() == QEvent.Wheel and not self._image.isNull():
             delta = event.angleDelta().y()
             if delta != 0:
-                self._zoom(1.2 if delta > 0 else 1 / 1.2)
+                self._zoom_at_cursor(1.2 if delta > 0 else 1 / 1.2)
             return True
 
         if obj is self._canvas and not self._image.isNull():

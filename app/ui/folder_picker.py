@@ -27,6 +27,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -170,8 +171,15 @@ class FolderPickerDialog(QDialog):
         self.btn_up = QPushButton("↑ 위로")
         self.btn_up.setFixedWidth(72)
         self.btn_up.clicked.connect(self._go_up)
+        self.btn_explorer = QPushButton("🗂 기본 탐색기")
+        self.btn_explorer.setToolTip(
+            "OS 기본 폴더 탐색기로 선택합니다.\n"
+            "(네트워크 공유 등 트리에 아직 안 보이는 위치를 여기서 바로 고를 수 있습니다.)"
+        )
+        self.btn_explorer.clicked.connect(self._open_native_explorer)
         topbar.addWidget(self.btn_back)
         topbar.addWidget(self.btn_up)
+        topbar.addWidget(self.btn_explorer)
 
         self._crumbs = QHBoxLayout()
         self._crumbs.setSpacing(2)
@@ -193,6 +201,8 @@ class FolderPickerDialog(QDialog):
         self.sidebar = QTreeWidget()
         self.sidebar.setHeaderHidden(True)
         self.sidebar.setFixedWidth(260)
+        self.sidebar.setIndentation(12)  # 기본(~20)은 하위로 갈수록 여백 과다 → 축소
+        self.sidebar.setRootIsDecorated(True)
         self.sidebar.itemClicked.connect(self._on_tree_clicked)
         self.sidebar.itemExpanded.connect(self._on_tree_expanded)
         body.addWidget(self.sidebar)
@@ -318,20 +328,56 @@ class FolderPickerDialog(QDialog):
         node = self._make_dir_node(self.sidebar.invisibleRootItem(), label, anchor)
         self._root_nodes.append((anchor, node))
 
+    def _open_native_explorer(self) -> None:
+        """OS 기본 폴더 선택 대화상자로 폴더를 고른다(트리에 안 보이는 네트워크 공유 등)."""
+        start = str(self._cur) if self._cur.exists() else str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, "폴더 선택 (기본 탐색기)", start)
+        if path:
+            self._go_to(self._safe_dir(path))
+
+    def _pin_scan_roots(self, search_roots: list[str]) -> None:
+        """각 루트 바로 아래에 scan_root_name 폴더가 있으면 최상위 '📌' 고정 노드로 추가."""
+        name = (getattr(self.settings, "scan_root_name", "") or "").strip()
+        if not name:
+            return
+        root = self.sidebar.invisibleRootItem()
+        seen: set[str] = set()
+        for r in search_roots:
+            try:
+                p = Path(r) / name
+                if not p.is_dir():
+                    continue
+            except OSError:
+                continue  # 연결 끊긴 드라이브/네트워크 → 스킵
+            key = str(p).rstrip("/\\")
+            if key in seen:
+                continue
+            seen.add(key)
+            disp = r.rstrip("/\\") or r
+            node = self._make_dir_node(root, f"📌 {name}  ({disp})", str(p))
+            self._root_nodes.append((str(p), node))
+
     def _reload_sidebar(self) -> None:
         self.sidebar.clear()
         self._root_nodes = []  # (path, node) — 현재 위치 트리 동기화용 루트
         root = self.sidebar.invisibleRootItem()
-        # 폴더 트리 위주: 홈 + 드라이브를 최상위 폴더 노드로 직접 노출(탐색기처럼).
+        favs = [f for f in getattr(self.settings, "favorite_folders", []) if Path(f).exists()]
+        recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
+        # 검색 대상 루트(홈·드라이브·현재/즐겨찾기/최근의 네트워크 앵커).
+        search_roots = [str(Path.home())] + [d.absoluteFilePath() for d in QDir.drives()]
+        for cand in [str(self._cur), *favs, *recents]:
+            a = self._unc_anchor(cand)
+            if a and a not in search_roots:
+                search_roots.append(a)
+        # 1) 스캔 데이터 폴더(scan_root_name)가 있는 위치를 최상위에 📌 고정.
+        self._pin_scan_roots(search_roots)
+        # 2) 폴더 트리 위주: 홈 + 드라이브를 최상위 폴더 노드로 노출(탐색기처럼).
         home = self._make_dir_node(root, "🏠 홈", str(Path.home()))
         self._root_nodes.append((str(Path.home()), home))
         for d in QDir.drives():
             p = d.absoluteFilePath()
             self._root_nodes.append((p, self._make_dir_node(root, self._drive_label(p), p)))
-        # 네트워크(UNC) 위치는 드라이브 목록에 안 나오므로, 현재 위치·즐겨찾기·최근에서
-        # 쓰인 네트워크 루트를 최상위에 추가해 트리에서 바로 보이고 펼칠 수 있게 한다.
-        favs = [f for f in getattr(self.settings, "favorite_folders", []) if Path(f).exists()]
-        recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
+        # 3) 네트워크(UNC) 위치는 드라이브 목록에 안 나오므로 앵커 루트를 추가.
         for cand in [str(self._cur), *favs, *recents]:
             self._ensure_root_for(cand)
         # 즐겨찾기·최근은 맨 아래 접이식 소형 그룹(기본 접힘).
