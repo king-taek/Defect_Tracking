@@ -39,6 +39,15 @@ _HINTS = [
 ]
 
 
+# 미분류(class 0) 후보 — 원본 info(DefectList)에 정식 결함으로 등록되지 않아 좌표가 없는,
+# '정상적으로 제외되는' 이미지. 진짜 실패(info 없음·불일치 등)와 구분해 따로 표기한다.
+_UNCLASSIFIED_MARK = "미분류(class 0)"
+
+
+def _is_unclassified(rec: DefectRecord) -> bool:
+    return _UNCLASSIFIED_MARK in (rec.note or "")
+
+
 def _signature(rec: DefectRecord) -> str:
     """동일 원인 묶음을 위한 서명(시도 트레일 문자열)."""
     return rec.note or rec.status.value
@@ -56,12 +65,20 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
     """실패 진단 markdown 문자열을 만든다(파일 쓰기는 write_parse_failure_report)."""
     failed = [r for r in records if not r.ok]
     total = len(records)
+    # 미분류(class 0) 후보와 '확인 필요' 실패를 분리한다.
+    unclassified = [r for r in failed if _is_unclassified(r)]
+    real_failed = [r for r in failed if not _is_unclassified(r)]
+
     lines: list[str] = []
     lines.append(f"# 좌표 추출 진단 — {lot_name}")
     lines.append("")
     lines.append(f"- 전체 이미지: **{total}개**")
     lines.append(f"- 좌표 OK: **{total - len(failed)}개**")
-    lines.append(f"- 실패: **{len(failed)}개**")
+    if unclassified:
+        lines.append(
+            f"- 미분류(class 0) 후보: **{len(unclassified)}개** (정식 결함 아님 · 무시 가능)"
+        )
+    lines.append(f"- 실패: **{len(real_failed)}개**")
     lines.append("")
 
     if not failed:
@@ -73,8 +90,53 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
                 lines.append(f"- {e}")
         return "\n".join(lines) + "\n"
 
-    # 상태별 카운트
-    by_status: Counter[str] = Counter(r.status.value for r in failed)
+    # 미분류(class 0) 후보 — 무시 가능(간단 요약만, KLA info 덤프 없음)
+    if unclassified:
+        lines.extend(_unclassified_section(unclassified))
+
+    # 확인 필요 실패 — 상태별 카운트 + 원인 클러스터(상세)
+    if real_failed:
+        lines.extend(_failure_clusters(real_failed))
+    else:
+        lines.append("확인이 필요한 실패는 없습니다 — 위 미분류(class 0) 후보만 있으며 정상입니다. ✅")
+        lines.append("")
+
+    if scan_errors:
+        lines.append("## 접근 실패 경로")
+        for e in scan_errors[:50]:
+            lines.append(f"- {e}")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _unclassified_section(recs: list[DefectRecord]) -> list[str]:
+    """미분류(class 0) 후보 요약 — layer/wafer 분포 + 예시(무거운 info 덤프 없음)."""
+    lines: list[str] = []
+    lines.append(f"## 미분류(class 0) 후보 — 무시 가능 ({len(recs)}개)")
+    lines.append("")
+    lines.append(
+        "> KLA 가 캡처했지만 정식 결함으로 분류/등록하지 않은 후보 이미지입니다. 원본 "
+        "info(DefectList)에 좌표 항목이 없어 정상적으로 제외됩니다(실제 결함 아님)."
+    )
+    by_layer = Counter(r.layer_folder for r in recs)
+    lines.append(
+        "- layer 분포: " + ", ".join(f"{k}×{v}" for k, v in by_layer.most_common(10))
+    )
+    by_wafer = Counter(r.wafer_id for r in recs)
+    lines.append(
+        "- wafer 분포: " + ", ".join(f"{k}×{v}" for k, v in by_wafer.most_common(10))
+    )
+    lines.append("- 예시 파일:")
+    for r in recs[:5]:
+        lines.append(f"  - `{Path(r.image_path).name}`")
+    lines.append("")
+    return lines
+
+
+def _failure_clusters(recs: list[DefectRecord]) -> list[str]:
+    """확인 필요 실패의 상태별 카운트 + 동일 사유 클러스터(상세 컨텍스트 포함)."""
+    lines: list[str] = []
+    by_status: Counter[str] = Counter(r.status.value for r in recs)
     lines.append("## 상태별 카운트")
     lines.append("")
     lines.append("| 상태 | 개수 |")
@@ -83,29 +145,28 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
         lines.append(f"| {_STATUS_LABEL.get(status, status)} | {n} |")
     lines.append("")
 
-    # 실패 서명 클러스터링(동일 트레일끼리)
     clusters: dict[str, list[DefectRecord]] = defaultdict(list)
-    for r in failed:
+    for r in recs:
         clusters[_signature(r)].append(r)
     lines.append("## 실패 원인 클러스터 (동일 사유끼리 묶음)")
     lines.append("")
-    for sig, recs in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
-        lines.append(f"### ({len(recs)}개) {sig}")
+    for sig, rs in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
+        lines.append(f"### ({len(rs)}개) {sig}")
         hint = _hint_for(sig)
         if hint:
             lines.append(f"> 처방: {hint}")
-        by_layer = Counter(r.layer_folder for r in recs)
+        by_layer = Counter(r.layer_folder for r in rs)
         dist = ", ".join(f"{k}×{v}" for k, v in by_layer.most_common(6))
         lines.append(f"- layer 분포: {dist}")
         lines.append("- 예시 파일:")
-        for r in recs[:5]:
+        for r in rs[:5]:
             lines.append(f"  - `{Path(r.image_path).resolve()}`")
         lines.append("")
 
         # 폴더별 진단 컨텍스트(같은 클러스터에서 고유 wafer_dir 기준)
         seen_dirs: set[str] = set()
         diag_count = 0
-        for r in recs:
+        for r in rs:
             if diag_count >= 3:
                 break
             d = r.diag
@@ -117,13 +178,7 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
             seen_dirs.add(wdir)
             diag_count += 1
             lines.extend(_format_diag_context(r))
-
-    if scan_errors:
-        lines.append("## 접근 실패 경로")
-        for e in scan_errors[:50]:
-            lines.append(f"- {e}")
-        lines.append("")
-    return "\n".join(lines) + "\n"
+    return lines
 
 
 def _format_diag_context(rec: DefectRecord) -> list[str]:
