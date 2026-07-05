@@ -234,8 +234,8 @@ def test_match_status_classification():
             ))
         return it
 
-    assert MainWindow._match_status(_item([True, True])) == "full"
-    assert MainWindow._match_status(_item([True, False])) == "partial"
+    assert MainWindow._match_status(_item([True, True])) == "matched"
+    assert MainWindow._match_status(_item([True, False])) == "matched"
     assert MainWindow._match_status(_item([False, False])) == "none"
 
 
@@ -260,10 +260,6 @@ def test_filter_traversal_skips(win):
     assert len(win._view_indices()) == len(win.matches)
     _set_filter(win, "all")
     assert win._view_indices() != []
-    _set_filter(win, "full")
-    assert win._view_indices() == []  # 완전매칭 없음
-    _set_filter(win, "unmatched")
-    assert len(win._view_indices()) == len(win.matches)
 
 
 def test_matched_filter_excludes_unmatched(win):
@@ -313,15 +309,6 @@ def test_recent_folders_push(win, tmp_path):
     assert win.settings.recent_folders[0] == "/a/lot1"
     assert win.settings.recent_folders.count("/a/lot1") == 1
     assert len(win.settings.recent_folders) <= 5
-
-
-def test_session_mark_toggle_via_window(win):
-    assert win.session is not None
-    base = win.matches[0].base
-    win._toggle_mark(base)
-    assert win.session.is_marked(str(base.image_path)) is True
-    win._toggle_mark(base)
-    assert win.session.is_marked(str(base.image_path)) is False
 
 
 def test_wafer_map_updates(win):

@@ -80,7 +80,6 @@ def export_excel(
     selected: list[BaseDefectMatches],
     thumb_cache: ThumbnailCache,
     source_roots: Iterable[str | Path],
-    notes: dict[str, str] | None = None,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> Path:
     """선택된 기준 defect 들의 비교 결과를 Excel 로 저장한다.
@@ -232,15 +231,6 @@ def export_excel(
         ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=n_cols)
         ws.row_dimensions[r].height = 24
         r += 1
-
-        # 메모 행(세션 마킹/메모가 있을 때만)
-        note = (notes or {}).get(str(base.image_path), "")
-        if note:
-            _set_cell(ws, r, 1, "메모", bold=True, align="center", fill=_LIGHT)
-            _set_cell(ws, r, 2, note, color=_NAVY, wrap=True, size=9)
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=n_cols)
-            ws.row_dimensions[r].height = 28
-            r += 1
         r += 1  # 블록 간 간격
 
     wb.save(out)

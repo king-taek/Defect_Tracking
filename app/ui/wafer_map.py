@@ -3,7 +3,7 @@
 die 클릭 시 해당 기준 사진으로 점프한다. 리뷰 현황을 한눈에 본다.
 
 상태 색:
-  full(전부 매칭)=초록, partial(일부)=주황, none(전무)=빨강, 기준없음=빈칸.
+  matched(매칭)=초록, none(전무)=빨강, 기준없음=빈칸.
 """
 
 from __future__ import annotations
@@ -20,8 +20,7 @@ _CELL = 16
 _GAP = 2
 
 _STATE_COLORS = {
-    "full": theme.MATCH,
-    "partial": theme.WARN,
+    "matched": theme.MATCH,
     "none": theme.NOMATCH,
 }
 

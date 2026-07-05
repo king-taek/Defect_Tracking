@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -39,7 +38,6 @@ from app.config import AppSettings
 from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import conflicting_source
 from app.scanner import LotIndex
-from app.session import SessionStore
 from app.thumbnails import ThumbnailCache
 from app.ui.compare_grid import CompareGrid
 from app.ui.controls import NavBar, SideBar
@@ -91,7 +89,6 @@ class MainWindow(QMainWindow):
         self._export_tray: list = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
-        self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
 
@@ -277,8 +274,6 @@ class MainWindow(QMainWindow):
         grid_host_layout.setContentsMargins(12, 12, 12, 12)
         self.grid = CompareGrid(loader=self.image_loader)
         self.grid.image_clicked.connect(self._open_viewer)
-        self.grid.mark_requested.connect(self._toggle_mark)
-        self.grid.note_requested.connect(self._edit_note)
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
         grid_host_layout.addWidget(self.grid)
         self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
@@ -325,7 +320,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+D"), self,
                   activated=lambda: self.top._set_all_compares(False))
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
-        QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
         QShortcut(QKeySequence(Qt.Key_A), self, activated=self._add_current_to_export)
         QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
 
@@ -542,8 +536,6 @@ class MainWindow(QMainWindow):
         self.lot_index = index
         # 새 LOT: 웨이퍼 맵 정합 캐시를 비운다(id(lot_index) 재사용으로 인한 stale 방지).
         self._align_cache.clear()
-        # 세션 마킹/메모 로드(작업공간, 원본 밖)
-        self.session = SessionStore.load(self.settings.workspace_path, index.lot_name)
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(
@@ -977,27 +969,14 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _match_status(item) -> str:
-        """기준 1개의 매칭 상태: full(전부) / partial(일부) / none(전무)."""
-        results = item.results
-        if not results:
-            return "none"
-        matched = sum(1 for r in results if r.is_match)
-        if matched == 0:
-            return "none"
-        if matched == len(results):
-            return "full"
-        return "partial"
+        """기준 1개의 매칭 상태: matched(하나라도 매칭) / none(전무)."""
+        return "matched" if any(r.is_match for r in item.results) else "none"
 
     def _passes_filter(self, item) -> bool:
         if self._filter == "all":
             return True
-        status = self._match_status(item)
         if self._filter == "matched":
-            return status != "none"
-        if self._filter == "unmatched":
-            return status != "full"
-        if self._filter == "full":
-            return status == "full"
+            return self._match_status(item) != "none"
         return True
 
     def _view_indices(self) -> list[int]:
@@ -1043,7 +1022,7 @@ class MainWindow(QMainWindow):
         if not self.matches:
             return
         view = self._view_indices()
-        targets = [i for i in view if self._match_status(self.matches[i]) != "full"]
+        targets = [i for i in view if self._match_status(self.matches[i]) == "none"]
         if not targets:
             self.banner.show_message("미매칭이 있는 기준 사진이 없습니다.", "success")
             return
@@ -1065,42 +1044,13 @@ class MainWindow(QMainWindow):
             self.lbl_view.setText(f"({n_view}개)")
 
     def _refresh_strip_marks(self) -> None:
-        """썸네일에 매칭 상태 점 + 세션 마킹 별을 반영한다."""
+        """썸네일에 매칭 상태 점을 반영한다."""
         if not self.matches:
             return
-        statuses = [self._match_status(m) for m in self.matches]
-        self.strip.set_status_marks(statuses)
-        if self.session is not None:
-            for i, m in enumerate(self.matches):
-                self.strip.set_marked(i, self.session.is_marked(str(m.base.image_path)))
+        self.strip.set_status_marks([self._match_status(m) for m in self.matches])
         # 매칭 0인 기준 사진은 후보(썸네일)에서도 제외해 보이도록 반영
         self.strip.set_visible_set(self._view_indices())
         self._refresh_view_count()
-
-    # ---- 세션 마킹/메모 ----
-    def _toggle_mark(self, record) -> None:
-        if self.session is None or record is None:
-            return
-        marked = self.session.toggle_mark(str(record.image_path))
-        for i, m in enumerate(self.matches):
-            if m.base.image_path == record.image_path:
-                self.strip.set_marked(i, marked)
-        self.banner.show_message("마킹함." if marked else "마킹 해제.", "info", timeout_ms=1500)
-
-    def _toggle_mark_current(self) -> None:
-        if self.matches and 0 <= self.current < len(self.matches):
-            self._toggle_mark(self.matches[self.current].base)
-
-    def _edit_note(self, record) -> None:
-        if self.session is None or record is None:
-            return
-        key = str(record.image_path)
-        text, ok = QInputDialog.getText(
-            self, "메모", "이 기준 사진에 대한 메모:", text=self.session.note(key)
-        )
-        if ok:
-            self.session.set_note(key, text.strip())
-            self.banner.show_message("메모를 저장했습니다.", "success", timeout_ms=1500)
 
     def _open_viewer(self, record: object) -> None:
         if isinstance(record, DefectRecord):
@@ -1462,7 +1412,6 @@ class MainWindow(QMainWindow):
             selected=selected,
             thumb_cache=self.thumb_cache,
             source_roots=[self.lot_index.lot_path],
-            notes=self.session.notes_map() if self.session else None,
         )
         worker = ExportWorker(kwargs)
         worker.signals.progress.connect(self._on_export_progress)
@@ -1511,6 +1460,4 @@ class MainWindow(QMainWindow):
             self.settings.save()
         except OSError:
             pass
-        if self.session is not None:
-            self.session.save()
         super().closeEvent(event)

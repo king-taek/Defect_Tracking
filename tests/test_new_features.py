@@ -140,7 +140,7 @@ def test_grid_hides_unmatched_cells(win):
     assert visible == [grid._base_layer]
     # 큰 허용오차 → 비교도 매칭 → 비교 셀도 보인다.
     win.top.spn_tol.setValue(100000.0)
-    _wait_status({"full"})
+    _wait_status({"matched"})
     win._goto(0)
     visible2 = {l for l, c in grid._cells.items() if not c.isHidden()}
     assert grid._base_layer in visible2

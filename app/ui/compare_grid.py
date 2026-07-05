@@ -37,8 +37,6 @@ class LayerCell(QFrame):
     """
 
     record_clicked = Signal(object)  # DefectRecord
-    mark_requested = Signal(object)  # 기준 record 마킹 토글
-    note_requested = Signal(object)  # 기준 record 메모 편집
     cluster_clicked = Signal(object)  # 근접중복 '+n' 클릭 → 묶인 base 목록(list[DefectRecord])
 
     def __init__(
@@ -207,8 +205,6 @@ class CompareGrid(QWidget):
     """layer 배치 그리드 컨테이너."""
 
     image_clicked = Signal(object)  # DefectRecord
-    mark_requested = Signal(object)  # 기준 record 마킹 토글
-    note_requested = Signal(object)  # 기준 record 메모 편집
     base_cluster_clicked = Signal(object)  # 근접중복 '+n' → 묶인 base 목록
 
     def __init__(
@@ -246,8 +242,6 @@ class CompareGrid(QWidget):
                     layer, is_base=(layer == base_layer), loader=self._loader
                 )
                 cell.record_clicked.connect(self.image_clicked)
-                cell.mark_requested.connect(self.mark_requested)
-                cell.note_requested.connect(self.note_requested)
                 cell.cluster_clicked.connect(self.base_cluster_clicked)
                 self._cells[layer] = cell
                 self._layer_order.append(layer)

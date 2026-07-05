@@ -86,13 +86,9 @@ class ThumbnailStrip(QScrollArea):
             self._thumbs[index].set_image(path)
 
     def set_status_marks(self, statuses: list[str]) -> None:
-        """각 썸네일에 매칭 상태 점을 표시(full/partial/none)."""
+        """각 썸네일에 매칭 상태 점을 표시(matched/none)."""
         for i, t in enumerate(self._thumbs):
-            t.set_status(statuses[i] if i < len(statuses) else "full")
-
-    def set_marked(self, index: int, marked: bool) -> None:
-        if 0 <= index < len(self._thumbs):
-            self._thumbs[index].set_marked(marked)
+            t.set_status(statuses[i] if i < len(statuses) else "matched")
 
     def set_visible_set(self, indices: Optional[list[int]]) -> None:
         """주어진 인덱스의 썸네일만 보이고 나머지는 숨긴다(후보 제외 반영).

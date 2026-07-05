@@ -59,7 +59,7 @@ from urllib.request import Request, urlopen
 from PIL import Image
 from PySide6.QtCore import QDir, QEasingCurve, QEvent, QMargins, QObject, QParallelAnimationGroup, QPoint, QPropertyAnimation, QRect, QRectF, QRunnable, QSize, QStorageInfo, QThreadPool, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QShortcut
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLayoutItem, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplashScreen, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLayout, QLayoutItem, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplashScreen, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -76,7 +76,6 @@ __version__ = "1.33.61"
 #   app/logging_config.py             — 애플리케이션 로깅 설정 (관측성).
 #   app/models.py                     — 도메인 데이터 모델.
 #   app/safety.py                     — 원본 보호 게이트 (문서 Section 1 — 절대 안전 규칙).
-#   app/session.py                    — 세션 마킹/메모 저장 (원본 미수정 원칙 준수).
 #   app/ui/flow_layout.py             — 줄바꿈(Flow) 레이아웃.
 #   app/ui/image_loader.py            — 비동기 이미지 로더 (문서 Section 10 — UI 멈춤 최소화).
 #   app/ui/theme.py                   — 다크 + 파란 네온 테마 (문서 Section 9).
@@ -1027,84 +1026,7 @@ def read_only_bytes(path: str | Path) -> bytes:
 
 
 # =============================================================================
-# app/session.py   [#6]
-# =============================================================================
-"""세션 마킹/메모 저장 (원본 미수정 원칙 준수).
-
-리뷰어가 기준 사진에 별표/메모를 남길 수 있게 한다. 데이터는 **항상 출력 작업공간**
-(원본 LOT 폴더 밖)의 `session/<lot>.json` 에만 저장한다. 키는 기준 이미지의 절대 경로.
-"""
-
-
-
-session__log = logging.getLogger("defect_tracker.session")
-
-
-def _safe_name(name: str) -> str:
-    return re.sub(r"[^0-9A-Za-z가-힣._-]", "_", name) or "session"
-
-
-class SessionStore:
-    """LOT 단위 마킹/메모 보관소(작업공간 JSON)."""
-
-    def __init__(self, path: Path, marks: dict[str, dict]):
-        self.path = path
-        self.marks = marks
-
-    @classmethod
-    def load(cls, workspace: Path, lot_name: str) -> "SessionStore":
-        path = Path(workspace) / "session" / f"{_safe_name(lot_name)}.json"
-        marks: dict[str, dict] = {}
-        if path.exists():
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    marks = {k: v for k, v in raw.items() if isinstance(v, dict)}
-            except (OSError, json.JSONDecodeError) as exc:
-                session__log.warning("세션 파일을 읽지 못했습니다(%s): %s", path, exc)
-        return cls(path, marks)
-
-    def save(self) -> None:
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(self.path.name + ".tmp")
-            tmp.write_text(
-                json.dumps(self.marks, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            os.replace(tmp, self.path)
-        except OSError as exc:
-            session__log.warning("세션 저장 실패(%s): %s", self.path, exc)
-
-    # ---- 조회/수정 ----
-    def is_marked(self, key: str) -> bool:
-        return bool(self.marks.get(key, {}).get("marked"))
-
-    def note(self, key: str) -> str:
-        return str(self.marks.get(key, {}).get("note", ""))
-
-    def toggle_mark(self, key: str) -> bool:
-        entry = self.marks.setdefault(key, {})
-        entry["marked"] = not entry.get("marked", False)
-        self._prune(key)
-        return bool(entry.get("marked"))
-
-    def set_note(self, key: str, note: str) -> None:
-        entry = self.marks.setdefault(key, {})
-        entry["note"] = note
-        self._prune(key)
-
-    def notes_map(self) -> dict[str, str]:
-        return {k: v.get("note", "") for k, v in self.marks.items() if v.get("note")}
-
-    def _prune(self, key: str) -> None:
-        """빈 항목은 제거(파일을 가볍게 유지)."""
-        e = self.marks.get(key)
-        if e and not e.get("marked") and not e.get("note"):
-            self.marks.pop(key, None)
-
-
-# =============================================================================
-# app/ui/flow_layout.py   [#7]
+# app/ui/flow_layout.py   [#6]
 # =============================================================================
 """줄바꿈(Flow) 레이아웃.
 
@@ -1208,7 +1130,7 @@ class FlowLayout(QLayout):
 
 
 # =============================================================================
-# app/ui/image_loader.py   [#8]
+# app/ui/image_loader.py   [#7]
 # =============================================================================
 """비동기 이미지 로더 (문서 Section 10 — UI 멈춤 최소화).
 
@@ -1324,7 +1246,7 @@ class ImageLoader(QObject):
 
 
 # =============================================================================
-# app/ui/theme.py   [#9]
+# app/ui/theme.py   [#8]
 # =============================================================================
 """다크 + 파란 네온 테마 (문서 Section 9).
 
@@ -1658,7 +1580,7 @@ QAbstractSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
 
 
 # =============================================================================
-# app/wafermap_align.py   [#10]
+# app/wafermap_align.py   [#9]
 # =============================================================================
 """웨이퍼 맵 die 정합(alignment) — 관측 die 와 디바이스 DB die_map 의 원점 맞추기.
 
@@ -1736,7 +1658,7 @@ def shifted_die_map(die_map: frozenset[Die] | set[Die], align: Alignment) -> set
 
 
 # =============================================================================
-# app/clustering.py   [#11]
+# app/clustering.py   [#10]
 # =============================================================================
 """defect 근접 클러스터링 + layer 간 교차 매칭 (순수 로직, UI 무관).
 
@@ -1962,7 +1884,7 @@ def collapse_matches(
 
 
 # =============================================================================
-# app/diagnostics.py   [#12]
+# app/diagnostics.py   [#11]
 # =============================================================================
 """좌표 추출 실패 진단 리포트(개발용) — 단일 markdown 파일로 관리.
 
@@ -2245,7 +2167,7 @@ def write_parse_failure_report(
 
 
 # =============================================================================
-# app/layout.py   [#13]
+# app/layout.py   [#12]
 # =============================================================================
 """Layer 폴더명 정규화 및 비교 그리드 배치 (문서 Section 8.2 / 8.4).
 
@@ -2360,7 +2282,7 @@ def build_grid(layers: list[str]) -> list[list[str | None]]:
 
 
 # =============================================================================
-# app/matcher.py   [#14]
+# app/matcher.py   [#13]
 # =============================================================================
 """매칭 엔진 (문서 Section 8.3 + 원본 AOI 도구 Module_Compare 알고리즘).
 
@@ -2737,7 +2659,7 @@ def match_all(
 
 
 # =============================================================================
-# app/parsers/camtek_filename.py   [#15]
+# app/parsers/camtek_filename.py   [#14]
 # =============================================================================
 """Camtek 파일명에서 직접 좌표 추출 (문서 Section 6 / 13.3.4 + 실제 AOI 도구 스키마).
 
@@ -2839,7 +2761,7 @@ def parse_camtek_filename(filename: str) -> CamtekNameResult:
 
 
 # =============================================================================
-# app/parsers/camtek_ini.py   [#16]
+# app/parsers/camtek_ini.py   [#15]
 # =============================================================================
 """ColorImageGrabingInfo.ini 기반 Camtek 좌표 산출 (문서 Section 13.3).
 
@@ -2987,7 +2909,7 @@ def convert_camtek_ini(ini_path: str | Path, original_name: str) -> CamtekIniRes
 
 
 # =============================================================================
-# app/parsers/kla_info.py   [#17]
+# app/parsers/kla_info.py   [#16]
 # =============================================================================
 """KLA info(.001) 기반 좌표 변환 (문서 Section 13.2 및 KLA 변환 보고서).
 
@@ -3281,7 +3203,7 @@ def convert_kla(info_path: str | Path, jpg_filename: str) -> KlaResult:
 
 
 # =============================================================================
-# app/thumbnails.py   [#18]
+# app/thumbnails.py   [#17]
 # =============================================================================
 """썸네일 생성/캐시 (문서 Section 8.6, 10).
 
@@ -3376,7 +3298,7 @@ class ThumbnailCache:
 
 
 # =============================================================================
-# app/ui/busy_overlay.py   [#19]
+# app/ui/busy_overlay.py   [#18]
 # =============================================================================
 """로딩(작업 중) 오버레이 — 부모 위 반투명 막 + 중앙 카드(부드러운 스피너·메시지·진행바).
 
@@ -3536,7 +3458,7 @@ class BusyOverlay(QWidget):
 
 
 # =============================================================================
-# app/ui/controls.py   [#20]
+# app/ui/controls.py   [#19]
 # =============================================================================
 """좌측 사이드바 컨트롤 및 하단 탐색 바 (문서 Section 8.1, 8.3, 8.5).
 
@@ -3933,7 +3855,7 @@ TopBar = SideBar
 
 
 # =============================================================================
-# app/ui/help_dialog.py   [#21]
+# app/ui/help_dialog.py   [#20]
 # =============================================================================
 """도움말 다이얼로그 — 단축키 + 기능 안내(섹션 구성, 스크롤)."""
 
@@ -3949,8 +3871,7 @@ _SHORTCUT_GROUPS = [
         ("U", "다음 '미매칭 포함' 기준으로 점프"),
         ("F5", "현재 자재 폴더 다시 스캔"),
     ]),
-    ("선택 · 마킹", [
-        ("M", "현재 기준 사진 마킹 토글"),
+    ("선택", [
         ("Ctrl + A / Ctrl + D", "비교 Layer 전체 선택 / 모두 해제"),
     ]),
     ("출력", [
@@ -3961,7 +3882,7 @@ _SHORTCUT_GROUPS = [
         ("Ctrl + O", "자재 폴더 열기 (우클릭: 최근 폴더)"),
         ("F1", "이 도움말 열기"),
         ("이미지 클릭", "원본 전체 해상도 확대 보기"),
-        ("이미지 우클릭", "경로 복사 / 파일·폴더 열기 (기준: 마킹·메모)"),
+        ("이미지 우클릭", "경로 복사 / 파일·폴더 열기"),
     ]),
 ]
 
@@ -4100,7 +4021,7 @@ class ShortcutsDialog(QDialog):
 
 
 # =============================================================================
-# app/ui/image_viewer.py   [#22]
+# app/ui/image_viewer.py   [#21]
 # =============================================================================
 """원본 확대 뷰어 (read-only) — defect review 사용성.
 
@@ -4345,7 +4266,7 @@ class ImageViewerDialog(QDialog):
 
 
 # =============================================================================
-# app/ui/notifications.py   [#23]
+# app/ui/notifications.py   [#22]
 # =============================================================================
 """비차단 알림 배너(토스트) — 매끄러운 오류/안내 처리 (문서 Section 9 / 사용성).
 
@@ -4514,7 +4435,7 @@ class NotificationBanner(QFrame):
 
 
 # =============================================================================
-# app/ui/settings_dialog.py   [#24]
+# app/ui/settings_dialog.py   [#23]
 # =============================================================================
 """설정 다이얼로그 — 작업공간/출력 폴더/기본 허용오차/업데이트 확인 (사용성).
 
@@ -4837,7 +4758,7 @@ class SettingsDialog(QDialog):
 
 
 # =============================================================================
-# app/ui/splash.py   [#25]
+# app/ui/splash.py   [#24]
 # =============================================================================
 """시작 스플래시 — 무거운 MainWindow 임포트/구성 전에 즉시 피드백을 준다.
 
@@ -4899,14 +4820,14 @@ def show_status(splash: QSplashScreen, text: str) -> None:
 
 
 # =============================================================================
-# app/ui/wafer_map.py   [#26]
+# app/ui/wafer_map.py   [#25]
 # =============================================================================
 """웨이퍼 맵 네비게이터 — 현재 wafer 의 die 격자를 매칭 상태로 색칠하고,
 
 die 클릭 시 해당 기준 사진으로 점프한다. 리뷰 현황을 한눈에 본다.
 
 상태 색:
-  full(전부 매칭)=초록, partial(일부)=주황, none(전무)=빨강, 기준없음=빈칸.
+  matched(매칭)=초록, none(전무)=빨강, 기준없음=빈칸.
 """
 
 
@@ -4917,8 +4838,7 @@ _CELL = 16
 _GAP = 2
 
 _STATE_COLORS = {
-    "full": MATCH,
-    "partial": WARN,
+    "matched": MATCH,
     "none": NOMATCH,
 }
 
@@ -5015,7 +4935,7 @@ class WaferMapWidget(QWidget):
 
 
 # =============================================================================
-# app/ui/widgets.py   [#27]
+# app/ui/widgets.py   [#26]
 # =============================================================================
 """재사용 위젯 및 애니메이션 헬퍼 (문서 Section 8.6, 9).
 
@@ -5135,16 +5055,11 @@ class ClickableThumb(QFrame):
         self.img.setStyleSheet(
             f"background:{BG}; border-radius:6px; color:{TEXT_DIM};"
         )
-        # 매칭 상태 점(부분=주황, 미매칭=빨강, 완전매칭=숨김) — 트리아지 표식
+        # 매칭 상태 점(미매칭=빨강, 매칭=숨김) — 트리아지 표식
         self.dot = QLabel(self.img)
         self.dot.setFixedSize(10, 10)
         self.dot.move(70, 4)
         self.dot.hide()
-        # 세션 마킹 별 표식(원본 미수정, 워크스페이스에만 저장)
-        self.star = QLabel("★", self.img)
-        self.star.setStyleSheet(f"color:{WARN}; font-size:12px; background:transparent;")
-        self.star.move(4, 2)
-        self.star.hide()
         self.caption = QLabel("")
         self.caption.setObjectName("dim")
         self.caption.setAlignment(Qt.AlignCenter)
@@ -5166,18 +5081,14 @@ class ClickableThumb(QFrame):
         self.caption.setText(text)
 
     def set_status(self, status: str) -> None:
-        """매칭 상태 점 표시: 'partial'(주황) / 'none'(빨강) / 'full'(숨김)."""
-        color = {"partial": WARN, "none": NOMATCH}.get(status)
-        if color is None:
+        """매칭 상태 점 표시: 'none'(빨강 점) / 'matched'(점 없음)."""
+        if status != "none":
             self.dot.hide()
             return
         self.dot.setStyleSheet(
-            f"background:{color}; border:1px solid {BG}; border-radius:5px;"
+            f"background:{NOMATCH}; border:1px solid {BG}; border-radius:5px;"
         )
         self.dot.show()
-
-    def set_marked(self, marked: bool) -> None:
-        self.star.setVisible(marked)
 
     def set_tooltip(self, text: str) -> None:
         # 자식 위젯은 부모 tooltip 을 상속하지 않으므로 모두 지정한다.
@@ -5209,7 +5120,7 @@ class ClickableThumb(QFrame):
 
 
 # =============================================================================
-# app/updater.py   [#28]
+# app/updater.py   [#27]
 # =============================================================================
 """자동 업데이트 — 메인 브랜치를 가져와 적용.
 
@@ -5506,7 +5417,7 @@ except ImportError:  # PySide6 미설치 환경(부트스트랩 전)
 
 
 # =============================================================================
-# app/export/excel_report.py   [#29]
+# app/export/excel_report.py   [#28]
 # =============================================================================
 """Excel 결과 출력 (문서 Section 8.7).
 
@@ -5579,7 +5490,6 @@ def export_excel(
     selected: list[BaseDefectMatches],
     thumb_cache: ThumbnailCache,
     source_roots: Iterable[str | Path],
-    notes: dict[str, str] | None = None,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> Path:
     """선택된 기준 defect 들의 비교 결과를 Excel 로 저장한다.
@@ -5731,15 +5641,6 @@ def export_excel(
         ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=n_cols)
         ws.row_dimensions[r].height = 24
         r += 1
-
-        # 메모 행(세션 마킹/메모가 있을 때만)
-        note = (notes or {}).get(str(base.image_path), "")
-        if note:
-            _set_cell(ws, r, 1, "메모", bold=True, align="center", fill=_LIGHT)
-            _set_cell(ws, r, 2, note, color=_NAVY, wrap=True, size=9)
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=n_cols)
-            ws.row_dimensions[r].height = 28
-            r += 1
         r += 1  # 블록 간 간격
 
     wb.save(out)
@@ -5747,7 +5648,7 @@ def export_excel(
 
 
 # =============================================================================
-# app/scanner.py   [#30]
+# app/scanner.py   [#29]
 # =============================================================================
 """LOT 폴더 스캔 및 인덱스 구축 (문서 Section 4, 8.1, 8.2).
 
@@ -6220,7 +6121,7 @@ def scan_lot(
 
 
 # =============================================================================
-# app/ui/cluster_view.py   [#31]
+# app/ui/cluster_view.py   [#30]
 # =============================================================================
 """클러스터 defect 표시용 공유 위젯 (히트맵·메인 매치 공통).
 
@@ -6391,7 +6292,7 @@ class ClusteredThumb(QWidget):
 
 
 # =============================================================================
-# app/ui/compare_grid.py   [#32]
+# app/ui/compare_grid.py   [#31]
 # =============================================================================
 """Layer 비교 그리드 (문서 Section 8.4).
 
@@ -6412,8 +6313,6 @@ class LayerCell(QFrame):
     """
 
     record_clicked = Signal(object)  # DefectRecord
-    mark_requested = Signal(object)  # 기준 record 마킹 토글
-    note_requested = Signal(object)  # 기준 record 메모 편집
     cluster_clicked = Signal(object)  # 근접중복 '+n' 클릭 → 묶인 base 목록(list[DefectRecord])
 
     def __init__(
@@ -6582,8 +6481,6 @@ class CompareGrid(QWidget):
     """layer 배치 그리드 컨테이너."""
 
     image_clicked = Signal(object)  # DefectRecord
-    mark_requested = Signal(object)  # 기준 record 마킹 토글
-    note_requested = Signal(object)  # 기준 record 메모 편집
     base_cluster_clicked = Signal(object)  # 근접중복 '+n' → 묶인 base 목록
 
     def __init__(
@@ -6621,8 +6518,6 @@ class CompareGrid(QWidget):
                     layer, is_base=(layer == base_layer), loader=self._loader
                 )
                 cell.record_clicked.connect(self.image_clicked)
-                cell.mark_requested.connect(self.mark_requested)
-                cell.note_requested.connect(self.note_requested)
                 cell.cluster_clicked.connect(self.base_cluster_clicked)
                 self._cells[layer] = cell
                 self._layer_order.append(layer)
@@ -6698,7 +6593,7 @@ class CompareGrid(QWidget):
 
 
 # =============================================================================
-# app/ui/export_dialog.py   [#33]
+# app/ui/export_dialog.py   [#32]
 # =============================================================================
 """결과 출력 트레이 다이얼로그 (문서 Section 8.7 재설계).
 
@@ -6980,7 +6875,7 @@ class ExportTrayDialog(QDialog):
 
 
 # =============================================================================
-# app/ui/nomatch_gallery.py   [#34]
+# app/ui/nomatch_gallery.py   [#33]
 # =============================================================================
 """미매칭(기준 layer 의 defect 과 어떤 비교 layer 와도 매칭 안 된) 사진 갤러리.
 
@@ -7148,7 +7043,7 @@ class NoMatchGalleryDialog(QDialog):
 
 
 # =============================================================================
-# app/ui/thumbnail_strip.py   [#35]
+# app/ui/thumbnail_strip.py   [#34]
 # =============================================================================
 """상단 기준 썸네일 스트립 (문서 Section 8.6).
 
@@ -7233,13 +7128,9 @@ class ThumbnailStrip(QScrollArea):
             self._thumbs[index].set_image(path)
 
     def set_status_marks(self, statuses: list[str]) -> None:
-        """각 썸네일에 매칭 상태 점을 표시(full/partial/none)."""
+        """각 썸네일에 매칭 상태 점을 표시(matched/none)."""
         for i, t in enumerate(self._thumbs):
-            t.set_status(statuses[i] if i < len(statuses) else "full")
-
-    def set_marked(self, index: int, marked: bool) -> None:
-        if 0 <= index < len(self._thumbs):
-            self._thumbs[index].set_marked(marked)
+            t.set_status(statuses[i] if i < len(statuses) else "matched")
 
     def set_visible_set(self, indices: Optional[list[int]]) -> None:
         """주어진 인덱스의 썸네일만 보이고 나머지는 숨긴다(후보 제외 반영).
@@ -7296,7 +7187,7 @@ class ThumbnailStrip(QScrollArea):
 
 
 # =============================================================================
-# app/ui/folder_picker.py   [#36]
+# app/ui/folder_picker.py   [#35]
 # =============================================================================
 """자재(LOT) 폴더 선택 다이얼로그 — 브레드크럼 + 한 단계 목록 + 사이드바.
 
@@ -8032,7 +7923,7 @@ class FolderPickerDialog(QDialog):
 
 
 # =============================================================================
-# app/ui/heatmap_dialog.py   [#37]
+# app/ui/heatmap_dialog.py   [#36]
 # =============================================================================
 """Defect 히트맵 팝업 (항목 4·5).
 
@@ -8818,7 +8709,7 @@ class HeatmapDialog(QDialog):
 
 
 # =============================================================================
-# app/workers.py   [#38]
+# app/workers.py   [#37]
 # =============================================================================
 """백그라운드 작업 (문서 Section 10 성능 요구사항).
 
@@ -9031,7 +8922,7 @@ class FullThumbWorker(QRunnable):
 
 
 # =============================================================================
-# app/ui/main_window.py   [#39]
+# app/ui/main_window.py   [#38]
 # =============================================================================
 """메인 윈도우 — 전체 workflow 조립 (문서 Section 8 전체).
 
@@ -9085,7 +8976,6 @@ class MainWindow(QMainWindow):
         self._export_tray: list = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
-        self.session: Optional[SessionStore] = None  # 세션 마킹/메모(작업공간 저장)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
 
@@ -9271,8 +9161,6 @@ class MainWindow(QMainWindow):
         grid_host_layout.setContentsMargins(12, 12, 12, 12)
         self.grid = CompareGrid(loader=self.image_loader)
         self.grid.image_clicked.connect(self._open_viewer)
-        self.grid.mark_requested.connect(self._toggle_mark)
-        self.grid.note_requested.connect(self._edit_note)
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
         grid_host_layout.addWidget(self.grid)
         self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
@@ -9319,7 +9207,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+D"), self,
                   activated=lambda: self.top._set_all_compares(False))
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
-        QShortcut(QKeySequence(Qt.Key_M), self, activated=self._toggle_mark_current)
         QShortcut(QKeySequence(Qt.Key_A), self, activated=self._add_current_to_export)
         QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
 
@@ -9535,8 +9422,6 @@ class MainWindow(QMainWindow):
         self.lot_index = index
         # 새 LOT: 웨이퍼 맵 정합 캐시를 비운다(id(lot_index) 재사용으로 인한 stale 방지).
         self._align_cache.clear()
-        # 세션 마킹/메모 로드(작업공간, 원본 밖)
-        self.session = SessionStore.load(self.settings.workspace_path, index.lot_name)
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(
@@ -9968,27 +9853,14 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _match_status(item) -> str:
-        """기준 1개의 매칭 상태: full(전부) / partial(일부) / none(전무)."""
-        results = item.results
-        if not results:
-            return "none"
-        matched = sum(1 for r in results if r.is_match)
-        if matched == 0:
-            return "none"
-        if matched == len(results):
-            return "full"
-        return "partial"
+        """기준 1개의 매칭 상태: matched(하나라도 매칭) / none(전무)."""
+        return "matched" if any(r.is_match for r in item.results) else "none"
 
     def _passes_filter(self, item) -> bool:
         if self._filter == "all":
             return True
-        status = self._match_status(item)
         if self._filter == "matched":
-            return status != "none"
-        if self._filter == "unmatched":
-            return status != "full"
-        if self._filter == "full":
-            return status == "full"
+            return self._match_status(item) != "none"
         return True
 
     def _view_indices(self) -> list[int]:
@@ -10034,7 +9906,7 @@ class MainWindow(QMainWindow):
         if not self.matches:
             return
         view = self._view_indices()
-        targets = [i for i in view if self._match_status(self.matches[i]) != "full"]
+        targets = [i for i in view if self._match_status(self.matches[i]) == "none"]
         if not targets:
             self.banner.show_message("미매칭이 있는 기준 사진이 없습니다.", "success")
             return
@@ -10056,42 +9928,13 @@ class MainWindow(QMainWindow):
             self.lbl_view.setText(f"({n_view}개)")
 
     def _refresh_strip_marks(self) -> None:
-        """썸네일에 매칭 상태 점 + 세션 마킹 별을 반영한다."""
+        """썸네일에 매칭 상태 점을 반영한다."""
         if not self.matches:
             return
-        statuses = [self._match_status(m) for m in self.matches]
-        self.strip.set_status_marks(statuses)
-        if self.session is not None:
-            for i, m in enumerate(self.matches):
-                self.strip.set_marked(i, self.session.is_marked(str(m.base.image_path)))
+        self.strip.set_status_marks([self._match_status(m) for m in self.matches])
         # 매칭 0인 기준 사진은 후보(썸네일)에서도 제외해 보이도록 반영
         self.strip.set_visible_set(self._view_indices())
         self._refresh_view_count()
-
-    # ---- 세션 마킹/메모 ----
-    def _toggle_mark(self, record) -> None:
-        if self.session is None or record is None:
-            return
-        marked = self.session.toggle_mark(str(record.image_path))
-        for i, m in enumerate(self.matches):
-            if m.base.image_path == record.image_path:
-                self.strip.set_marked(i, marked)
-        self.banner.show_message("마킹함." if marked else "마킹 해제.", "info", timeout_ms=1500)
-
-    def _toggle_mark_current(self) -> None:
-        if self.matches and 0 <= self.current < len(self.matches):
-            self._toggle_mark(self.matches[self.current].base)
-
-    def _edit_note(self, record) -> None:
-        if self.session is None or record is None:
-            return
-        key = str(record.image_path)
-        text, ok = QInputDialog.getText(
-            self, "메모", "이 기준 사진에 대한 메모:", text=self.session.note(key)
-        )
-        if ok:
-            self.session.set_note(key, text.strip())
-            self.banner.show_message("메모를 저장했습니다.", "success", timeout_ms=1500)
 
     def _open_viewer(self, record: object) -> None:
         if isinstance(record, DefectRecord):
@@ -10447,7 +10290,6 @@ class MainWindow(QMainWindow):
             selected=selected,
             thumb_cache=self.thumb_cache,
             source_roots=[self.lot_index.lot_path],
-            notes=self.session.notes_map() if self.session else None,
         )
         worker = ExportWorker(kwargs)
         worker.signals.progress.connect(self._on_export_progress)
@@ -10496,8 +10338,6 @@ class MainWindow(QMainWindow):
             self.settings.save()
         except OSError:
             pass
-        if self.session is not None:
-            self.session.save()
         super().closeEvent(event)
 
 

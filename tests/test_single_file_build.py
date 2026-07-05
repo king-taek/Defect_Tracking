@@ -55,11 +55,10 @@ def test_config_parity(tmp_path):
 def test_collision_rename_preserved(tmp_path):
     mod = _load_single_file(tmp_path)
 
-    # 6개 모듈의 _log 로거 이름이 각각 보존됐는지(충돌로 사라지지 않았는지)
+    # 여러 모듈의 _log 로거 이름이 각각 보존됐는지(충돌로 사라지지 않았는지)
     assert mod.scanner__log.name == "defect_tracker.scanner"
     assert mod.workers__log.name == "defect_tracker.workers"
     assert mod.device_db__log.name == "defect_tracker.device_db"
-    assert mod.session__log.name == "defect_tracker.session"
     assert mod.camtek_ini__log.name == "defect_tracker.parsers.ini"
     assert mod.kla_info__log.name == "defect_tracker.parsers.kla"
 
