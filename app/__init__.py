@@ -3,4 +3,4 @@
 원본 데이터는 절대 훼손하지 않는 read-only defect layer 비교 뷰어.
 """
 
-__version__ = "1.33.66"
+__version__ = "1.33.67"

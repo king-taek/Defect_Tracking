@@ -325,6 +325,7 @@ class HeatmapDialog(QDialog):
         self._thumb_token = 0            # stale 썸네일 로딩 무시
         self._active_thumb_workers: set = set()  # 실행 중 워커 참조 유지(GC 방지)
         self._hm_align_cache: dict = {}  # observed→alignment 캐시(매 refresh 재계산 방지)
+        self._align_shift = (0, 0)  # 관측→die_map 좌표 정합 이동(밀도·선택 키를 die_map 좌표로)
         self._xr = (0.0, 1.0)   # die 내부 local 좌표 범위(subcell 판정용)
         self._yr = (0.0, 1.0)
         self._subdivide = False
@@ -551,26 +552,23 @@ class HeatmapDialog(QDialog):
     def _refresh_map(self, preserve_selection: bool = False) -> None:
         keep = list(self._selected_keys) if preserve_selection else []
         entries = self._map_entries()
-        observed = {(r.col, r.row) for _, r in entries}
+        observed = {
+            (r.col, r.row) for _, r in entries
+            if r.col is not None and r.row is not None
+        }
         die_count = len(observed)
         subdivide = heatmap.should_subdivide(die_count)
         xr, yr = heatmap.local_ranges([r for _, r in entries])
         self._xr, self._yr, self._subdivide = xr, yr, subdivide
-        density_groups = heatmap.group_defects(entries, subdivide, xr, yr)
-        density = {k: len(v) for k, v in density_groups.items()}
-        # 매치만 상세용 그룹(base index)은 항상 기준 defect 전체로, 동일 subdivide/range 로 키 정합.
-        self._groups = heatmap.group_defects(self._base_entries(), subdivide, xr, yr)
-        self._selected_keys = [k for k in keep if k in density]
 
+        # 웨이퍼 '모양'과 defect '정합'을 분리한다. 모양은 항상 die_map 자체(고정 좌표)로
+        # 그려 정합 오차가 모양에 구멍/잘림을 만들지 못하게 하고, defect 밀도는 정합 이동
+        # (shift)만큼 die_map 좌표계로 옮겨 올린다.
         prod = config.active_product()
         valid = None
+        shift = (0, 0)
         caption = prod.name if prod.source == "db" else ""  # 제품명만(‘모양 정합’ 미표기)
         if prod.die_map:
-            # 디바이스 die_map 이 있으면 관측 defect 유무·정합 신뢰도와 무관하게 항상 그
-            # 모양으로 웨이퍼를 그린다(wafer 형태 유지). 관측 die 가 있으면 최적 평행이동을
-            # 적용해 die_map 을 관측 좌표계에 맞추고, 관측이 없으면 die_map 을 그대로 쓴다.
-            # (이전엔 정합 overlap 이 낮거나 관측이 없으면 valid=None 이 돼 웨이퍼가 통짜
-            #  사각형으로 무너지고 die 가 빠져 보였다.)
             if observed:
                 # 정합은 관측 die 집합·제품이 같으면 재계산 불필요 → 캐시(매 refresh 비용 절감).
                 ckey = (prod.name, frozenset(observed))
@@ -578,13 +576,23 @@ class HeatmapDialog(QDialog):
                 if align is None:
                     align = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
                     self._hm_align_cache[ckey] = align
-                valid = wafermap_align.shifted_die_map(prod.die_map, align)
-            else:
-                valid = set(prod.die_map)
-        paint_valid = (valid | observed) if valid else None
+                shift = (align.dcol, align.drow)
+            valid = set(prod.die_map)  # 모양 = die_map 그대로(항상 온전한 wafer 형태)
+        self._align_shift = shift
+
+        # 밀도/그룹 키를 die_map 좌표계로 맞춘다(관측 좌표 − shift).
+        density_groups = heatmap.group_defects(entries, subdivide, xr, yr)
+        density = {self._shift_key(k): len(v) for k, v in density_groups.items()}
+        # 매치만 상세용 그룹(base index)은 항상 기준 defect 전체로, 동일 subdivide/range 로 키 정합.
+        base_groups = heatmap.group_defects(self._base_entries(), subdivide, xr, yr)
+        self._groups = {self._shift_key(k): v for k, v in base_groups.items()}
+        self._selected_keys = [k for k in keep if k in density]
+
+        observed_dm = {(c - shift[0], r - shift[1]) for c, r in observed}
+        paint_valid = (valid | observed_dm) if valid else None
         if paint_valid is not None:
             # 내용 bounding box 로 정규화(맵이 여백에 떠 보이거나 잘리지 않게).
-            content = set(paint_valid) | observed
+            content = set(paint_valid) | observed_dm
             min_col = min(c for c, _ in content)
             min_row = min(r for _, r in content)
             cols = max(c for c, _ in content) - min_col + 1
@@ -634,11 +642,22 @@ class HeatmapDialog(QDialog):
                     out.append(bi)
         return out
 
+    def _shift_key(self, k: HeatKey) -> HeatKey:
+        """관측 좌표 HeatKey 를 die_map 좌표계로 옮긴다(정합 shift 만큼)."""
+        dc, dr = self._align_shift
+        if dc == 0 and dr == 0:
+            return k
+        return HeatKey(k.col - dc, k.row - dr, k.sub_col, k.sub_row)
+
     def _key_for_record(self, rec) -> HeatKey:
+        # 밀도/그룹 키와 같은 die_map 좌표계로 맞춘다(관측 좌표 − shift).
+        dc, dr = self._align_shift
+        col = int(rec.col) - dc
+        row = int(rec.row) - dr
         if self._subdivide and rec.x is not None and rec.y is not None:
             sc, sr = heatmap.subcell_of(rec.x, rec.y, self._xr, self._yr)
-            return HeatKey(int(rec.col), int(rec.row), sc, sr)
-        return HeatKey(int(rec.col), int(rec.row))
+            return HeatKey(col, row, sc, sr)
+        return HeatKey(col, row)
 
     def _records_at_selection(self) -> list[tuple[str, object]]:
         """선택 위치의 체크된 layer 모든 defect record — (layer, record)."""
