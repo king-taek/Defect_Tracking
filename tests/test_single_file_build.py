@@ -97,7 +97,9 @@ def test_mainwindow_smoke(tmp_path):
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
-    settings = mod.AppSettings()
+    # 헤르메틱: 시작 시 네트워크 업데이트 확인을 끈다(안 그러면 CI 에서 실제 GitHub API 호출 +
+    # 모달 다이얼로그로 헤드리스 abort). test_ui_smoke.py 와 동일한 처리.
+    settings = mod.AppSettings(workspace=str(tmp_path / "ws"), auto_update_check=False)
     win = mod.MainWindow(settings)
     win.show_initial()
     win.close()
