@@ -247,10 +247,18 @@ class SettingsDialog(QDialog):
         return host
 
     def _reload_products(self, select: str | None = None) -> None:
-        """config.PRODUCTS 로 제품 콤보를 다시 채운다."""
+        """config.PRODUCTS 로 제품 콤보를 다시 채운다.
+
+        익명 기본 프로파일(DEFAULT_PRODUCT, 표시명 'DEVA Live')은 실제 디바이스가 아니라
+        내부 폴백이므로 목록에 노출하지 않고, 대신 '(자동 인식)' 항목으로 대체한다. 이
+        항목을 고르면 기본 프로파일이 유지되며 저장 시 LOT 경로로 디바이스를 자동 인식한다.
+        """
         self.cmb_product.blockSignals(True)
         self.cmb_product.clear()
+        self.cmb_product.addItem("(자동 인식)", config.DEFAULT_PRODUCT)
         for key, prod in config.PRODUCTS.items():
+            if key == config.DEFAULT_PRODUCT:
+                continue
             self.cmb_product.addItem(f"{prod.name} ({key})", key)
         if select:
             idx = self.cmb_product.findData(select)

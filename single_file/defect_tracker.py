@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.64   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.65   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.64"
+__version__ = "1.33.65"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -4719,10 +4719,18 @@ class SettingsDialog(QDialog):
         return host
 
     def _reload_products(self, select: str | None = None) -> None:
-        """config.PRODUCTS 로 제품 콤보를 다시 채운다."""
+        """config.PRODUCTS 로 제품 콤보를 다시 채운다.
+
+        익명 기본 프로파일(DEFAULT_PRODUCT, 표시명 'DEVA Live')은 실제 디바이스가 아니라
+        내부 폴백이므로 목록에 노출하지 않고, 대신 '(자동 인식)' 항목으로 대체한다. 이
+        항목을 고르면 기본 프로파일이 유지되며 저장 시 LOT 경로로 디바이스를 자동 인식한다.
+        """
         self.cmb_product.blockSignals(True)
         self.cmb_product.clear()
+        self.cmb_product.addItem("(자동 인식)", DEFAULT_PRODUCT)
         for key, prod in PRODUCTS.items():
+            if key == DEFAULT_PRODUCT:
+                continue
             self.cmb_product.addItem(f"{prod.name} ({key})", key)
         if select:
             idx = self.cmb_product.findData(select)
