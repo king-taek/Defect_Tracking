@@ -6,6 +6,25 @@
 
 from __future__ import annotations
 
+import re
+
+# ---- UI 글자 크기(전역 스케일) ----
+# 설정의 ui_font_size 값 → 배율. 보통=현재 그대로, 크게=20% 확대.
+FONT_SCALES = {"normal": 1.0, "large": 1.2}
+# 인라인 스타일(px 직접 지정) 위젯이 참조하는 현재 배율. apply_theme 에서 갱신.
+FONT_SCALE = 1.0
+
+
+def scale_for(key: str | None) -> float:
+    """설정 값(normal/large) → 글자 크기 배율."""
+    return FONT_SCALES.get(key or "normal", 1.0)
+
+
+def fpx(base: int) -> int:
+    """현재 배율을 반영한 글자 크기(px). 인라인 스타일용."""
+    return max(1, round(base * FONT_SCALE))
+
+
 # 팔레트 — 저채도 슬레이트 다크 테마(부드러운 대비, 넓은 여백 지향)
 BG = "#11151c"
 BG_PANEL = "#171c26"
@@ -316,7 +335,36 @@ def _make_arrow(direction: str, color: str, size: int = 12) -> str:
     return path.as_posix()
 
 
-def apply_theme(app) -> None:
+_FONT_RE = re.compile(r"font-size:\s*(\d+)px")
+_ORIG_PT: float | None = None
+
+
+def _scaled_sheet(scale: float) -> str:
+    """스타일시트의 모든 font-size(px)를 배율만큼 키운다.
+
+    보통(1.0)은 현재와 완전히 동일. 크게일 때는 명시 크기 없는 위젯(콤보/입력/체크박스 등)의
+    기본 글자 크기도 커지도록 `*` 규칙에 기본 font-size 를 함께 주입한다(구체 선택자가 우선).
+    """
+    if scale == 1.0:
+        return STYLESHEET
+    sheet = _FONT_RE.sub(
+        lambda m: f"font-size: {max(8, round(int(m.group(1)) * scale))}px", STYLESHEET
+    )
+    return sheet + f"\n* {{ font-size: {round(12 * scale)}px; }}\n"
+
+
+def apply_theme(app, scale: float = 1.0) -> None:
+    global FONT_SCALE, _ORIG_PT
+    FONT_SCALE = scale
+    # 앱 기본 폰트 크기도 배율만큼(명시 크기 없는 네이티브 요소·메뉴 등 대응). 원본을 한 번만
+    # 기억해 반복 적용해도 배율이 누적되지 않게 한다.
+    if _ORIG_PT is None:
+        f0 = app.font()
+        _ORIG_PT = f0.pointSizeF() if f0.pointSizeF() > 0 else 9.0
+    f = app.font()
+    f.setPointSizeF(_ORIG_PT * scale)
+    app.setFont(f)
+
     # 콤보/스핀 화살표를 런타임 이미지로 주입(테마색 삼각형).
     # 주의: `QComboBox:hover::down-arrow` 규칙은 Qt 에서 화살표가 두 번 그려지는
     # QSS 버그를 유발하므로 사용하지 않는다(화살표 색은 고정 TEXT_DIM 으로 충분).
@@ -327,4 +375,4 @@ QComboBox::down-arrow {{ image: url("{down}"); width: 12px; height: 12px; }}
 QAbstractSpinBox::down-arrow {{ image: url("{down}"); width: 9px; height: 9px; }}
 QAbstractSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
 """
-    app.setStyleSheet(STYLESHEET + arrow_qss)
+    app.setStyleSheet(_scaled_sheet(scale) + arrow_qss)

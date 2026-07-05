@@ -137,7 +137,7 @@ class ClickableThumb(QFrame):
         self.caption = QLabel("")
         self.caption.setObjectName("dim")
         self.caption.setAlignment(Qt.AlignCenter)
-        self.caption.setStyleSheet("font-size: 9px;")
+        self.caption.setStyleSheet(f"font-size: {theme.fpx(9)}px;")
         lay.addWidget(self.img)
         lay.addWidget(self.caption)
 

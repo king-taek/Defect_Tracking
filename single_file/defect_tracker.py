@@ -395,6 +395,7 @@ class AppSettings:
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(비면 번들 DB 자동 로드)
     thumbnail_center_ratio: float = THUMBNAIL_CENTER_RATIO  # 상단 썸네일 중앙 crop 비율(확대율)
+    ui_font_size: str = "normal"  # 전체 UI 글자 크기: normal(보통) / large(크게)
     heatmap_layout: int = 0  # 히트맵 팝업 레이아웃 프리셋 인덱스(마지막 선택 기억)
     log_dir: str = field(default_factory=default_log_dir)  # 비어 있으면 workspace/logs 사용
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
@@ -1255,6 +1256,24 @@ class ImageLoader(QObject):
 """
 
 
+
+# ---- UI 글자 크기(전역 스케일) ----
+# 설정의 ui_font_size 값 → 배율. 보통=현재 그대로, 크게=20% 확대.
+FONT_SCALES = {"normal": 1.0, "large": 1.2}
+# 인라인 스타일(px 직접 지정) 위젯이 참조하는 현재 배율. apply_theme 에서 갱신.
+FONT_SCALE = 1.0
+
+
+def scale_for(key: str | None) -> float:
+    """설정 값(normal/large) → 글자 크기 배율."""
+    return FONT_SCALES.get(key or "normal", 1.0)
+
+
+def fpx(base: int) -> int:
+    """현재 배율을 반영한 글자 크기(px). 인라인 스타일용."""
+    return max(1, round(base * FONT_SCALE))
+
+
 # 팔레트 — 저채도 슬레이트 다크 테마(부드러운 대비, 넓은 여백 지향)
 BG = "#11151c"
 BG_PANEL = "#171c26"
@@ -1565,7 +1584,36 @@ def _make_arrow(direction: str, color: str, size: int = 12) -> str:
     return path.as_posix()
 
 
-def apply_theme(app) -> None:
+_FONT_RE = re.compile(r"font-size:\s*(\d+)px")
+_ORIG_PT: float | None = None
+
+
+def _scaled_sheet(scale: float) -> str:
+    """스타일시트의 모든 font-size(px)를 배율만큼 키운다.
+
+    보통(1.0)은 현재와 완전히 동일. 크게일 때는 명시 크기 없는 위젯(콤보/입력/체크박스 등)의
+    기본 글자 크기도 커지도록 `*` 규칙에 기본 font-size 를 함께 주입한다(구체 선택자가 우선).
+    """
+    if scale == 1.0:
+        return STYLESHEET
+    sheet = _FONT_RE.sub(
+        lambda m: f"font-size: {max(8, round(int(m.group(1)) * scale))}px", STYLESHEET
+    )
+    return sheet + f"\n* {{ font-size: {round(12 * scale)}px; }}\n"
+
+
+def apply_theme(app, scale: float = 1.0) -> None:
+    global FONT_SCALE, _ORIG_PT
+    FONT_SCALE = scale
+    # 앱 기본 폰트 크기도 배율만큼(명시 크기 없는 네이티브 요소·메뉴 등 대응). 원본을 한 번만
+    # 기억해 반복 적용해도 배율이 누적되지 않게 한다.
+    if _ORIG_PT is None:
+        f0 = app.font()
+        _ORIG_PT = f0.pointSizeF() if f0.pointSizeF() > 0 else 9.0
+    f = app.font()
+    f.setPointSizeF(_ORIG_PT * scale)
+    app.setFont(f)
+
     # 콤보/스핀 화살표를 런타임 이미지로 주입(테마색 삼각형).
     # 주의: `QComboBox:hover::down-arrow` 규칙은 Qt 에서 화살표가 두 번 그려지는
     # QSS 버그를 유발하므로 사용하지 않는다(화살표 색은 고정 TEXT_DIM 으로 충분).
@@ -1576,7 +1624,7 @@ QComboBox::down-arrow {{ image: url("{down}"); width: 12px; height: 12px; }}
 QAbstractSpinBox::down-arrow {{ image: url("{down}"); width: 9px; height: 9px; }}
 QAbstractSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
 """
-    app.setStyleSheet(STYLESHEET + arrow_qss)
+    app.setStyleSheet(_scaled_sheet(scale) + arrow_qss)
 
 
 # =============================================================================
@@ -3640,7 +3688,7 @@ class SideBar(QFrame):
         credit = QLabel(CREDITS.replace(", ", "\n"))
         credit.setObjectName("dim")
         credit.setWordWrap(True)
-        credit.setStyleSheet("font-size:9px;")
+        credit.setStyleSheet(f"font-size:{fpx(11)}px;")  # 만든이 문구 +20%(9→11)
         credit.setAlignment(Qt.AlignHCenter)
         outer.addWidget(credit)
 
@@ -3816,7 +3864,7 @@ class NavBar(QFrame):
 
         self.lbl_index = QLabel("0 / 0")
         self.lbl_index.setAlignment(Qt.AlignCenter)
-        self.lbl_index.setStyleSheet("font-size:13px; font-weight:600;")
+        self.lbl_index.setStyleSheet(f"font-size:{fpx(13)}px; font-weight:600;")
         self.lbl_index.setMinimumWidth(90)
 
         self.lbl_status = QLabel("")
@@ -4517,6 +4565,17 @@ class SettingsDialog(QDialog):
         )
         form.addRow("defect 클러스터 거리", self.spn_cluster)
 
+        # 전체 UI 글자 크기(보통/크게).
+        self.cmb_font = NoScrollComboBox()
+        self.cmb_font.addItem("보통", "normal")
+        self.cmb_font.addItem("크게", "large")
+        fi = self.cmb_font.findData(getattr(self._settings, "ui_font_size", "normal"))
+        self.cmb_font.setCurrentIndex(fi if fi >= 0 else 0)
+        self.cmb_font.setToolTip(
+            "전체 UI 글자 크기입니다. 변경하면 대부분 즉시 적용되고, 다시 시작하면 완전히 적용됩니다."
+        )
+        form.addRow("글자 크기", self.cmb_font)
+
         self.chk_update = QCheckBox("시작할 때 업데이트 확인")
         self.chk_update.setChecked(self._settings.auto_update_check)
         form.addRow("자동 업데이트", self.chk_update)
@@ -4598,7 +4657,7 @@ class SettingsDialog(QDialog):
 
         credit = QLabel(CREDITS)
         credit.setObjectName("dim")
-        credit.setStyleSheet("font-size:10px;")
+        credit.setStyleSheet(f"font-size:{fpx(12)}px;")  # 만든이 문구 +20%
         outer.addWidget(credit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -4754,6 +4813,7 @@ class SettingsDialog(QDialog):
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or DEFAULT_PRODUCT
         self._settings.device_db_path = self.ed_device_db.text().strip()
+        self._settings.ui_font_size = self.cmb_font.currentData() or "normal"
         return self._settings
 
 
@@ -5063,7 +5123,7 @@ class ClickableThumb(QFrame):
         self.caption = QLabel("")
         self.caption.setObjectName("dim")
         self.caption.setAlignment(Qt.AlignCenter)
-        self.caption.setStyleSheet("font-size: 9px;")
+        self.caption.setStyleSheet(f"font-size: {fpx(9)}px;")
         lay.addWidget(self.img)
         lay.addWidget(self.caption)
 
@@ -10047,6 +10107,7 @@ class MainWindow(QMainWindow):
         old_workspace = self.settings.workspace
         old_output = self.settings.output_folder
         old_cluster_radius = getattr(self.settings, "cluster_radius", None)
+        old_font = getattr(self.settings, "ui_font_size", "normal")
         update_available = bool(self._update_status and self._update_status.available)
         dlg = SettingsDialog(
             self.settings, current_lot, self, update_available=update_available
@@ -10099,6 +10160,11 @@ class MainWindow(QMainWindow):
         # defect 클러스터 거리가 바뀌면 근접 묶음이 달라지므로 재매칭한다.
         if getattr(s, "cluster_radius", None) != old_cluster_radius and self._base_records_raw:
             self._rematch(rebuild_grid=True)
+        # 글자 크기(보통/크게)가 바뀌면 테마를 다시 적용해 대부분 즉시 반영한다.
+        if getattr(s, "ui_font_size", "normal") != old_font:
+            from PySide6.QtWidgets import QApplication
+
+            apply_theme(QApplication.instance(), scale_for(s.ui_font_size))
         self.banner.show_message("설정을 저장했습니다.", "success")
 
     # ------------------------------------------------------------ 업데이트
@@ -10427,7 +10493,9 @@ def main() -> int:
     )
     app = QApplication(sys.argv)
     app.setApplicationName("Defect Tracker")
-    apply_theme(app)
+    # 설정을 먼저 읽어 글자 크기(보통/크게)를 테마에 반영한 뒤 스플래시를 띄운다.
+    settings = AppSettings.load()
+    apply_theme(app, scale_for(settings.ui_font_size))
 
     # Qt 준비 직후 즉시 스플래시 표시 → 무거운 구성 동안 "로딩 중" 피드백을 보여준다.
 
@@ -10436,7 +10504,6 @@ def main() -> int:
     show_status(splash, "로딩 중...")
     app.processEvents()
 
-    settings = AppSettings.load()
     _load_device_db(settings)
     set_active_product(settings.product)
     # 빌트인 폴백(die_map 없음) 대신 같은 패키지 크기의 DB die_map 제품으로 승격 →

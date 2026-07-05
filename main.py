@@ -90,7 +90,9 @@ def main() -> int:
     )
     app = QApplication(sys.argv)
     app.setApplicationName("Defect Tracker")
-    theme.apply_theme(app)
+    # 설정을 먼저 읽어 글자 크기(보통/크게)를 테마에 반영한 뒤 스플래시를 띄운다.
+    settings = AppSettings.load()
+    theme.apply_theme(app, theme.scale_for(settings.ui_font_size))
 
     # Qt 준비 직후 즉시 스플래시 표시 → 무거운 구성 동안 "로딩 중" 피드백을 보여준다.
     from app.ui.splash import make_splash, show_status
@@ -100,7 +102,6 @@ def main() -> int:
     show_status(splash, "로딩 중...")
     app.processEvents()
 
-    settings = AppSettings.load()
     _load_device_db(settings)
     config.set_active_product(settings.product)
     # 빌트인 폴백(die_map 없음) 대신 같은 패키지 크기의 DB die_map 제품으로 승격 →

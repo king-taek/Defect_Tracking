@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from app import __version__, config
 from app.config import AppSettings
 from app.safety import conflicting_source
+from app.ui import theme
 
 
 class SettingsDialog(QDialog):
@@ -100,6 +101,17 @@ class SettingsDialog(QDialog):
             "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어 대표 1장+‘+n’ 으로 봅니다."
         )
         form.addRow("defect 클러스터 거리", self.spn_cluster)
+
+        # 전체 UI 글자 크기(보통/크게).
+        self.cmb_font = NoScrollComboBox()
+        self.cmb_font.addItem("보통", "normal")
+        self.cmb_font.addItem("크게", "large")
+        fi = self.cmb_font.findData(getattr(self._settings, "ui_font_size", "normal"))
+        self.cmb_font.setCurrentIndex(fi if fi >= 0 else 0)
+        self.cmb_font.setToolTip(
+            "전체 UI 글자 크기입니다. 변경하면 대부분 즉시 적용되고, 다시 시작하면 완전히 적용됩니다."
+        )
+        form.addRow("글자 크기", self.cmb_font)
 
         self.chk_update = QCheckBox("시작할 때 업데이트 확인")
         self.chk_update.setChecked(self._settings.auto_update_check)
@@ -182,7 +194,7 @@ class SettingsDialog(QDialog):
 
         credit = QLabel(config.CREDITS)
         credit.setObjectName("dim")
-        credit.setStyleSheet("font-size:10px;")
+        credit.setStyleSheet(f"font-size:{theme.fpx(12)}px;")  # 만든이 문구 +20%
         outer.addWidget(credit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -340,4 +352,5 @@ class SettingsDialog(QDialog):
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
         self._settings.device_db_path = self.ed_device_db.text().strip()
+        self._settings.ui_font_size = self.cmb_font.currentData() or "normal"
         return self._settings

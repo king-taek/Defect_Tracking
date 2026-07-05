@@ -284,6 +284,7 @@ class AppSettings:
     product: str = DEFAULT_PRODUCT  # 활성 제품 프로파일(좌표 변환 상수)
     device_db_path: str = ""  # 외부 AOIDeviceDB.xlsx 경로(비면 번들 DB 자동 로드)
     thumbnail_center_ratio: float = THUMBNAIL_CENTER_RATIO  # 상단 썸네일 중앙 crop 비율(확대율)
+    ui_font_size: str = "normal"  # 전체 UI 글자 크기: normal(보통) / large(크게)
     heatmap_layout: int = 0  # 히트맵 팝업 레이아웃 프리셋 인덱스(마지막 선택 기억)
     log_dir: str = field(default_factory=default_log_dir)  # 비어 있으면 workspace/logs 사용
     window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)

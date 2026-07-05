@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
+from app.ui import theme
 
 
 class NoScrollDoubleSpinBox(QDoubleSpinBox):
@@ -195,7 +196,7 @@ class SideBar(QFrame):
         credit = QLabel(config.CREDITS.replace(", ", "\n"))
         credit.setObjectName("dim")
         credit.setWordWrap(True)
-        credit.setStyleSheet("font-size:9px;")
+        credit.setStyleSheet(f"font-size:{theme.fpx(11)}px;")  # 만든이 문구 +20%(9→11)
         credit.setAlignment(Qt.AlignHCenter)
         outer.addWidget(credit)
 
@@ -371,7 +372,7 @@ class NavBar(QFrame):
 
         self.lbl_index = QLabel("0 / 0")
         self.lbl_index.setAlignment(Qt.AlignCenter)
-        self.lbl_index.setStyleSheet("font-size:13px; font-weight:600;")
+        self.lbl_index.setStyleSheet(f"font-size:{theme.fpx(13)}px; font-weight:600;")
         self.lbl_index.setMinimumWidth(90)
 
         self.lbl_status = QLabel("")

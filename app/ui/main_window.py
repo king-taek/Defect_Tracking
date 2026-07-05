@@ -1166,6 +1166,7 @@ class MainWindow(QMainWindow):
         old_workspace = self.settings.workspace
         old_output = self.settings.output_folder
         old_cluster_radius = getattr(self.settings, "cluster_radius", None)
+        old_font = getattr(self.settings, "ui_font_size", "normal")
         update_available = bool(self._update_status and self._update_status.available)
         dlg = SettingsDialog(
             self.settings, current_lot, self, update_available=update_available
@@ -1220,6 +1221,12 @@ class MainWindow(QMainWindow):
         # defect 클러스터 거리가 바뀌면 근접 묶음이 달라지므로 재매칭한다.
         if getattr(s, "cluster_radius", None) != old_cluster_radius and self._base_records_raw:
             self._rematch(rebuild_grid=True)
+        # 글자 크기(보통/크게)가 바뀌면 테마를 다시 적용해 대부분 즉시 반영한다.
+        if getattr(s, "ui_font_size", "normal") != old_font:
+            from PySide6.QtWidgets import QApplication
+
+            from app.ui import theme
+            theme.apply_theme(QApplication.instance(), theme.scale_for(s.ui_font_size))
         self.banner.show_message("설정을 저장했습니다.", "success")
 
     # ------------------------------------------------------------ 업데이트
