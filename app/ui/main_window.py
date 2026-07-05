@@ -1354,6 +1354,50 @@ class MainWindow(QMainWindow):
         return name or "compare"
 
     # ------------------------------------------------------------ 출력
+    def _compute_all_layers_matched(self) -> list[BaseDefectMatches]:
+        """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 합친다.
+
+        기준 layer 종속 없이 '전체 매치'를 담기 위한 것. base image_path 로 중복 제거하고,
+        현재 wafer 필터가 걸려 있으면 그 wafer 로 한정한다. (layer 수만큼 매칭을 다시 돌림)
+        """
+        from app.clustering import collapse_matches
+
+        if self.lot_index is None:
+            return []
+        layers = self.lot_index.layer_canonicals()
+        rbl = self.lot_index.records_by_layer()
+        tolerance = self.top.tolerance()
+        seen: set[str] = set()
+        out: list[BaseDefectMatches] = []
+        for base_layer in layers:
+            base_records = [
+                r for r in self.lot_index.records_for_layer(base_layer) if r.ok
+            ]
+            if self._wafer_filter:
+                base_records = [r for r in base_records if r.wafer_id == self._wafer_filter]
+            if not base_records:
+                continue
+            compare_layers = [lyr for lyr in layers if lyr != base_layer]
+            matches, _ = matcher.match_all_with_offsets(
+                base_records, compare_layers, rbl, tolerance
+            )
+            for m in collapse_matches(matches):
+                if self._match_status(m) != "none":
+                    k = str(m.base.image_path)
+                    if k not in seen:
+                        seen.add(k)
+                        out.append(m)
+        return out
+
+    def _provide_all_layers_matched(self) -> list[BaseDefectMatches]:
+        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자 — 대기 커서로 계산."""
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            return self._compute_all_layers_matched()
+        finally:
+            QApplication.restoreOverrideCursor()
+
     def _export(self) -> None:
         if not self.matches:
             self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
@@ -1365,7 +1409,9 @@ class MainWindow(QMainWindow):
         # 트레이가 비어 있어도 다이얼로그를 열어(전체 추가 버튼 사용) 담을 수 있게 한다.
         dlg = ExportTrayDialog(
             list(self._export_tray), self.thumb_cache,
-            all_matched=all_matched, parent=self,
+            all_matched=all_matched,
+            all_layers_provider=self._provide_all_layers_matched,
+            parent=self,
         )
         if not dlg.exec():
             return
@@ -1373,6 +1419,12 @@ class MainWindow(QMainWindow):
         # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지).
         self._export_tray = list(selected)
         self._update_add_export_button()
+        # '확인'(저장만) → 트레이 상태만 저장하고 닫는다. Excel 출력은 나중에.
+        if not dlg.wants_export():
+            self.banner.show_message(
+                f"출력 목록을 저장했습니다 ({len(selected)}장).", "success"
+            )
+            return
         if not selected:
             self.banner.show_message("출력할 사진이 없습니다.", "info")
             return

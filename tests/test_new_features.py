@@ -91,6 +91,34 @@ def test_export_tray_dialog_remove_and_add_all(win, app):
     assert dlg.selected() == []
 
 
+def test_export_tray_dialog_ok_vs_export(win, app):
+    """확인(저장만)과 Excel 출력을 구분한다(wants_export)."""
+    from app.ui.export_dialog import ExportTrayDialog
+    entries = [win.matches[0]]
+    dlg = ExportTrayDialog(entries, win.thumb_cache)
+    dlg._on_ok()
+    assert dlg.wants_export() is False  # 확인 = 저장만
+    dlg2 = ExportTrayDialog(entries, win.thumb_cache)
+    dlg2._on_export()
+    assert dlg2.wants_export() is True  # Excel 출력
+
+
+def test_export_all_layers_button_unions_matches(win, app):
+    """'모든 매치(기준 없이)'는 모든 layer 를 기준으로 한 매치를 합쳐 담는다."""
+    from app.ui.export_dialog import ExportTrayDialog
+    provider = win._provide_all_layers_matched
+    expected = {str(m.base.image_path) for m in provider()}
+    if not expected:
+        return
+    dlg = ExportTrayDialog([], win.thumb_cache, all_layers_provider=provider)
+    assert hasattr(dlg, "btn_add_all_layers")
+    dlg._add_all_layers()
+    assert {str(m.base.image_path) for m in dlg.selected()} == expected
+    # 현재 기준 layer 매치(all_matched)보다 크거나 같아야(여러 layer 합집합).
+    cur = {str(m.base.image_path) for m in win.matches if win._match_status(m) != "none"}
+    assert cur.issubset(expected)
+
+
 # ---- 항목 2: 매치 없는 셀 숨김(re-pack) ----
 
 def test_grid_hides_unmatched_cells(win):

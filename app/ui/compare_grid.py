@@ -200,10 +200,6 @@ class LayerCell(QFrame):
                 QUrl.fromLocalFile(str(_Path(path).parent))
             ),
         )
-        if self.is_base:
-            menu.addSeparator()
-            menu.addAction("마킹 토글 (M)", lambda: self.mark_requested.emit(rec))
-            menu.addAction("메모…", lambda: self.note_requested.emit(rec))
         menu.exec(event.globalPos())
 
 

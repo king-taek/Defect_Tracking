@@ -1,15 +1,15 @@
-"""로딩(작업 중) 오버레이 — 부모 위에 반투명 막 + 중앙 카드(스피너·메시지·진행바).
+"""로딩(작업 중) 오버레이 — 부모 위 반투명 막 + 중앙 카드(부드러운 스피너·메시지·진행바).
 
-무거운 작업이 진행되는 동안 '멈춘 것'처럼 보이지 않도록, 애니메이션 스피너와 (가능하면)
-진행도를 표시한다. 부모의 크기에 맞춰 자동으로 덮는다.
+무거운 작업이 진행되는 동안 '멈춘 것'처럼 보이지 않도록, 부드럽게 회전하는 네온 링과
+(가능하면) 진행도를 표시한다. 부모의 크기에 맞춰 자동으로 덮는다.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -20,7 +20,37 @@ from PySide6.QtWidgets import (
 
 from app.ui import theme
 
-_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+class _SpinnerRing(QWidget):
+    """부드럽게 회전하는 네온 원호(브라유 글리프보다 매끄럽게)."""
+
+    def __init__(self, parent: Optional[QWidget] = None, size: int = 52):
+        super().__init__(parent)
+        self._angle = 0.0
+        self.setFixedSize(size, size)
+
+    def advance(self, deg: float) -> None:
+        self._angle = (self._angle + deg) % 360.0
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        m = 7
+        rect = QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m)
+        # 바탕 트랙(희미한 전체 원)
+        track = QPen(QColor(theme.NEON_SOFT))
+        track.setWidth(5)
+        track.setCapStyle(Qt.RoundCap)
+        p.setPen(track)
+        p.drawArc(rect, 0, 360 * 16)
+        # 밝은 회전 호(약 110°)
+        arc = QPen(QColor(theme.NEON))
+        arc.setWidth(5)
+        arc.setCapStyle(Qt.RoundCap)
+        p.setPen(arc)
+        p.drawArc(rect, int(-self._angle * 16), 110 * 16)
+        p.end()
 
 
 class BusyOverlay(QWidget):
@@ -35,41 +65,60 @@ class BusyOverlay(QWidget):
         lay = QVBoxLayout(self)
         lay.setAlignment(Qt.AlignCenter)
         card = QFrame()
-        card.setObjectName("panel")
-        card.setFixedWidth(340)
+        card.setObjectName("busyCard")
+        card.setFixedWidth(320)
+        # 은은한 네온 테두리 + 살짝 밝은 배경으로 카드를 또렷하게.
+        card.setStyleSheet(
+            "QFrame#busyCard {"
+            f" background:{theme.BG_ELEV};"
+            f" border:1px solid {theme.NEON_SOFT};"
+            " border-radius:14px; }"
+        )
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(22, 20, 22, 20)
-        cl.setSpacing(10)
+        cl.setContentsMargins(26, 24, 26, 22)
+        cl.setSpacing(14)
         cl.setAlignment(Qt.AlignCenter)
 
-        self._spinner = QLabel(_SPINNER[0])
-        self._spinner.setAlignment(Qt.AlignCenter)
-        self._spinner.setStyleSheet(f"font-size:26px; color:{theme.NEON};")
-        cl.addWidget(self._spinner)
+        self._ring = _SpinnerRing()
+        cl.addWidget(self._ring, alignment=Qt.AlignHCenter)
 
-        self._msg = QLabel("처리 중…")
+        self._base_msg = "처리 중"
+        self._msg = QLabel(self._base_msg)
         self._msg.setAlignment(Qt.AlignCenter)
         self._msg.setWordWrap(True)
-        self._msg.setStyleSheet(f"color:{theme.TEXT}; font-weight:600;")
+        self._msg.setStyleSheet(
+            f"color:{theme.TEXT}; font-weight:700; font-size:14px; border:none;"
+        )
         cl.addWidget(self._msg)
+
+        self._sub = QLabel("잠시만 기다려 주세요")
+        self._sub.setAlignment(Qt.AlignCenter)
+        self._sub.setStyleSheet(
+            f"color:{theme.TEXT_DIM}; font-size:11px; border:none;"
+        )
+        cl.addWidget(self._sub)
 
         self._bar = QProgressBar()
         self._bar.setTextVisible(True)
+        self._bar.setFixedHeight(14)
         self._bar.setVisible(False)
         cl.addWidget(self._bar)
 
         lay.addWidget(card)
 
-        self._i = 0
+        self._dot = 0
+        self._frame = 0
         self._timer = QTimer(self)
-        self._timer.setInterval(90)
+        self._timer.setInterval(40)  # 부드러운 회전(≈25fps)
         self._timer.timeout.connect(self._tick)
 
         self._host.installEventFilter(self)
 
     # ---- 표시 제어 ---------------------------------------------------
-    def start(self, message: str = "처리 중…", determinate: bool = False) -> None:
-        self._msg.setText(message)
+    def start(self, message: str = "처리 중", determinate: bool = False) -> None:
+        self._base_msg = message.rstrip("… .")
+        self._msg.setText(self._base_msg)
+        self._sub.setVisible(not determinate)
         self._bar.setVisible(determinate)
         if determinate:
             self._bar.setRange(0, 100)
@@ -81,7 +130,8 @@ class BusyOverlay(QWidget):
             self._timer.start()
 
     def set_message(self, message: str) -> None:
-        self._msg.setText(message)
+        self._base_msg = message.rstrip("… .")
+        self._msg.setText(self._base_msg + "." * self._dot)
 
     def set_progress(self, cur: int, total: int) -> None:
         if total <= 0:
@@ -97,8 +147,11 @@ class BusyOverlay(QWidget):
 
     # ---- 내부 ---------------------------------------------------------
     def _tick(self) -> None:
-        self._i = (self._i + 1) % len(_SPINNER)
-        self._spinner.setText(_SPINNER[self._i])
+        self._ring.advance(14)  # 회전
+        self._frame += 1
+        if self._frame % 9 == 0:  # 메시지 말줄임(…) 애니메이션은 느리게
+            self._dot = (self._dot + 1) % 4
+            self._msg.setText(self._base_msg + "." * self._dot)
 
     def _reposition(self) -> None:
         self.setGeometry(self._host.rect())
@@ -110,5 +163,5 @@ class BusyOverlay(QWidget):
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(8, 11, 16, 170))  # 반투명 어두운 막
+        painter.fillRect(self.rect(), QColor(8, 11, 16, 185))  # 반투명 어두운 막
         painter.end()

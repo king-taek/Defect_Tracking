@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -38,6 +38,7 @@ class ExportTrayDialog(QDialog):
         entries: list[BaseDefectMatches],
         thumb_cache: Optional[ThumbnailCache] = None,
         all_matched: Optional[list[BaseDefectMatches]] = None,
+        all_layers_provider: Optional[Callable[[], list[BaseDefectMatches]]] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
@@ -48,7 +49,10 @@ class ExportTrayDialog(QDialog):
             self._add(m)
         # 이번 LOT 의 매칭 있는 기준 사진(전체 추가 버튼용).
         self._all_matched = list(all_matched or [])
+        # 모든 layer 를 기준으로 매치를 합쳐 담는 공급자(느릴 수 있어 클릭 시 계산).
+        self._all_layers_provider = all_layers_provider
         self._thumb_cache = thumb_cache
+        self._wants_export = False  # True=Excel 출력, False=저장만(확인)
         self.setWindowTitle("결과 출력 — 담은 사진")
         self.setMinimumSize(620, 540)
         self._build()
@@ -76,12 +80,23 @@ class ExportTrayDialog(QDialog):
         self.title.setObjectName("title")
         head.addWidget(self.title)
         head.addStretch()
-        self.btn_add_all = QPushButton("이번 LOT 전체(매치) 추가")
+        self.btn_add_all = QPushButton("기준 layer 매치 전체 추가")
         self.btn_add_all.setObjectName("mini")
-        self.btn_add_all.setToolTip("이번 자재(LOT)에서 매칭이 있는 기준 사진을 모두 담습니다.")
+        self.btn_add_all.setToolTip(
+            "현재 선택된 기준 layer 기준으로, 매칭이 있는 기준 사진을 모두 담습니다."
+        )
         self.btn_add_all.clicked.connect(self._add_all_matched)
         self.btn_add_all.setEnabled(bool(self._all_matched))
         head.addWidget(self.btn_add_all)
+        if self._all_layers_provider is not None:
+            self.btn_add_all_layers = QPushButton("모든 매치(기준 없이) 추가")
+            self.btn_add_all_layers.setObjectName("mini")
+            self.btn_add_all_layers.setToolTip(
+                "모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 "
+                "모두 담습니다(중복 제거). layer 수만큼 재계산해 잠시 걸릴 수 있습니다."
+            )
+            self.btn_add_all_layers.clicked.connect(self._add_all_layers)
+            head.addWidget(self.btn_add_all_layers)
         self.btn_clear = QPushButton("전체 비우기")
         self.btn_clear.setObjectName("mini")
         self.btn_clear.setToolTip("담은 사진을 모두 뺍니다.")
@@ -109,7 +124,7 @@ class ExportTrayDialog(QDialog):
         self._scroll.setWidget(self._host)
         outer.addWidget(self._scroll, 1)
 
-        self._empty = QLabel("담은 사진이 없습니다. '이번 LOT 전체(매치) 추가'로 담거나 창을 닫고 '＋ 출력에 추가'로 담아 주세요.")
+        self._empty = QLabel("담은 사진이 없습니다. 위 '기준 layer 매치 전체 추가'로 담거나 창을 닫고 '＋ 출력에 추가'로 담아 주세요.")
         self._empty.setObjectName("dim")
         self._empty.setWordWrap(True)
         self._empty.setAlignment(Qt.AlignCenter)
@@ -121,15 +136,35 @@ class ExportTrayDialog(QDialog):
         bottom = QHBoxLayout()
         bottom.addStretch(1)
         btn_cancel = QPushButton("취소")
+        btn_cancel.setToolTip("변경을 취소하고 닫습니다(담은 목록을 저장하지 않음).")
         btn_cancel.clicked.connect(self.reject)
         bottom.addWidget(btn_cancel)
+        # 확인 = 담은 목록만 저장하고 닫는다(Excel 출력은 나중에).
+        self.btn_ok = QPushButton("확인")
+        self.btn_ok.setToolTip("담은 목록을 저장하고 닫습니다(지금 Excel 출력은 하지 않음).")
+        self.btn_ok.clicked.connect(self._on_ok)
+        bottom.addWidget(self.btn_ok)
         self.btn_export = QPushButton("Excel 출력")
         self.btn_export.setObjectName("primary")
-        self.btn_export.setToolTip("담은 사진을 Excel 파일로 출력합니다.")
+        self.btn_export.setToolTip("담은 사진을 지금 Excel 파일로 출력합니다.")
         self.btn_export.setDefault(True)
-        self.btn_export.clicked.connect(self.accept)
+        self.btn_export.clicked.connect(self._on_export)
         bottom.addWidget(self.btn_export)
         outer.addLayout(bottom)
+
+    def _on_ok(self) -> None:
+        """확인 — 담은 상태를 저장(트레이 반영)하고 닫는다. 출력은 하지 않음."""
+        self._wants_export = False
+        self.accept()
+
+    def _on_export(self) -> None:
+        """Excel 출력 — 저장 + 출력 흐름으로 진행."""
+        self._wants_export = True
+        self.accept()
+
+    def wants_export(self) -> bool:
+        """확인(False) vs Excel 출력(True) 구분."""
+        return self._wants_export
 
     def _clear_grid(self) -> None:
         while self._grid.count():
@@ -226,6 +261,15 @@ class ExportTrayDialog(QDialog):
         for m in self._all_matched:
             if self._add(m):
                 added += 1
+        self._populate()
+
+    def _add_all_layers(self) -> None:
+        """모든 layer 를 기준으로 한 매치를 공급자에서 받아 담는다(중복 제거)."""
+        if self._all_layers_provider is None:
+            return
+        items = self._all_layers_provider() or []
+        for m in items:
+            self._add(m)
         self._populate()
 
     def selected(self) -> list[BaseDefectMatches]:
