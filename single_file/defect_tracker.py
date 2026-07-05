@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.67   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.68   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.67"
+__version__ = "1.33.68"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -2219,9 +2219,9 @@ def write_parse_failure_report(
 # =============================================================================
 """Layer 폴더명 정규화 및 비교 그리드 배치 (문서 Section 8.2 / 8.4).
 
-폴더명 예: "1. LYA4", "2. LYC3_재리뷰"
+폴더명 예: "1. LYA4", "2. LYC3_재리뷰", "3. LYA4재리뷰"
   - 선행 순번 "N. " 제거
-  - 접미 "_재리뷰" 제거 후 is_re_review 플래그
+  - 접미 "재리뷰"(앞 언더바·공백은 있어도/없어도) 제거 후 is_re_review 플래그
   - 남은 토큰을 canonical layer 토큰으로 사용 (예: LYA4, LYC3)
 
 비교 화면 그리드(Section 8.4)는 config.DEFAULT_LAYER_GRID 를 기본으로 하되,
@@ -2232,10 +2232,12 @@ def write_parse_failure_report(
 
 
 _ORDER_PREFIX_RE = re.compile(r"^\s*\d+\s*[.\-_)]\s*")
-_RE_REVIEW_SUFFIXES = ("_재리뷰", "_재 리뷰", "_rereview", "_re-review")
-# 재리뷰 레벨: 접미가 "_" + ("재"×n) + "리뷰"(공백 허용). n = 재리뷰 깊이.
-#   _재리뷰=1, _재재리뷰=2, _재재재리뷰=3 …
-_RE_REVIEW_LEVEL_RE = re.compile(r"_\s*((?:재\s*)+)리뷰\s*$")
+_RE_REVIEW_SUFFIXES = (
+    "_재리뷰", "_재 리뷰", "재리뷰", "재 리뷰", "_rereview", "_re-review",
+)
+# 재리뷰 레벨: 접미가 (구분자) + ("재"×n) + "리뷰"(공백 허용). n = 재리뷰 깊이.
+#   재리뷰/_재리뷰=1, 재재리뷰=2, 재재재리뷰=3 … (앞 언더바·공백은 있어도/없어도 인식)
+_RE_REVIEW_LEVEL_RE = re.compile(r"[_\s]*((?:재\s*)+)리뷰\s*$")
 # 영문 다중 re- 도 보조 지원: _re-review=1, _re-re-review=2 …
 _EN_RE_REVIEW_RE = re.compile(r"_\s*((?:re-?)+)review\s*$", re.IGNORECASE)
 

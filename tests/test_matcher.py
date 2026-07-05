@@ -181,6 +181,10 @@ def test_normalize_layer_order_prefix_and_rereview():
     assert layout.normalize_layer("1. LYA4_재리뷰") == ("LYA4", True)
     # 재재리뷰(반복 재)도 같은 canonical 로 정규화
     assert layout.normalize_layer("3. LYA4_재재리뷰") == ("LYA4", True)
+    # 언더바 없이 붙은 '재리뷰'(및 공백 구분)도 동일하게 인식
+    assert layout.normalize_layer("2. LYC3재리뷰") == ("LYC3", True)
+    assert layout.normalize_layer("3. LYA4 재리뷰") == ("LYA4", True)
+    assert layout.normalize_layer("4. LYA4재재리뷰") == ("LYA4", True)
 
 
 def test_re_review_level():
@@ -190,6 +194,10 @@ def test_re_review_level():
     assert layout.re_review_level("3. LYA4_재재재리뷰") == 3
     assert layout.re_review_level("LYA4_rereview") == 1
     assert layout.re_review_level("LYA4_re-re-review") == 2
+    # 언더바 없이 붙은 '재리뷰'도 인식(공백 구분 포함)
+    assert layout.re_review_level("LYA4재리뷰") == 1
+    assert layout.re_review_level("LYA4 재리뷰") == 1
+    assert layout.re_review_level("LYA4재재리뷰") == 2
 
 
 def test_build_grid_places_known_layers():
