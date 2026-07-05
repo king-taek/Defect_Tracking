@@ -18,6 +18,7 @@ from PySide6.QtCore import (
     QDir,
     QObject,
     QRunnable,
+    QStorageInfo,
     Qt,
     QThreadPool,
     QTimer,
@@ -263,6 +264,60 @@ class FolderPickerDialog(QDialog):
         node.setFlags(Qt.ItemIsEnabled)
         return node
 
+    @staticmethod
+    def _unc_anchor(s: str) -> str:
+        """경로의 루트(anchor). UNC(\\\\server\\share)는 플랫폼과 무관하게 공유 루트를 돌려준다."""
+        s = str(s)
+        if s.startswith("\\\\") or s.startswith("//"):
+            sep = "\\" if s[0] == "\\" else "/"
+            parts = s.replace("/", "\\").split("\\")  # ['', '', server, share, ...]
+            if len(parts) >= 4 and parts[2] and parts[3]:
+                return f"{sep}{sep}{parts[2]}{sep}{parts[3]}{sep}"
+            return s
+        try:
+            return Path(s).anchor
+        except Exception:  # noqa: BLE001
+            return ""
+
+    @staticmethod
+    def _drive_label(p: str) -> str:
+        """드라이브 표시명 — 네트워크 드라이브는 볼륨 이름·UNC 대상까지 함께 보여준다."""
+        drive = p.rstrip("/\\") or p
+        name = ""
+        dev = ""
+        try:
+            si = QStorageInfo(p)
+            name = si.name() or ""
+            raw = si.device()
+            try:
+                dev = bytes(raw).decode("utf-8", "ignore")
+            except Exception:  # noqa: BLE001
+                dev = str(raw)
+        except Exception:  # noqa: BLE001
+            pass
+        is_net = dev.startswith("\\\\") or dev.startswith("//")
+        extra = []
+        if name:
+            extra.append(name)
+        if is_net and dev:
+            extra.append(dev)
+        label = drive + (f"  ({' · '.join(extra)})" if extra else "")
+        return ("🌐 " if is_net else "💾 ") + label
+
+    def _ensure_root_for(self, path) -> None:
+        """path 를 포함하는 최상위 루트가 없으면(예: UNC 네트워크 폴더) 그 루트를 추가한다."""
+        anchor = self._unc_anchor(path)
+        if not anchor:
+            return
+        na = anchor.rstrip("/\\")
+        for rp, _ in self._root_nodes:
+            if str(rp).rstrip("/\\") == na:
+                return
+        is_net = anchor.startswith("\\\\") or anchor.startswith("//")
+        label = ("🌐 " + anchor) if is_net else self._drive_label(anchor)
+        node = self._make_dir_node(self.sidebar.invisibleRootItem(), label, anchor)
+        self._root_nodes.append((anchor, node))
+
     def _reload_sidebar(self) -> None:
         self.sidebar.clear()
         self._root_nodes = []  # (path, node) — 현재 위치 트리 동기화용 루트
@@ -272,15 +327,19 @@ class FolderPickerDialog(QDialog):
         self._root_nodes.append((str(Path.home()), home))
         for d in QDir.drives():
             p = d.absoluteFilePath()
-            self._root_nodes.append((p, self._make_dir_node(root, "💾 " + p, p)))
-        # 즐겨찾기·최근은 맨 아래 접이식 소형 그룹(기본 접힘).
+            self._root_nodes.append((p, self._make_dir_node(root, self._drive_label(p), p)))
+        # 네트워크(UNC) 위치는 드라이브 목록에 안 나오므로, 현재 위치·즐겨찾기·최근에서
+        # 쓰인 네트워크 루트를 최상위에 추가해 트리에서 바로 보이고 펼칠 수 있게 한다.
         favs = [f for f in getattr(self.settings, "favorite_folders", []) if Path(f).exists()]
+        recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
+        for cand in [str(self._cur), *favs, *recents]:
+            self._ensure_root_for(cand)
+        # 즐겨찾기·최근은 맨 아래 접이식 소형 그룹(기본 접힘).
         if favs:
             grp = self._make_group_node("★ 즐겨찾기")
             for f in favs:
                 self._make_dir_node(grp, "★ " + (Path(f).name or f), f)
             grp.setExpanded(False)
-        recents = [f for f in getattr(self.settings, "recent_folders", []) if Path(f).exists()]
         if recents:
             grp = self._make_group_node("↻ 최근")
             for f in recents:
@@ -301,8 +360,11 @@ class FolderPickerDialog(QDialog):
     def _reveal_in_tree(self, path: Path) -> None:
         """현재 경로를 포함하는 루트를 찾아 세그먼트마다 지연 확장하며 그 노드를 선택·스크롤."""
         roots = getattr(self, "_root_nodes", None)
-        if not roots:
+        if roots is None:
             return
+        # 네트워크(UNC) 등 기존 루트에 없는 위치면 루트를 즉석에서 추가.
+        self._ensure_root_for(path)
+        roots = self._root_nodes
         target = Path(path)
         best = None  # 가장 깊은(구체적인) 접두 루트
         for rp, node in roots:

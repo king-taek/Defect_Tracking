@@ -594,3 +594,18 @@ def test_no_conder_branding_left():
         capture_output=True, text=True,
     )
     assert out.stdout.strip() == "", f"leftover conder refs:\n{out.stdout}"
+
+
+def test_folder_picker_network_unc_root(app, tmp_path):
+    """UNC 네트워크 경로(\\\\server\\share)가 트리 최상위 루트로 추가되고 reveal 가능."""
+    from app.ui.folder_picker import FolderPickerDialog
+    dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
+    # 공유 루트 추출(플랫폼 무관)
+    assert FolderPickerDialog._unc_anchor(r"\\nas01\lots\LOT") == "\\\\nas01\\lots\\"
+    # 네트워크 위치로 이동 시 루트가 즉석 추가된다.
+    from pathlib import Path
+    dlg._reveal_in_tree(Path(r"\\nas01\lots\LOT"))
+    roots = [str(p) for p, _ in dlg._root_nodes]
+    assert any(r.startswith("\\\\nas01") for r in roots)
+    # 드라이브 라벨 생성이 예외 없이 동작.
+    assert isinstance(FolderPickerDialog._drive_label("/"), str)
