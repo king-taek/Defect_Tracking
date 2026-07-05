@@ -143,6 +143,13 @@ class FolderPickerDialog(QDialog):
         self._valid_material: str = ""
         self._token = 0
 
+        # '확인 중…' 배너 애니메이션 타이머(빌드 중 _set_banner 가 참조하므로 먼저 만든다).
+        self._busy_base = ""
+        self._busy_dots = 0
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(350)
+        self._busy_timer.timeout.connect(self._tick_busy)
+
         self._build_ui()
         self._reload_sidebar()
         self._go_to(self._cur, push=False)
@@ -679,11 +686,24 @@ class FolderPickerDialog(QDialog):
 
     def _set_banner(self, kind: str, text: str) -> None:
         fg, bg = _BANNER_COLORS.get(kind, _BANNER_COLORS["none"])
-        self.banner.setText(text)
+        if kind == "busy":
+            # 로딩(확인 중) — 말줄임 애니메이션으로 '움직이는' 로딩 표시.
+            self._busy_base = text.rstrip("… .")
+            self._busy_dots = 0
+            self.banner.setText(self._busy_base)
+            if not self._busy_timer.isActive():
+                self._busy_timer.start()
+        else:
+            self._busy_timer.stop()
+            self.banner.setText(text)
         self.banner.setStyleSheet(
             f"QLabel {{ background-color: {bg}; color: {fg};"
             f" border: 1px solid {fg}; border-radius: 6px; padding: 8px 10px; }}"
         )
+
+    def _tick_busy(self) -> None:
+        self._busy_dots = (self._busy_dots + 1) % 4
+        self.banner.setText(self._busy_base + "." * self._busy_dots)
 
     # ----------------------------------------------------------- favorites
     def _update_pin_button(self) -> None:

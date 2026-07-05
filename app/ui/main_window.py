@@ -453,10 +453,11 @@ class MainWindow(QMainWindow):
 
         self.progress.setVisible(True)
         self.btn_stop.setVisible(True)
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
+        # 실제 진행(총 wafer 수)이 오기 전까지는 불확정(busy) 애니메이션으로 움직이게 한다
+        # (0% 에 멈춰 '로딩중'만 뜨는 것 방지). _on_scan_progress 가 오면 0~100%로 전환.
+        self.progress.setRange(0, 0)
         self.progress.setTextVisible(True)
-        self.progress.setFormat("스캔 준비 중...  %p%")
+        self.progress.setFormat("스캔 준비 중...")
         self.nav.set_status("스캔 중...")
         self.top.set_lot_name(Path(folder).name)
         self.setWindowTitle(f"{self._base_title}  —  {Path(folder).name}")

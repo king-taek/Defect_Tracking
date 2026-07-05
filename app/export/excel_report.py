@@ -52,6 +52,24 @@ def _set_cell(ws, row, col, value, *, bold=False, color=None, fill=None,
     return cell
 
 
+def _place_image(ws, thumb_cache, rec, row, col) -> None:
+    """(row,col) 셀에 rec 썸네일을 앵커한다. 실패 시 안내 텍스트."""
+    col_letter = get_column_letter(col)
+    cell = ws.cell(row=row, column=col)
+    cell.border = _BORDER
+    thumb = thumb_cache.get_full_thumbnail(rec.image_path, max_size=_IMG_PX)
+    if thumb is not None:
+        try:
+            xl = XLImage(str(thumb))
+            xl.anchor = f"{col_letter}{row}"
+            ws.add_image(xl)
+            return
+        except (OSError, ValueError):
+            cell.value = "(이미지 로드 실패)"
+            return
+    cell.value = "(이미지 없음)"
+
+
 def export_excel(
     output_path: str | Path,
     *,
@@ -81,12 +99,15 @@ def export_excel(
     ws.title = "비교 결과"
     ws.sheet_view.showGridLines = False
 
-    # 열: A=라벨, B=기준, C..=비교 layer
-    columns = ["기준: " + base_layer] + compare_layers
-    n_cols = len(columns) + 1  # +1 라벨열
+    # 열: A=라벨, B=기준, C..=비교 layer. 각 블록이 '자기' 기준/비교 layer 로 스스로
+    # 라벨링하므로(여러 layer 를 한 번에 담아도 섞이지 않게), 열 수는 블록별 비교 layer
+    # 최댓값으로 잡는다.
+    max_cmp = max((len(item.results) for item in selected), default=len(compare_layers))
+    n_data_cols = 1 + max_cmp  # 기준 + 비교(최대)
+    n_cols = n_data_cols + 1   # + 라벨열(A)
 
     ws.column_dimensions["A"].width = 16
-    for ci in range(len(columns)):
+    for ci in range(n_data_cols):
         ws.column_dimensions[get_column_letter(2 + ci)].width = _IMG_COL_WIDTH
 
     # ---- 보고서 헤더 ----
@@ -99,10 +120,21 @@ def export_excel(
     ws.row_dimensions[r].height = 26
     r += 1
 
+    # 담긴 항목들의 실제 기준 layer(혼합일 수 있음)를 헤더에 표기.
+    base_layers_present: list[str] = []
+    for item in selected:
+        bl = item.base.layer or base_layer
+        if bl not in base_layers_present:
+            base_layers_present.append(bl)
+    if len(base_layers_present) <= 1:
+        base_desc = base_layers_present[0] if base_layers_present else base_layer
+    else:
+        base_desc = "혼합(기준 없이): " + ", ".join(base_layers_present)
+
     meta = (
-        f"LOT: {lot_name}    기준 Layer: {base_layer}    "
-        f"비교 Layer: {', '.join(compare_layers) or '-'}    "
-        f"허용 오차: {tolerance:g}    생성: {datetime.now():%Y-%m-%d %H:%M}"
+        f"LOT: {lot_name}    기준 Layer: {base_desc}    "
+        f"허용 오차: {tolerance:g}    생성: {datetime.now():%Y-%m-%d %H:%M}    "
+        f"※ 각 블록의 'Layer' 행이 실제 기준/비교 layer 를 표시"
     )
     mc = ws.cell(row=r, column=1, value=meta)
     mc.font = Font(color="FFFFFFFF", size=10)
@@ -114,20 +146,22 @@ def export_excel(
 
     # 상단 컬럼 헤더 행은 두지 않는다 — 블록마다 'Layer' 행으로 이미 표기하므로 중복이다(항목 1).
 
-    # ---- 각 기준 defect 블록 ----
+    # ---- 각 기준 defect 블록 (블록마다 '자기' 기준/비교 layer 로 표기) ----
     _total = len(selected)
     for idx, item in enumerate(selected, start=1):
         if progress is not None:
             progress(idx, _total)
         base = item.base
+        base_layer_name = base.layer or base_layer
+        results = list(item.results)
 
-        # 블록 제목
+        # 블록 제목 — 기준 layer 를 함께 표기(여러 layer 혼합 대비).
         _set_cell(
             ws, r, 1,
             f"#{idx}", bold=True, color="FFFFFFFF", fill=_GREY, align="center",
         )
         head = (
-            f"wafer {base.wafer_id}   "
+            f"기준 {base_layer_name}   wafer {base.wafer_id}   "
             f"die ({base.col},{base.row})   pos {base.position_key}   "
             f"[{base.source.value}]"
         )
@@ -136,77 +170,59 @@ def export_excel(
         ws.row_dimensions[r].height = 18
         r += 1
 
-        # Layer 이름 행 — 각 사진마다 어떤 layer 인지 블록마다 반복 표기(항목 8).
-        layer_names = [base_layer] + compare_layers
+        # Layer 이름 행 — 이 블록의 실제 기준/비교 layer(전역 기준에 종속되지 않음).
         _set_cell(ws, r, 1, "Layer", bold=True, align="center", fill=_LIGHT)
-        for ci, name in enumerate(layer_names):
-            is_base = ci == 0
+        _set_cell(
+            ws, r, 2, "★ " + base_layer_name + " (기준)",
+            bold=True, color="FFFFFFFF", fill=_NEON, align="center",
+        )
+        for ci, mr in enumerate(results):
             _set_cell(
-                ws, r, 2 + ci,
-                ("★ " + name + " (기준)") if is_base else name,
-                bold=True,
-                color="FFFFFFFF",
-                fill=_NEON if is_base else _NAVY,
-                align="center",
+                ws, r, 3 + ci, mr.compare_layer,
+                bold=True, color="FFFFFFFF", fill=_NAVY, align="center",
             )
+        for ci in range(len(results), max_cmp):
+            _set_cell(ws, r, 3 + ci, "", fill=_LIGHT, align="center")
         ws.row_dimensions[r].height = 18
         r += 1
 
         # 이미지 행
         _set_cell(ws, r, 1, "이미지", bold=True, align="center", fill=_LIGHT)
         ws.row_dimensions[r].height = _IMG_ROW_HEIGHT
-        for ci in range(len(columns)):
-            col_letter = get_column_letter(2 + ci)
-            cell = ws.cell(row=r, column=1 + 1 + ci)
-            cell.border = _BORDER
-            if ci == 0:
-                rec = base
-            else:
-                mr = item.for_layer(compare_layers[ci - 1])
-                rec = mr.matched if mr and mr.matched else None
+        _place_image(ws, thumb_cache, base, r, 2)
+        for ci, mr in enumerate(results):
+            rec = mr.matched
             if rec is not None:
-                thumb = thumb_cache.get_full_thumbnail(rec.image_path, max_size=_IMG_PX)
-                if thumb is not None:
-                    try:
-                        xl = XLImage(str(thumb))
-                        xl.anchor = f"{col_letter}{r}"
-                        ws.add_image(xl)
-                    except (OSError, ValueError):
-                        cell.value = "(이미지 로드 실패)"
-                else:
-                    cell.value = "(이미지 없음)"
+                _place_image(ws, thumb_cache, rec, r, 3 + ci)
             else:
-                _set_cell(ws, r, 2 + ci, "매칭 없음", color=_NOMATCH, align="center")
+                _set_cell(ws, r, 3 + ci, "매칭 없음", color=_NOMATCH, align="center")
+        for ci in range(len(results), max_cmp):
+            ws.cell(row=r, column=3 + ci).border = _BORDER
         r += 1
 
         # 상세 정보 행
         _set_cell(ws, r, 1, "정보", bold=True, align="center", fill=_LIGHT)
-        for ci in range(len(columns)):
-            if ci == 0:
-                rec = base
-                matched = True
-                dist = None
+        base_lines = ["기준 ★", f"위치 {base.position_key}", Path(base.image_path).name]
+        extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
+        if extra:
+            base_lines.append(f"+{extra} 근접중복")
+        _set_cell(ws, r, 2, "\n".join(base_lines), color=_NEON, wrap=True, size=9)
+        for ci, mr in enumerate(results):
+            rec = mr.matched
+            if rec is not None:
+                dist = mr.distance
+                lines = [
+                    f"매칭 O (거리 {dist:.1f})" if dist is not None else "매칭 O",
+                    f"위치 {rec.position_key}",
+                    Path(rec.image_path).name,
+                ]
+                color = _MATCH
             else:
-                mr = item.for_layer(compare_layers[ci - 1])
-                rec = mr.matched if mr else None
-                matched = bool(mr and mr.is_match)
-                dist = mr.distance if mr else None
-            lines = []
-            if ci == 0:
-                lines.append("기준 ★")
-                lines.append(f"위치 {base.position_key}")
-                lines.append(Path(base.image_path).name)
-                extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
-                if extra:
-                    lines.append(f"+{extra} 근접중복")
-            elif rec is not None:
-                lines.append(f"매칭 O (거리 {dist:.1f})" if dist is not None else "매칭 O")
-                lines.append(f"위치 {rec.position_key}")
-                lines.append(Path(rec.image_path).name)
-            else:
-                lines.append("매칭 X")
-            color = _NEON if ci == 0 else (_MATCH if matched else _NOMATCH)
-            _set_cell(ws, r, 2 + ci, "\n".join(lines), color=color, wrap=True, size=9)
+                lines = ["매칭 X"]
+                color = _NOMATCH
+            _set_cell(ws, r, 3 + ci, "\n".join(lines), color=color, wrap=True, size=9)
+        for ci in range(len(results), max_cmp):
+            ws.cell(row=r, column=3 + ci).border = _BORDER
         ws.row_dimensions[r].height = 48
         r += 1
 

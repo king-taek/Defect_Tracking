@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -34,8 +34,32 @@ def _blank_holder(px: int) -> QLabel:
     return holder
 
 
+def _start_loading_anim(holder: QLabel) -> None:
+    """지연 로딩 placeholder 에 '로딩' 말줄임(…) 애니메이션을 건다(홀더 자식 타이머)."""
+    holder._load_dots = 0  # type: ignore[attr-defined]
+    holder.setText("로딩")
+    timer = QTimer(holder)
+    timer.setInterval(350)
+
+    def _tick() -> None:
+        holder._load_dots = (holder._load_dots + 1) % 4  # type: ignore[attr-defined]
+        holder.setText("로딩" + "." * holder._load_dots)  # type: ignore[attr-defined]
+
+    timer.timeout.connect(_tick)
+    timer.start()
+    holder._load_timer = timer  # type: ignore[attr-defined]
+
+
+def _stop_loading_anim(holder: QLabel) -> None:
+    timer = getattr(holder, "_load_timer", None)
+    if timer is not None:
+        timer.stop()
+        holder._load_timer = None  # type: ignore[attr-defined]
+
+
 def fill_holder(holder: QLabel, thumb_cache, image_path, px: int) -> None:
     """(UI 스레드) 캐시된 썸네일을 holder 에 그린다. 실패 시 '이미지 없음'."""
+    _stop_loading_anim(holder)  # 로딩 애니메이션 정지 후 실제 이미지로 교체
     path = thumb_cache.get_full_thumbnail(image_path, max_size=px) \
         if thumb_cache is not None else None
     if path is not None:
@@ -50,10 +74,10 @@ def fill_holder(holder: QLabel, thumb_cache, image_path, px: int) -> None:
 
 
 def load_thumb_holder(thumb_cache, image_path, px: int, defer: bool = False) -> QLabel:
-    """썸네일 이미지 QLabel(배지 없음). defer=True 면 '…'만 두고 나중에 fill_holder 로 채운다."""
+    """썸네일 QLabel. defer=True 면 '로딩…' 애니메이션을 두고 나중에 fill_holder 로 채운다."""
     holder = _blank_holder(px)
     if defer:
-        holder.setText("로딩…")
+        _start_loading_anim(holder)
         return holder
     fill_holder(holder, thumb_cache, image_path, px)
     return holder
