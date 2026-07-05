@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.69   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.70   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.69"
+__version__ = "1.33.70"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -5229,6 +5229,8 @@ updater__ProgressCb = Optional[Callable[[str], None]]
 
 # ZIP 추출 시 덮어쓰지 않을 최상위 폴더
 _SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", "venv"}
+# 자동 업데이트로 받아오지 않을(로컬 유지) 파일 이름 — 개발 문서는 배포본에서 갱신하지 않는다.
+_SKIP_FILES = {"CLAUDE.md", "README.md"}
 
 _API = "https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
 _ZIP = "https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}"
@@ -5351,6 +5353,13 @@ def apply_via_git(
             capture_output=True, text=True, timeout=180,
         )
 
+    # 개발 문서(CLAUDE.md·README.md)는 업데이트로 받아오지 않는다 → reset 전 로컬 내용을
+    # 저장해 두었다가 이후 그대로 복원한다(로컬에 없으면 없는 상태로 되돌린다).
+    saved = {
+        name: ((root / name).read_bytes() if (root / name).exists() else None)
+        for name in _SKIP_FILES
+    }
+
     if progress:
         progress("원격 변경사항 받는 중...")
     f = run(["fetch", "--depth", "1", "origin", branch])
@@ -5361,6 +5370,17 @@ def apply_via_git(
     r = run(["reset", "--hard", f"origin/{branch}"])
     if r.returncode != 0:
         return False, f"git reset 실패: {r.stderr.strip()}"
+
+    # 저장해 둔 개발 문서를 복원(업데이트가 이 파일들을 바꾸지 않도록).
+    for name, content in saved.items():
+        p = root / name
+        try:
+            if content is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_bytes(content)
+        except OSError:
+            pass
     return True, "git 으로 업데이트했습니다."
 
 
@@ -5400,6 +5420,8 @@ def extract_over(
             rel_parts = parts[1:]  # 'repo-branch/' 접두 제거
             if any(p in skip for p in rel_parts):
                 continue
+            if rel_parts[-1] in _SKIP_FILES:
+                continue  # 개발 문서(CLAUDE.md·README.md)는 갱신하지 않음
             rel = "/".join(rel_parts)
             dest = _safe_join(target_root, rel)
             if dest is None:

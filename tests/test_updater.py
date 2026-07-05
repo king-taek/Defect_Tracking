@@ -53,6 +53,24 @@ def test_extract_over_skips_protected_dirs(tmp_path):
     assert (target / "app" / "keep.py").exists()
 
 
+def test_extract_over_skips_dev_docs(tmp_path):
+    """자동 업데이트(ZIP)로 CLAUDE.md·README.md 는 받아오지 않는다(로컬 유지)."""
+    target = tmp_path / "install"
+    target.mkdir()
+    (target / "README.md").write_text("LOCAL-README", encoding="utf-8")
+    (target / "CLAUDE.md").write_text("LOCAL-CLAUDE", encoding="utf-8")
+    zp = _make_zip(tmp_path, {
+        "README.md": "REMOTE-README",
+        "CLAUDE.md": "REMOTE-CLAUDE",
+        "app/keep.py": "keep",
+    })
+    updater.extract_over(zp, target)
+    # 문서는 원격 내용으로 덮이지 않고 로컬 그대로여야 한다.
+    assert (target / "README.md").read_text() == "LOCAL-README"
+    assert (target / "CLAUDE.md").read_text() == "LOCAL-CLAUDE"
+    assert (target / "app" / "keep.py").read_text() == "keep"  # 나머지는 정상 적용
+
+
 def test_extract_over_zip_slip_blocked(tmp_path):
     target = tmp_path / "install"
     target.mkdir()
