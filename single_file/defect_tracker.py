@@ -57,7 +57,7 @@ from typing import Any, Callable, Iterable, Optional
 from urllib.request import Request, urlopen
 
 from PIL import Image
-from PySide6.QtCore import QDir, QEasingCurve, QEvent, QMargins, QObject, QParallelAnimationGroup, QPoint, QPropertyAnimation, QRect, QRectF, QRunnable, QSize, QStorageInfo, QThreadPool, QTimer, QUrl, Qt, Signal, Slot
+from PySide6.QtCore import QDir, QEasingCurve, QEvent, QEventLoop, QMargins, QObject, QParallelAnimationGroup, QPoint, QPropertyAnimation, QRect, QRectF, QRunnable, QSize, QStorageInfo, QThreadPool, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLayout, QLayoutItem, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplashScreen, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 from openpyxl import Workbook
@@ -3482,6 +3482,16 @@ class BusyOverlay(QWidget):
     def stop(self) -> None:
         self._timer.stop()
         self.setVisible(False)
+
+    def pump(self) -> None:
+        """무거운 메인 스레드 작업 중에도 스피너가 계속 회전하도록 이벤트 루프를 잠깐 돌린다.
+
+        사용자 입력 이벤트는 제외해 작업 도중 재진입(레이어 재변경 등)을 막고,
+        타이머·페인트 이벤트만 처리해 애니메이션 프레임을 갱신한다.
+        """
+        if not self.isVisible():
+            return
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
 
     # ---- 내부 ---------------------------------------------------------
     def _tick(self) -> None:
@@ -7169,9 +7179,16 @@ class ThumbnailStrip(QScrollArea):
         self._current = -1
 
     def set_items(
-        self, captions: list[str], tooltips: Optional[list[str]] = None
+        self,
+        captions: list[str],
+        tooltips: Optional[list[str]] = None,
+        on_progress=None,
     ) -> None:
-        """기준 record 개수만큼 썸네일 placeholder 를 만든다."""
+        """기준 record 개수만큼 썸네일 placeholder 를 만든다.
+
+        on_progress 가 주어지면 일정 개수마다 호출해(예: 로딩 스피너 pump) 많은
+        썸네일을 만드는 동안에도 UI 가 멈춘 것처럼 보이지 않게 한다.
+        """
         self.clear()
         for i, cap in enumerate(captions):
             thumb = ClickableThumb(i)
@@ -7182,6 +7199,9 @@ class ThumbnailStrip(QScrollArea):
             # stretch 앞에 삽입
             self._layout.insertWidget(self._layout.count() - 1, thumb)
             self._thumbs.append(thumb)
+            # 썸네일이 많을 때 주기적으로 이벤트 루프에 양보 → 스피너 애니메이션 유지
+            if on_progress is not None and (i & 15) == 15:
+                on_progress()
 
     def set_thumbnail(self, index: int, path: str) -> None:
         if 0 <= index < len(self._thumbs):
@@ -7992,7 +8012,7 @@ class FolderPickerDialog(QDialog):
 사진만** 가로로 나열하며(매칭 없는 칸은 표시하지 않음), 각 썸네일 좌상단에 layer 배지를
 붙인다. 각 행은 '담기'로 공유 출력 트레이에 담을 수 있다.
 
-die 개수가 50개 미만이면 각 die 를 4×5(20) 하위셀로 나눠 die 내부 위치를 구분한다.
+die 개수가 50개 미만이면 각 die 를 5×5(25) 하위셀로 나눠 die 내부 위치를 구분한다.
 wafer 선택에서 '전체'를 고르면 모든 wafer 의 defect 을 한 장에 밀도 합산해 보여준다.
 
 순수 집계/분할 로직은 app.heatmap 에 있고 여기서는 시각화/상호작용만 담당한다.
@@ -8032,7 +8052,7 @@ def _heat_color(count: int, max_count: int) -> QColor:
 class HeatmapWaferMap(QWidget):
     """웨이퍼맵에 defect 밀도를 색으로 그리고 위치 클릭을 알린다.
 
-    die 개수가 적으면(subdivide=True) 각 die 를 4×5 하위셀로 나눠 그린다.
+    die 개수가 적으면(subdivide=True) 각 die 를 5×5 하위셀로 나눠 그린다.
     """
 
     selection_changed = Signal(object)  # list[HeatKey]
@@ -8557,7 +8577,7 @@ class HeatmapDialog(QDialog):
             self._map._selected_keys = set(self._selected_keys)
             self._map.update()
 
-        sub_txt = " · die 4×5 분할" if subdivide else ""
+        sub_txt = " · die 5×5 분할" if subdivide else ""
         n_def = sum(density.values())
         wafer_txt = "전체 wafer" if self._current_wafer == _ALL_WAFERS else f"wafer {self._current_wafer}"
         self.lbl_map.setText(
@@ -9098,6 +9118,32 @@ class MainWindow(QMainWindow):
         else:
             self.show()
 
+    def maybe_prompt_device_db(self) -> None:
+        """디바이스 DB(AOIDeviceDB.xlsx)가 없으면 설정을 안내하는 팝업을 띄운다.
+
+        DB 가 로드되지 않으면(등록된 db 제품 0개) 웨이퍼 맵 die 배치·좌표 변환이 정확히
+        표시되지 않으므로, 시작 시 한 번 설정을 권한다. '지금 설정'을 누르면 설정 창을 연다.
+        """
+        has_db = any(
+            getattr(p, "source", "") == "db" for p in PRODUCTS.values()
+        )
+        if has_db:
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("디바이스 DB 설정 필요")
+        box.setText("디바이스 DB(AOIDeviceDB.xlsx)가 설정되어 있지 않습니다.")
+        box.setInformativeText(
+            "웨이퍼 맵의 die 배치와 좌표 변환을 정확히 표시하려면 디바이스 DB 를 "
+            "설정해야 합니다.\n지금 설정하시겠습니까?"
+        )
+        btn_set = box.addButton("지금 설정", QMessageBox.AcceptRole)
+        box.addButton("나중에", QMessageBox.RejectRole)
+        box.setDefaultButton(btn_set)
+        box.exec()
+        if box.clickedButton() is btn_set:
+            self._open_settings()
+
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
         root = QWidget()
@@ -9376,7 +9422,12 @@ class MainWindow(QMainWindow):
                     f"디바이스 자동 인식: {prod.name}", "info", timeout_ms=2500
                 )
 
-    def load_lot(self, folder: str, wafer_filter: Optional[str] = None) -> None:
+    def load_lot(
+        self,
+        folder: str,
+        wafer_filter: Optional[str] = None,
+        auto_detect: bool = True,
+    ) -> None:
         # 2차 원본 보호(Section 1.1): 캐시/결과 작업공간이 이 LOT 내부면 차단한다.
         if not self._verify_workspace_outside(folder):
             return
@@ -9384,7 +9435,9 @@ class MainWindow(QMainWindow):
         self._wafer_filter = wafer_filter
 
         # 디바이스 자동 인식(스캔 전): 좌표 변환·die 배치를 올바른 제품으로 맞춘다.
-        self._auto_select_product(folder)
+        # 설정에서 사용자가 직접 제품을 고른 재스캔(auto_detect=False)에서는 건너뛴다.
+        if auto_detect:
+            self._auto_select_product(folder)
 
         self.settings.last_lot_folder = folder
         self._push_recent(folder)
@@ -9656,10 +9709,12 @@ class MainWindow(QMainWindow):
             if extra:
                 tt += f" · 근접중복 +{extra}"
             tooltips.append(tt)
-        self.strip.set_items(captions, tooltips)
+        self.strip.set_items(captions, tooltips, on_progress=self.busy.pump)
         self._start_thumbnails()
+        self.busy.pump()
 
         self._rebuild_grid()
+        self.busy.pump()
         self._empty_label.setVisible(not self.base_records)
         self.nav.set_enabled(bool(self.base_records))
         if self.base_records:
@@ -9718,9 +9773,13 @@ class MainWindow(QMainWindow):
         self.base_records = [m.base for m in self.matches]
         self._view_cache = None
         self._update_match_summary()
-        self.busy.stop()
-        if after is not None:
-            after()
+        # 오버레이를 먼저 끄지 않고(스피너 정지·화면 멈춤 방지), 무거운 재구성이
+        # 끝난 뒤에 끈다. 재구성 도중에는 busy.pump() 로 스피너가 계속 돌게 한다.
+        try:
+            if after is not None:
+                after()
+        finally:
+            self.busy.stop()
 
     def _on_match_error(self, msg: str, token: int) -> None:
         if token != self._match_token:
@@ -10136,12 +10195,26 @@ class MainWindow(QMainWindow):
                 register_devices(load_device_db(db_path))
         except Exception:  # noqa: BLE001
             self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
+        old_active = _active_product
         set_active_product(s.product)
         ensure_die_map_product()
         # 제품/DB 가 바뀌면 die_map 이 달라지므로 웨이퍼 맵 정합 캐시를 무효화한다.
         self._align_cache.clear()
-        # 다음 네비게이션까지 기다리지 않고 지금 바로 새 제품 기준으로 다시 그린다.
-        if self.matches:
+        # 디바이스(제품)가 바뀌면 좌표 변환(col/row/x/y)이 '파싱 시점'에 계산되므로
+        # 단순 재그리기로는 좌표가 갱신되지 않는다. 현재 LOT 을 다시 스캔해 새 pitch/offset
+        # 으로 좌표를 재계산한다(사용자가 직접 고른 제품이므로 자동 인식은 건너뜀).
+        if (
+            _active_product != old_active
+            and self.settings.last_lot_folder
+            and self.lot_index is not None
+        ):
+            self.load_lot(
+                self.settings.last_lot_folder,
+                wafer_filter=self._wafer_filter,
+                auto_detect=False,
+            )
+        elif self.matches:
+            # 다음 네비게이션까지 기다리지 않고 지금 바로 새 제품 기준으로 다시 그린다.
             self._goto(self.current)
         # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
         if s.workspace != old_workspace or s.output_folder != old_output:
@@ -10521,6 +10594,10 @@ def main() -> int:
     window = MainWindow(settings)
     window.show_initial()  # 기본 최대화(설정), 해제 이력이 있으면 저장된 창 크기
     splash.finish(window)
+    # 창이 뜬 뒤(이벤트 루프 진입 후) 디바이스 DB 미설정 안내 팝업을 띄운다.
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(0, window.maybe_prompt_device_db)
     return app.exec()
 
 

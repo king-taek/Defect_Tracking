@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QLabel,
     QProgressBar,
@@ -144,6 +145,16 @@ class BusyOverlay(QWidget):
     def stop(self) -> None:
         self._timer.stop()
         self.setVisible(False)
+
+    def pump(self) -> None:
+        """무거운 메인 스레드 작업 중에도 스피너가 계속 회전하도록 이벤트 루프를 잠깐 돌린다.
+
+        사용자 입력 이벤트는 제외해 작업 도중 재진입(레이어 재변경 등)을 막고,
+        타이머·페인트 이벤트만 처리해 애니메이션 프레임을 갱신한다.
+        """
+        if not self.isVisible():
+            return
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
 
     # ---- 내부 ---------------------------------------------------------
     def _tick(self) -> None:

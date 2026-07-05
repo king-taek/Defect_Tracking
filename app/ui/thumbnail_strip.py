@@ -67,9 +67,16 @@ class ThumbnailStrip(QScrollArea):
         self._current = -1
 
     def set_items(
-        self, captions: list[str], tooltips: Optional[list[str]] = None
+        self,
+        captions: list[str],
+        tooltips: Optional[list[str]] = None,
+        on_progress=None,
     ) -> None:
-        """기준 record 개수만큼 썸네일 placeholder 를 만든다."""
+        """기준 record 개수만큼 썸네일 placeholder 를 만든다.
+
+        on_progress 가 주어지면 일정 개수마다 호출해(예: 로딩 스피너 pump) 많은
+        썸네일을 만드는 동안에도 UI 가 멈춘 것처럼 보이지 않게 한다.
+        """
         self.clear()
         for i, cap in enumerate(captions):
             thumb = ClickableThumb(i)
@@ -80,6 +87,9 @@ class ThumbnailStrip(QScrollArea):
             # stretch 앞에 삽입
             self._layout.insertWidget(self._layout.count() - 1, thumb)
             self._thumbs.append(thumb)
+            # 썸네일이 많을 때 주기적으로 이벤트 루프에 양보 → 스피너 애니메이션 유지
+            if on_progress is not None and (i & 15) == 15:
+                on_progress()
 
     def set_thumbnail(self, index: int, path: str) -> None:
         if 0 <= index < len(self._thumbs):

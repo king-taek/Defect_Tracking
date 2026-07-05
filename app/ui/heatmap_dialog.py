@@ -5,7 +5,7 @@
 사진만** 가로로 나열하며(매칭 없는 칸은 표시하지 않음), 각 썸네일 좌상단에 layer 배지를
 붙인다. 각 행은 '담기'로 공유 출력 트레이에 담을 수 있다.
 
-die 개수가 50개 미만이면 각 die 를 4×5(20) 하위셀로 나눠 die 내부 위치를 구분한다.
+die 개수가 50개 미만이면 각 die 를 5×5(25) 하위셀로 나눠 die 내부 위치를 구분한다.
 wafer 선택에서 '전체'를 고르면 모든 wafer 의 defect 을 한 장에 밀도 합산해 보여준다.
 
 순수 집계/분할 로직은 app.heatmap 에 있고 여기서는 시각화/상호작용만 담당한다.
@@ -69,7 +69,7 @@ def _heat_color(count: int, max_count: int) -> QColor:
 class HeatmapWaferMap(QWidget):
     """웨이퍼맵에 defect 밀도를 색으로 그리고 위치 클릭을 알린다.
 
-    die 개수가 적으면(subdivide=True) 각 die 를 4×5 하위셀로 나눠 그린다.
+    die 개수가 적으면(subdivide=True) 각 die 를 5×5 하위셀로 나눠 그린다.
     """
 
     selection_changed = Signal(object)  # list[HeatKey]
@@ -596,7 +596,7 @@ class HeatmapDialog(QDialog):
             self._map._selected_keys = set(self._selected_keys)
             self._map.update()
 
-        sub_txt = " · die 4×5 분할" if subdivide else ""
+        sub_txt = " · die 5×5 분할" if subdivide else ""
         n_def = sum(density.values())
         wafer_txt = "전체 wafer" if self._current_wafer == _ALL_WAFERS else f"wafer {self._current_wafer}"
         self.lbl_map.setText(

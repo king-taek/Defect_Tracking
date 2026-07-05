@@ -120,6 +120,10 @@ def main() -> int:
     window = MainWindow(settings)
     window.show_initial()  # 기본 최대화(설정), 해제 이력이 있으면 저장된 창 크기
     splash.finish(window)
+    # 창이 뜬 뒤(이벤트 루프 진입 후) 디바이스 DB 미설정 안내 팝업을 띄운다.
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(0, window.maybe_prompt_device_db)
     return app.exec()
 
 
