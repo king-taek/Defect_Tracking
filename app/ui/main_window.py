@@ -1354,11 +1354,12 @@ class MainWindow(QMainWindow):
         return name or "compare"
 
     # ------------------------------------------------------------ 출력
-    def _compute_all_layers_matched(self) -> list[BaseDefectMatches]:
+    def _compute_all_layers_matched(self, progress=None) -> list[BaseDefectMatches]:
         """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 합친다.
 
         기준 layer 종속 없이 '전체 매치'를 담기 위한 것. base image_path 로 중복 제거하고,
         현재 wafer 필터가 걸려 있으면 그 wafer 로 한정한다. (layer 수만큼 매칭을 다시 돌림)
+        진행도는 progress(cur, total) 콜백으로 알린다(layer 단위).
         """
         from app.clustering import collapse_matches
 
@@ -1367,36 +1368,35 @@ class MainWindow(QMainWindow):
         layers = self.lot_index.layer_canonicals()
         rbl = self.lot_index.records_by_layer()
         tolerance = self.top.tolerance()
+        total = len(layers)
         seen: set[str] = set()
         out: list[BaseDefectMatches] = []
-        for base_layer in layers:
+        for i, base_layer in enumerate(layers):
+            if progress is not None:
+                progress(i, total)  # layer i 처리 시작(진행 표시)
             base_records = [
                 r for r in self.lot_index.records_for_layer(base_layer) if r.ok
             ]
             if self._wafer_filter:
                 base_records = [r for r in base_records if r.wafer_id == self._wafer_filter]
-            if not base_records:
-                continue
-            compare_layers = [lyr for lyr in layers if lyr != base_layer]
-            matches, _ = matcher.match_all_with_offsets(
-                base_records, compare_layers, rbl, tolerance
-            )
-            for m in collapse_matches(matches):
-                if self._match_status(m) != "none":
-                    k = str(m.base.image_path)
-                    if k not in seen:
-                        seen.add(k)
-                        out.append(m)
+            if base_records:
+                compare_layers = [lyr for lyr in layers if lyr != base_layer]
+                matches, _ = matcher.match_all_with_offsets(
+                    base_records, compare_layers, rbl, tolerance
+                )
+                for m in collapse_matches(matches):
+                    if self._match_status(m) != "none":
+                        k = str(m.base.image_path)
+                        if k not in seen:
+                            seen.add(k)
+                            out.append(m)
+        if progress is not None:
+            progress(total, total)
         return out
 
-    def _provide_all_layers_matched(self) -> list[BaseDefectMatches]:
-        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자 — 대기 커서로 계산."""
-        from PySide6.QtWidgets import QApplication
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            return self._compute_all_layers_matched()
-        finally:
-            QApplication.restoreOverrideCursor()
+    def _provide_all_layers_matched(self, progress=None) -> list[BaseDefectMatches]:
+        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자(진행 콜백 지원)."""
+        return self._compute_all_layers_matched(progress)
 
     def _export(self) -> None:
         if not self.matches:

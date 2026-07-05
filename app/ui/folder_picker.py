@@ -11,8 +11,19 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
+
+_NUM_RE = re.compile(r"(\d+)")
+
+
+def natural_key(name: str) -> list:
+    """자연 정렬 키 — 숫자 부분을 정수로 비교해 '2.'가 '10.'보다 앞에 오게 한다.
+
+    예) 1., 2., …, 10., 11., …, 21. (사전식 1., 10., 11., 2. 방지)
+    """
+    return [int(t) if t.isdigit() else t.lower() for t in _NUM_RE.split(name)]
 
 from PySide6.QtCore import (
     QDir,
@@ -72,7 +83,7 @@ def _subdir_count(path: Path) -> int:
 def _first_subdir(path: Path) -> Optional[Path]:
     try:
         with os.scandir(path) as it:
-            names = sorted(e.name for e in it if e.is_dir())
+            names = sorted((e.name for e in it if e.is_dir()), key=natural_key)
     except OSError:
         return None
     return path / names[0] if names else None
@@ -154,7 +165,7 @@ class FolderPickerDialog(QDialog):
                 names = [e.name for e in it if e.is_dir() and not e.name.startswith(".")]
         except OSError:
             return []
-        return sorted(names, key=str.lower)
+        return sorted(names, key=natural_key)
 
     # ----------------------------------------------------------- UI build
     def _build_ui(self) -> None:

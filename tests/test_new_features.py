@@ -807,6 +807,26 @@ def test_thumbnail_cache_atomic_write(app, tmp_path):
     assert not list(out.parent.glob("*.tmp"))
 
 
+def test_folder_picker_natural_sort():
+    """폴더 나열이 자연 정렬(숫자 인식)로 1., 2., …, 10., 11. 순서가 되어야 한다."""
+    from app.ui.folder_picker import natural_key
+    assert sorted(["10.", "1.", "11.", "2.", "21.", "3."], key=natural_key) == [
+        "1.", "2.", "3.", "10.", "11.", "21."
+    ]
+    assert sorted(["10. FS", "2. LYB4", "1. LYA4"], key=natural_key) == [
+        "1. LYA4", "2. LYB4", "10. FS"
+    ]
+
+
+def test_folder_picker_lists_dirs_naturally(app, tmp_path):
+    """실제 폴더 나열(_list_subdirs)도 자연 정렬을 따른다."""
+    from app.ui.folder_picker import FolderPickerDialog
+    for n in ["1.", "2.", "10.", "11.", "21.", "3."]:
+        (tmp_path / n).mkdir()
+    dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
+    assert dlg._list_subdirs(tmp_path) == ["1.", "2.", "3.", "10.", "11.", "21."]
+
+
 def test_folder_picker_scan_root_input(app, tmp_path):
     from app.ui.folder_picker import FolderPickerDialog
     (tmp_path / "ScanData" / "LOT").mkdir(parents=True)

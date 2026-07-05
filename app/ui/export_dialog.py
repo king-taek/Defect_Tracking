@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from app.models import BaseDefectMatches
 from app.thumbnails import ThumbnailCache
 from app.ui import theme
+from app.ui.busy_overlay import BusyOverlay
 
 _COLUMNS = 3
 _THUMB_PX = 180  # 카드 썸네일 크기(크게)
@@ -57,6 +58,8 @@ class ExportTrayDialog(QDialog):
         self.setMinimumSize(620, 540)
         self._build()
         self._populate()
+        # 무거운 '모든 매치(기준 없이)' 계산 동안 다이얼로그 위에 로딩+진행도 표시.
+        self._busy = BusyOverlay(self)
 
     @staticmethod
     def _key(item: BaseDefectMatches) -> str:
@@ -264,10 +267,26 @@ class ExportTrayDialog(QDialog):
         self._populate()
 
     def _add_all_layers(self) -> None:
-        """모든 layer 를 기준으로 한 매치를 공급자에서 받아 담는다(중복 제거)."""
+        """모든 layer 를 기준으로 한 매치를 공급자에서 받아 담는다(중복 제거).
+
+        계산이 무거우므로 로딩 오버레이 + layer 단위 진행도를 표시한다.
+        """
         if self._all_layers_provider is None:
             return
-        items = self._all_layers_provider() or []
+        from PySide6.QtWidgets import QApplication
+
+        self._busy.start("모든 매치 계산 중", determinate=True)
+        QApplication.processEvents()
+
+        def _progress(cur: int, total: int) -> None:
+            self._busy.set_message(f"모든 매치 계산 중  ({cur}/{total} layer)")
+            self._busy.set_progress(cur, total)
+            QApplication.processEvents()  # 동기 루프 중에도 진행바가 갱신되도록
+
+        try:
+            items = self._all_layers_provider(_progress) or []
+        finally:
+            self._busy.stop()
         for m in items:
             self._add(m)
         self._populate()
