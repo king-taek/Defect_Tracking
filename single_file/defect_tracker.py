@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.62   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.63   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.62"
+__version__ = "1.33.63"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -10195,6 +10195,22 @@ class MainWindow(QMainWindow):
                 register_devices(load_device_db(db_path))
         except Exception:  # noqa: BLE001
             self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
+        # 디바이스 DB 를 새로 반영한 뒤, 아직 빌트인 기본 제품(DEFAULT_PRODUCT)에 머물러
+        # 있으면 현재 LOT 경로에서 제품(디바이스)을 DB 시트명 기준으로 자동 인식해 프로파일을
+        # 맞춘다("DB 저장하면 알아서 읽도록"). 사용자가 특정 디바이스를 직접 고른 경우엔
+        # 그 값(≠기본)이 유지되므로 자동 인식이 덮어쓰지 않는다.
+        if s.product == DEFAULT_PRODUCT and self.lot_index is not None:
+            try:
+                detected, _ = match_product_for_path(str(self.lot_index.lot_path))
+            except Exception:  # noqa: BLE001 - 인식 실패는 치명적이지 않음
+                detected = None
+            if detected and detected in PRODUCTS:
+                s.product = detected
+                prod = PRODUCTS[detected]
+                if getattr(prod, "source", "") == "db":
+                    self.banner.show_message(
+                        f"디바이스 자동 인식: {prod.name}", "info", timeout_ms=2500
+                    )
         old_active = _active_product
         set_active_product(s.product)
         ensure_die_map_product()

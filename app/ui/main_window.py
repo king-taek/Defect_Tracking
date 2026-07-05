@@ -1235,6 +1235,22 @@ class MainWindow(QMainWindow):
                 config.register_devices(load_device_db(db_path))
         except Exception:  # noqa: BLE001
             self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
+        # 디바이스 DB 를 새로 반영한 뒤, 아직 빌트인 기본 제품(DEFAULT_PRODUCT)에 머물러
+        # 있으면 현재 LOT 경로에서 제품(디바이스)을 DB 시트명 기준으로 자동 인식해 프로파일을
+        # 맞춘다("DB 저장하면 알아서 읽도록"). 사용자가 특정 디바이스를 직접 고른 경우엔
+        # 그 값(≠기본)이 유지되므로 자동 인식이 덮어쓰지 않는다.
+        if s.product == config.DEFAULT_PRODUCT and self.lot_index is not None:
+            try:
+                detected, _ = config.match_product_for_path(str(self.lot_index.lot_path))
+            except Exception:  # noqa: BLE001 - 인식 실패는 치명적이지 않음
+                detected = None
+            if detected and detected in config.PRODUCTS:
+                s.product = detected
+                prod = config.PRODUCTS[detected]
+                if getattr(prod, "source", "") == "db":
+                    self.banner.show_message(
+                        f"디바이스 자동 인식: {prod.name}", "info", timeout_ms=2500
+                    )
         old_active = config._active_product
         config.set_active_product(s.product)
         config.ensure_die_map_product()
