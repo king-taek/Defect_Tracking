@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 
 # ---- UI 글자 크기(전역 스케일) ----
-# 설정의 ui_font_size 값 → 배율. 보통=현재 그대로, 크게=20% 확대.
-FONT_SCALES = {"normal": 1.0, "large": 1.2, "xlarge": 1.4}
+# 설정의 ui_font_size 값 → 배율. 보통 기준 30%씩 증가(100% / 130% / 160%).
+FONT_SCALES = {"normal": 1.0, "large": 1.3, "xlarge": 1.6}
 # 인라인 스타일(px 직접 지정) 위젯이 참조하는 현재 배율. apply_theme 에서 갱신.
 FONT_SCALE = 1.0
 
