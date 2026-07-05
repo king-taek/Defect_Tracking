@@ -10626,8 +10626,19 @@ if __name__ == "__main__":
 # =============================================================================
 # 이 배포본은 defect_tracker.py 한 파일이므로, 업데이트는 레포 전체 ZIP 전개 대신
 # GitHub main 의 single_file/defect_tracker.py 를 받아 "자기 자신"만 원자적으로 교체한다.
-# 감지(available)는 위 updater.check_update 가 version.json 의 커밋 SHA 로 판정하며,
-# 교체 성공 시 version.json 을 새 SHA 로 기록해 다음 실행부터 정확히 비교한다.
+# 버전 파일(version.json)은 항상 "이 py 파일이 있는 폴더"에만 둔다.
+_SINGLE_FILE_DIR = Path(__file__).resolve().parent  # 이 py 파일이 있는 폴더
+
+
+def app_root() -> Path:
+    """단일 파일: 버전/업데이트 기준 폴더 = 이 파일이 있는 폴더.
+
+    맨 끝에서 재정의하므로 check_update·current_sha·read_version(읽기)과 apply_update(쓰기)가
+    모두 이 폴더의 version.json 을 쓴다. 상위 폴더나 CWD 로 새지 않는다.
+    """
+    return _SINGLE_FILE_DIR
+
+
 _SINGLE_FILE_RAW_URL = (
     "https://raw.githubusercontent.com/"
     "{owner}/{repo}/{branch}/single_file/defect_tracker.py"
@@ -10639,7 +10650,7 @@ def apply_update(status, root=None, owner=UPDATE_OWNER, repo=UPDATE_REPO,
     """단일 파일 자기 교체 업데이트(레포 트리 전개 대체). 이름을 덮어써 이 정의가 쓰인다."""
     if is_frozen():
         return False, "실행파일(exe) 버전은 자동 업데이트를 지원하지 않습니다. 새 파일을 받아 교체하세요."
-    target = Path(__file__).resolve()
+    target = _SINGLE_FILE_DIR / Path(__file__).name
     try:
         if progress:
             progress("새 단일 파일 내려받는 중...")
@@ -10654,7 +10665,7 @@ def apply_update(status, root=None, owner=UPDATE_OWNER, repo=UPDATE_REPO,
         tmp.write_bytes(data)
         os.replace(tmp, target)  # 원자적 교체(같은 볼륨)
         if status.remote:
-            write_version(target.parent, status.remote)
+            write_version(_SINGLE_FILE_DIR, status.remote)  # version.json 은 이 폴더에만
         return True, "단일 파일을 최신으로 교체했습니다."
     except Exception as exc:  # noqa: BLE001 - 네트워크/IO 오류 graceful
         return False, "업데이트 실패: {}".format(exc)

@@ -139,8 +139,22 @@ def test_single_file_self_replace_update(tmp_path):
     assert target.read_bytes() == new_bytes
     assert not (tmp_path / "app").exists()
     assert not (tmp_path / "main.py").exists()
-    # 다음 실행부터 정확히 감지하도록 version.json 기록
+    # 다음 실행부터 정확히 감지하도록 version.json 기록 — 반드시 py 파일과 같은 폴더에만
     assert json.loads((tmp_path / "version.json").read_text())["commit"] == "deadbeef" * 5
+    # 한 단계 위 폴더(옛 parents[1] 버그)로 절대 새지 않는다
+    assert not (tmp_path.parent / "version.json").exists()
+
+
+def test_single_file_version_dir_is_py_folder(tmp_path):
+    """단일 파일의 버전 기준 폴더(app_root)는 py 파일이 있는 폴더여야 한다(상위/CWD 아님)."""
+    mod = _load_single_file(tmp_path)
+    assert mod.app_root() == tmp_path
+    assert mod._SINGLE_FILE_DIR == tmp_path
+    # 감지(읽기)도 이 폴더의 version.json 을 본다
+    import json
+
+    (tmp_path / "version.json").write_text(json.dumps({"commit": "LOCALSHA"}), encoding="utf-8")
+    assert mod.current_sha() == "LOCALSHA"
 
 
 def test_update_detection_via_version_json(tmp_path):
