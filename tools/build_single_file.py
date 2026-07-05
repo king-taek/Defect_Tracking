@@ -393,6 +393,47 @@ def _require_dependencies() -> None:
 _require_dependencies()'''
 
 
+_SINGLE_FILE_UPDATE = '''\
+# =============================================================================
+# 단일 파일 업데이트 정책 (생성기가 추가 — 단일 파일 전용, app/ 소스에는 없음)
+# =============================================================================
+# 이 배포본은 defect_tracker.py 한 파일이므로, 업데이트는 레포 전체 ZIP 전개 대신
+# GitHub main 의 single_file/defect_tracker.py 를 받아 "자기 자신"만 원자적으로 교체한다.
+# 감지(available)는 위 updater.check_update 가 version.json 의 커밋 SHA 로 판정하며,
+# 교체 성공 시 version.json 을 새 SHA 로 기록해 다음 실행부터 정확히 비교한다.
+_SINGLE_FILE_RAW_URL = (
+    "https://raw.githubusercontent.com/"
+    "{owner}/{repo}/{branch}/single_file/defect_tracker.py"
+).format(owner=UPDATE_OWNER, repo=UPDATE_REPO, branch=UPDATE_BRANCH)
+
+
+def apply_update(status, root=None, owner=UPDATE_OWNER, repo=UPDATE_REPO,
+                 branch=UPDATE_BRANCH, opener=urlopen, progress=None):
+    """단일 파일 자기 교체 업데이트(레포 트리 전개 대체). 이름을 덮어써 이 정의가 쓰인다."""
+    if is_frozen():
+        return False, "실행파일(exe) 버전은 자동 업데이트를 지원하지 않습니다. 새 파일을 받아 교체하세요."
+    target = Path(__file__).resolve()
+    try:
+        if progress:
+            progress("새 단일 파일 내려받는 중...")
+        req = Request(_SINGLE_FILE_RAW_URL, headers={"User-Agent": "Defect Tracker"})
+        with opener(req, timeout=60) as resp:
+            data = resp.read()
+        if not data.strip():
+            return False, "받은 파일이 비어 있습니다."
+        if progress:
+            progress("적용 중...")
+        tmp = target.with_name(target.name + ".new")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)  # 원자적 교체(같은 볼륨)
+        if status.remote:
+            write_version(target.parent, status.remote)
+        return True, "단일 파일을 최신으로 교체했습니다."
+    except Exception as exc:  # noqa: BLE001 - 네트워크/IO 오류 graceful
+        return False, "업데이트 실패: {}".format(exc)
+'''
+
+
 def build() -> str:
     modules, packages = discover()
     for pkg in packages:
@@ -476,14 +517,46 @@ def build() -> str:
         "# =============================================================================\n"
         + main_body
     )
+    parts.append(_SINGLE_FILE_UPDATE.rstrip())
     return "\n\n\n".join(parts) + "\n"
+
+
+def stamp_version(out_dir: Path) -> int:
+    """배포 폴더에 version.json({"commit": <HEAD sha>})을 기록.
+
+    자동 업데이트 감지용. 커밋·push 직후(HEAD == origin/main)에 실행해야 SHA 가
+    실제 배포본과 일치한다. version.json 은 .gitignore 대상(설치본별 파일)이며,
+    defect_tracker.py 와 함께 배포한다.
+    """
+    import json
+    import subprocess
+
+    try:
+        sha = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True, timeout=15,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"git HEAD SHA 확인 실패: {exc}", file=sys.stderr)
+        return 1
+    out_dir.mkdir(parents=True, exist_ok=True)
+    vf = out_dir / "version.json"
+    vf.write_text(json.dumps({"commit": sha}, indent=2), encoding="utf-8")
+    print(f"기록: {vf}  (commit {sha[:12]})")
+    print("주의: 커밋·push 이후에 실행해야 배포본과 SHA 가 일치합니다.")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="단일 파일 생성기")
     ap.add_argument("-o", "--output", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--check", action="store_true", help="커밋본이 최신인지만 확인")
+    ap.add_argument("--stamp-version", action="store_true",
+                    help="배포 폴더에 version.json(HEAD SHA) 기록(자동 업데이트 감지용)")
     args = ap.parse_args(argv)
+
+    if args.stamp_version:
+        return stamp_version(args.output.parent)
 
     text = build()
     if args.check:

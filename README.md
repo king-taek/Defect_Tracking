@@ -115,6 +115,12 @@ python single_file/defect_tracker.py   # 실행
 - **실행 요건**: PySide6 GUI 데스크톱 앱이므로 실행에는 여전히 Python + PySide6 가 필요합니다
   (`bootstrap.py` 로 설치). 브라우저 "웹 파이썬"(Pyodide 등)에서는 Qt 를 못 불러와 실행 불가.
 - 번들 `data/AOIDeviceDB.xlsx` 는 선택 사항이며 함께 배포되지 않습니다(없으면 내장 폴백).
+- **자동 업데이트**: 단일 파일은 레포 전체 ZIP 을 전개하지 않고, GitHub `main` 의
+  `single_file/defect_tracker.py` 를 받아 **자기 자신만 원자적으로 교체**합니다. 최신 여부는
+  파일 옆 `version.json`(`{"commit": <sha>}`)의 커밋 SHA 로 판정합니다. 배포 시 정확한 감지를
+  위해 커밋·push 직후 `python tools/build_single_file.py --stamp-version` 로 `version.json` 을
+  함께 만들어 배포하세요(없으면 첫 실행에서 한 번 "업데이트 있음"으로 뜬 뒤, 업데이트하면 자동 기록).
+- 배포 구성: `defect_tracker.py` + `bootstrap.py`(+ 선택 `version.json`).
 - **버전 갱신 순서**(app 코드 변경 시): `python tools/compute_version.py --write` →
   `python tools/build_single_file.py` → `app/__init__.py` + 산출물을 같은 커밋에 포함.
   `python tools/build_single_file.py --check` 는 커밋본이 최신인지만 확인합니다(테스트에서 강제).

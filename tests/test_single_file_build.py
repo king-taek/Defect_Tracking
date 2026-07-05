@@ -105,6 +105,58 @@ def test_mainwindow_smoke(tmp_path):
     app.processEvents()
 
 
+class _FakeResp:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_single_file_self_replace_update(tmp_path):
+    """단일 파일 apply_update 는 레포 ZIP 전개가 아니라 자기 자신만 교체해야 한다."""
+    import json
+
+    mod = _load_single_file(tmp_path)
+    target = tmp_path / "defect_tracker.py"
+    new_bytes = b"# NEW SINGLE FILE CONTENT\nprint('hi')\n"
+
+    def fake_opener(req, timeout=0):
+        return _FakeResp(new_bytes)
+
+    status = mod.UpdateStatus(available=True, local=None, remote="deadbeef" * 5, method="zip")
+    ok, msg = mod.apply_update(status, opener=fake_opener)
+    assert ok, msg
+    # 실행 중인 파일(자기 자신)만 교체, 레포 트리는 전개되지 않음
+    assert target.read_bytes() == new_bytes
+    assert not (tmp_path / "app").exists()
+    assert not (tmp_path / "main.py").exists()
+    # 다음 실행부터 정확히 감지하도록 version.json 기록
+    assert json.loads((tmp_path / "version.json").read_text())["commit"] == "deadbeef" * 5
+
+
+def test_update_detection_via_version_json(tmp_path):
+    """version.json 의 커밋 SHA 로 최신/새버전을 정확히 판정(오탐 없음)."""
+    import json
+
+    mod = _load_single_file(tmp_path)
+    (tmp_path / "version.json").write_text(json.dumps({"commit": "SAME"}), encoding="utf-8")
+
+    def opener_for(remote_sha):
+        def opener(req, timeout=0):
+            return _FakeResp(json.dumps({"sha": remote_sha}).encode())
+        return opener
+
+    assert mod.check_update(opener=opener_for("SAME")).available is False   # 최신
+    assert mod.check_update(opener=opener_for("OTHER")).available is True   # 새 버전
+
+
 def test_committed_artifact_not_stale():
     """커밋된 단일 파일이 재생성 결과와 바이트 동일해야 함(표류 방지)."""
     committed = bsf.DEFAULT_OUT
