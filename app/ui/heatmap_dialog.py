@@ -392,14 +392,20 @@ class HeatmapDialog(QDialog):
         return any((r := m.for_layer(lyr)) and r.is_match for lyr in self._compare_layers)
 
     def _all_defect_entries(self) -> list[tuple[int, object]]:
-        """체크된 layer 의 모든 좌표 OK defect(맵 density 용). 기준 특별취급 없음."""
+        """체크된 layer 의 좌표 OK defect(맵 density 용). 기준 특별취급 없음.
+
+        근접 중복(같은 wafer·die·거리<cluster_radius) defect 은 한 클러스터로 묶어
+        밀도에는 1개(대표)로만 계산한다.
+        """
         out: list[tuple[int, object]] = []
         k = 0
         for lyr in self._selected_layers():
-            for rec in self._records_by_layer.get(lyr, []):
-                if not getattr(rec, "ok", False) or not self._wafer_ok(rec):
-                    continue
-                out.append((k, rec))
+            recs = [
+                rec for rec in self._records_by_layer.get(lyr, [])
+                if getattr(rec, "ok", False) and self._wafer_ok(rec)
+            ]
+            for cl in cluster_records(recs, self._cluster_radius):
+                out.append((k, cl.representative))
                 k += 1
         return out
 

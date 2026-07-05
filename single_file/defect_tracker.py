@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.68   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.69   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.68"
+__version__ = "1.33.69"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -8428,14 +8428,20 @@ class HeatmapDialog(QDialog):
         return any((r := m.for_layer(lyr)) and r.is_match for lyr in self._compare_layers)
 
     def _all_defect_entries(self) -> list[tuple[int, object]]:
-        """체크된 layer 의 모든 좌표 OK defect(맵 density 용). 기준 특별취급 없음."""
+        """체크된 layer 의 좌표 OK defect(맵 density 용). 기준 특별취급 없음.
+
+        근접 중복(같은 wafer·die·거리<cluster_radius) defect 은 한 클러스터로 묶어
+        밀도에는 1개(대표)로만 계산한다.
+        """
         out: list[tuple[int, object]] = []
         k = 0
         for lyr in self._selected_layers():
-            for rec in self._records_by_layer.get(lyr, []):
-                if not getattr(rec, "ok", False) or not self._wafer_ok(rec):
-                    continue
-                out.append((k, rec))
+            recs = [
+                rec for rec in self._records_by_layer.get(lyr, [])
+                if getattr(rec, "ok", False) and self._wafer_ok(rec)
+            ]
+            for cl in cluster_records(recs, self._cluster_radius):
+                out.append((k, cl.representative))
                 k += 1
         return out
 

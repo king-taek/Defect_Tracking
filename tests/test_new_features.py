@@ -404,6 +404,31 @@ def test_heatmap_subdivide_small_die_count(app):
     assert dlg._map._subdivide is True
 
 
+def test_heatmap_density_counts_clusters_as_one(app):
+    """근접 중복(클러스터) defect 은 밀도에서 대표 1개로만 계산된다."""
+    from app.ui.heatmap_dialog import HeatmapDialog
+    from app.models import BaseDefectMatches, DefectRecord
+    from pathlib import Path
+
+    def mk(name, col, row, x, y):
+        base = DefectRecord(image_path=Path(name), wafer_id="W1", layer="LYA4",
+                            layer_folder="LYA4", col=col, row=row, x=x, y=y)
+        return BaseDefectMatches(base=base)
+
+    # die(2,3) 에 거리<50 근접 3개(→1 클러스터) + die(4,4) 단독 1개(→1 클러스터)
+    matches = [
+        mk("/a.jpg", 2, 3, 0, 0), mk("/b.jpg", 2, 3, 10, 10),
+        mk("/c.jpg", 2, 3, 20, 20), mk("/d.jpg", 4, 4, 0, 0),
+    ]
+    rbl = {"LYA4": [m.base for m in matches]}
+    s = AppSettings()
+    s.cluster_radius = 50.0
+    dlg = HeatmapDialog(matches, "LYA4", [], None, lambda idxs: None, s,
+                        records_by_layer=rbl)
+    # raw defect 4개지만 밀도 합은 클러스터 2개여야 한다(근접 3개는 1로 계산).
+    assert sum(dlg._map._density.values()) == 2
+
+
 # ---- 8차: 히트맵 모드/드래그/클러스터 · 폴더트리 · 출력 · 도움말 ----
 
 def _make_heatmap(win):
