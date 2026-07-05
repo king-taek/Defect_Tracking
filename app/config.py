@@ -197,6 +197,9 @@ UPDATE_BRANCH = "main"
 # 기본 허용 오차 (Section 8.3) - 좌표 단위는 파일/INI 값 그대로 사용
 DEFAULT_TOLERANCE = 100.0
 
+# defect 근접 클러스터링 거리(같은 die 안에서 이 값 미만이면 하나로 묶음). 설정에서 조절.
+DEFAULT_CLUSTER_RADIUS = 50.0
+
 # 상단 썸네일은 사진 중앙 일부 구간만 확대 (Section 8.6) - 중앙 비율
 # 0.20 = 중앙 20% 를 잘라 ≈5× 확대(고정).
 THUMBNAIL_CENTER_RATIO = 0.20
@@ -271,6 +274,7 @@ class AppSettings:
     last_lot_folder: str = ""
     output_folder: str = ""  # 비어 있으면 workspace/exports 사용
     tolerance: float = DEFAULT_TOLERANCE
+    cluster_radius: float = DEFAULT_CLUSTER_RADIUS  # defect 근접 클러스터링 거리(설정에서 조절)
     base_layer: str = ""
     compare_layers: list[str] = field(default_factory=list)
     recent_folders: list[str] = field(default_factory=list)  # 최근 연 자재 폴더(최대 5)

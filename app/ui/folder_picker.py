@@ -240,7 +240,7 @@ class FolderPickerDialog(QDialog):
         right = QVBoxLayout()
         right.setSpacing(6)
         self.ed_filter = QLineEdit()
-        self.ed_filter.setPlaceholderText("이 폴더 안에서 이름으로 거르기…")
+        self.ed_filter.setPlaceholderText("이 폴더 안에서 이름으로 찾기…")
         self.ed_filter.setClearButtonEnabled(True)
         self.ed_filter.textChanged.connect(self._apply_filter)
         right.addWidget(self.ed_filter)
@@ -715,3 +715,20 @@ class FolderPickerDialog(QDialog):
         if kind == "unknown":
             return str(target)
         return ""  # too_high / none
+
+    def _resolved_kind(self) -> str:
+        """마지막 후보의 구조 판정(material/layer/wafer/too_high/unknown)."""
+        target = self._candidate or self._cur
+        if self._valid_for == target and self._valid_kind:
+            return self._valid_kind
+        kind, _ = scanner.classify_selection(target)
+        return kind
+
+    def selected_wafer_folder(self) -> str:
+        """wafer 폴더를 직접 골랐다면 그 폴더 경로, 아니면 빈 문자열.
+
+        호출 측이 '개별 wafer 만 볼지' 를 물어보고, 아니면 selected_path()(상위 LOT)로
+        회귀할 수 있게 한다.
+        """
+        target = self._candidate or self._cur
+        return str(target) if self._resolved_kind() == "wafer" else ""

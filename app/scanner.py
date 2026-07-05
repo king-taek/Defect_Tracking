@@ -140,26 +140,56 @@ def _image_depth(root: Path, max_depth: int = 4, breadth: int = 24) -> Optional[
     return None
 
 
+def _child_dirs(root: Path, breadth: int = 24) -> list[Path]:
+    """root 의 바로 아래 하위 디렉터리 목록(breadth 로 제한, 네트워크 대비)."""
+    try:
+        with os.scandir(root) as it:
+            dirs = [Path(e.path) for e in it if e.is_dir()]
+    except OSError:
+        return []
+    return dirs[:breadth]
+
+
+def _has_child_dir_with_images(root: Path, breadth: int = 24) -> bool:
+    """root 의 바로 아래 하위 폴더(=wafer 후보) 중 하나라도 이미지를 직접 담고 있는가."""
+    return any(_dir_has_image(c) for c in _child_dirs(root, breadth))
+
+
+def _has_grandchild_dir_with_images(root: Path, breadth: int = 24) -> bool:
+    """root/자식(layer)/손자(wafer)/이미지 구조가 있는가(= root 가 자재(LOT)인가).
+
+    자식(layer) 폴더 중 하나라도 '이미지를 직접 담은 하위 폴더(wafer)'를 가지면 True.
+    """
+    return any(_has_child_dir_with_images(c, breadth) for c in _child_dirs(root, breadth))
+
+
 def classify_selection(path: str | Path) -> tuple[str, Optional[Path]]:
-    """선택한 폴더가 자재 구조(자재/layer/wafer/이미지)에서 어느 레벨인지 판별.
+    """선택한 폴더가 자재 구조(LOT/layer/wafer/사진)에서 어느 레벨인지 **구조로** 판별.
+
+    LOT 폴더의 정의: `LOT/layer/wafer/사진` — 사진이 정확히 2단계 아래(wafer 폴더)에
+    있어야 자재(LOT)로 인정한다. 얕은 위치(LOT·layer 폴더)에 흔히 섞여 있는 요약/맵
+    이미지 같은 잡파일에 흔들리지 않도록 **가장 깊은 구조가 우선**하도록 판정한다.
 
     Returns:
         (kind, material_path) — kind 는
-          'material'(정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 자재로 보정 가능) /
+          'material'(LOT 정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 자재로 보정) /
           'too_high'(device 등 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
-        material_path 는 layer/wafer/material 일 때 추정 자재 폴더, 그 외 None.
+        material_path 는 layer/wafer/material 일 때 추정 자재(LOT) 폴더, 그 외 None.
     """
     p = Path(path)
-    depth = _image_depth(p)
-    if depth is None:
-        return ("unknown", None)
-    if depth == 2:
+    # 깊은 구조 우선: LOT/layer/wafer/사진(손자에 이미지) → 자재(LOT).
+    if _has_grandchild_dir_with_images(p):
         return ("material", p)
-    if depth == 1:
+    # p/wafer/사진(자식이 이미지 직접 보유) → p 는 layer, 상위가 LOT.
+    if _has_child_dir_with_images(p):
         return ("layer", p.parent)
-    if depth == 0:
+    # p/사진(직접 보유) → p 는 wafer, 상위상위가 LOT.
+    if _dir_has_image(p):
         return ("wafer", p.parent.parent)
-    return ("too_high", None)  # depth >= 3
+    # 여기까지 아니지만 더 깊은 곳에 이미지가 있으면 상위(device 등) → 재선택 필요.
+    if _image_depth(p) is not None:
+        return ("too_high", None)
+    return ("unknown", None)
 
 
 def _merge_ini_sections(ini_paths: list[Path]) -> dict[str, dict[str, str]]:

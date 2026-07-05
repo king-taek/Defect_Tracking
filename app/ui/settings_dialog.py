@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -86,6 +87,19 @@ class SettingsDialog(QDialog):
         # 시작 시 DB 경로가 있으면 미리 로드해 제품 목록을 채운다.
         if self._settings.device_db_path:
             self._load_db(self._settings.device_db_path, select=self._settings.product)
+
+        # defect 근접 클러스터링 거리 — 같은 die 안에서 이 값 미만이면 하나로 묶는다.
+        self.spn_cluster = QDoubleSpinBox()
+        self.spn_cluster.setRange(0.0, 100000.0)
+        self.spn_cluster.setDecimals(1)
+        self.spn_cluster.setSingleStep(5.0)
+        self.spn_cluster.setValue(
+            getattr(self._settings, "cluster_radius", config.DEFAULT_CLUSTER_RADIUS)
+        )
+        self.spn_cluster.setToolTip(
+            "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어 대표 1장+‘+n’ 으로 봅니다."
+        )
+        form.addRow("defect 클러스터 거리", self.spn_cluster)
 
         self.chk_update = QCheckBox("시작할 때 업데이트 확인")
         self.chk_update.setChecked(self._settings.auto_update_check)
@@ -322,6 +336,7 @@ class SettingsDialog(QDialog):
         self._settings.output_folder = self.ed_output.text().strip()
         self._settings.log_dir = self.ed_log_dir.text().strip()
         self._settings.dev_mode = self.btn_dev.isChecked()
+        self._settings.cluster_radius = self.spn_cluster.value()
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
         self._settings.device_db_path = self.ed_device_db.text().strip()

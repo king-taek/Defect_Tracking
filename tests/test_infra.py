@@ -112,6 +112,26 @@ def test_classify_selection_levels(tmp_path):
     assert scanner.classify_selection(tmp_path / "EMPTY") == ("unknown", None)
 
 
+def test_classify_selection_ignores_stray_shallow_images(tmp_path):
+    """LOT/layer 폴더에 요약/맵 잡이미지가 섞여 있어도 구조로 올바르게 판별한다.
+
+    LOT 정의는 LOT/layer/wafer/사진. 얕은 위치의 잡파일에 흔들려 wafer/layer 로
+    오판(→ 상위 잘못된 폴더로 이동)하면 안 된다.
+    """
+    root = tmp_path / "DEVICE" / "MAT"
+    wafer = root / "LAYER" / "WAFER"
+    wafer.mkdir(parents=True)
+    (wafer / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    # LOT 루트와 layer 폴더에 잡이미지(요약/맵)를 흩뿌린다.
+    (root / "summary.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    (root / "LAYER" / "overview.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    # 잡이미지가 있어도 LOT 은 material, layer 는 layer, wafer 는 wafer 로 판별.
+    assert scanner.classify_selection(root) == ("material", root)
+    assert scanner.classify_selection(root / "LAYER") == ("layer", root)
+    assert scanner.classify_selection(root / "LAYER" / "WAFER") == ("wafer", root)
+
+
 def test_product_profiles_default_and_switch():
     from app import config
     from app.config import ProductConfig

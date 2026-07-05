@@ -538,6 +538,18 @@ def test_settings_dialog_dev_mode_toggle(app, tmp_path):
     assert dlg.updated_settings().dev_mode is False
 
 
+def test_settings_dialog_cluster_radius(app, tmp_path):
+    """defect 클러스터 거리 스핀박스가 설정을 읽고/쓴다."""
+    from app.config import AppSettings
+    from app.ui.settings_dialog import SettingsDialog
+
+    s = AppSettings(workspace=str(tmp_path / "ws"), cluster_radius=42.0)
+    dlg = SettingsDialog(s, current_lot=None)
+    assert dlg.spn_cluster.value() == 42.0
+    dlg.spn_cluster.setValue(75.0)
+    assert dlg.updated_settings().cluster_radius == 75.0
+
+
 def test_stop_scan_hides_progress(win):
     # 스캔 진행 상태를 흉내내고 _stop_scan 이 진행바/버튼을 숨기고 토큰을 올리는지
     win.progress.setVisible(True)

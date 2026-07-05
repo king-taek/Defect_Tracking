@@ -116,7 +116,7 @@ class MatchWorker(QRunnable):
     """
 
     def __init__(self, base_records, compare_layers, records_by_layer, tolerance,
-                 index=None, fail_index=None):
+                 index=None, fail_index=None, cluster_radius=None):
         super().__init__()
         self.base_records = base_records
         self.compare_layers = compare_layers
@@ -124,6 +124,7 @@ class MatchWorker(QRunnable):
         self.tolerance = tolerance
         self.index = index
         self.fail_index = fail_index
+        self.cluster_radius = cluster_radius
         self.signals = MatchSignals()
 
     @Slot()
@@ -136,7 +137,10 @@ class MatchWorker(QRunnable):
                 self.base_records, self.compare_layers, self.records_by_layer,
                 self.tolerance, index=self.index, fail_index=self.fail_index,
             )
-            matches = collapse_matches(all_matches)
+            if self.cluster_radius is not None:
+                matches = collapse_matches(all_matches, self.cluster_radius)
+            else:
+                matches = collapse_matches(all_matches)
             self.signals.finished.emit(matches, offsets)
         except Exception as exc:  # noqa: BLE001 - 워커 예외는 UI 로 전달
             _log.exception("매칭 워커 실패")

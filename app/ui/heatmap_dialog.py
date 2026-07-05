@@ -312,6 +312,10 @@ class HeatmapDialog(QDialog):
         self._records_by_layer = records_by_layer or {}
         # 교차 매칭(전체 defect 모드)·매칭 판정용 허용오차.
         self._tolerance = getattr(settings, "tolerance", None) or config.DEFAULT_TOLERANCE
+        # defect 근접 클러스터링 거리(설정에서 조절).
+        self._cluster_radius = (
+            getattr(settings, "cluster_radius", None) or config.DEFAULT_CLUSTER_RADIUS
+        )
         self.setWindowTitle("Defect 히트맵")
         self.setMinimumSize(900, 600)
 
@@ -482,6 +486,21 @@ class HeatmapDialog(QDialog):
         self.lbl_map.setStyleSheet("font-size:10px;")
         self.lbl_map.setWordWrap(True)
         lay.addWidget(self.lbl_map)
+        # 여러 다이 선택 토글 — 웨이퍼 맵 바로 아래에 둔다(드래그 사각 선택은 이 토글과
+        # 무관하게 항상 가능).
+        self.btn_multi = QPushButton("여러 다이 선택: OFF")
+        self.btn_multi.setObjectName("mini")
+        self.btn_multi.setCheckable(True)
+        self.btn_multi.setToolTip(
+            "켜면 클릭이 여러 die 를 누적 토글합니다.\n"
+            "(끄면 클릭=한 개 선택. 드래그 사각 다중 선택은 항상 가능합니다.)"
+        )
+        self.btn_multi.toggled.connect(self._on_multi_toggled)
+        multi_row = QHBoxLayout()
+        multi_row.setContentsMargins(0, 0, 0, 0)
+        multi_row.addWidget(self.btn_multi, 0)
+        multi_row.addStretch(1)
+        lay.addLayout(multi_row)
         return panel
 
     def _build_list_panel(self) -> QWidget:
@@ -494,16 +513,6 @@ class HeatmapDialog(QDialog):
         self.lbl_detail = QLabel("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
         self.lbl_detail.setObjectName("dim")
         head.addWidget(self.lbl_detail, 1)
-        # 여러 다이 선택 토글(드래그 사각 선택은 이 토글과 무관하게 항상 가능).
-        self.btn_multi = QPushButton("여러 다이 선택: OFF")
-        self.btn_multi.setObjectName("mini")
-        self.btn_multi.setCheckable(True)
-        self.btn_multi.setToolTip(
-            "켜면 클릭이 여러 die 를 누적 토글합니다.\n"
-            "(끄면 클릭=한 개 선택. 드래그 사각 다중 선택은 항상 가능합니다.)"
-        )
-        self.btn_multi.toggled.connect(self._on_multi_toggled)
-        head.addWidget(self.btn_multi, 0)
         self.btn_add_all = QPushButton("이 위치 출력에 넣기")
         self.btn_add_all.setObjectName("mini")
         self.btn_add_all.setToolTip("선택 위치의 매칭된 기준 defect 을 출력 트레이에 담습니다.")
@@ -673,7 +682,10 @@ class HeatmapDialog(QDialog):
         by_layer: dict[str, list] = defaultdict(list)
         for lyr, rec in self._records_at_selection():
             by_layer[lyr].append(rec)
-        layer_to_clusters = {lyr: cluster_records(recs) for lyr, recs in by_layer.items()}
+        layer_to_clusters = {
+            lyr: cluster_records(recs, self._cluster_radius)
+            for lyr, recs in by_layer.items()
+        }
         groups = cross_layer_groups(layer_to_clusters, self._tolerance)
         matched = [g for g in groups if len(g) >= 2]
         individual = [g for g in groups if len(g) == 1]
@@ -709,7 +721,8 @@ class HeatmapDialog(QDialog):
         flow = FlowLayout(host, margin=0, h_spacing=8, v_spacing=8)
         for g in groups:
             (layer, cluster), = g.items()
-            flow.addWidget(self._clustered_thumb(cluster, layer, layer == self._base_layer))
+            # 조사 모드에는 기준(★)이 없다 — 항상 일반 배지로 표시.
+            flow.addWidget(self._clustered_thumb(cluster, layer, False))
         outer.addWidget(host)
         return box
 
@@ -786,7 +799,8 @@ class HeatmapDialog(QDialog):
 
         for lyr in self._selected_layers():
             if lyr in group:
-                lay.addWidget(self._clustered_thumb(group[lyr], lyr, lyr == self._base_layer))
+                # 조사 모드에는 기준(★)이 없다 — 항상 일반 배지로 표시.
+                lay.addWidget(self._clustered_thumb(group[lyr], lyr, False))
         lay.addStretch()
         return row
 

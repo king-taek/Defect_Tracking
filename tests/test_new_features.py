@@ -404,6 +404,28 @@ def test_heatmap_no_base_all_layer_checkboxes(win, app):
     assert "ON" in dlg.btn_multi.text()
 
 
+def _ancestor_ids(w):
+    out, p = [], w.parent()
+    while p is not None:
+        out.append(id(p))
+        p = p.parent()
+    return set(out)
+
+
+def test_heatmap_multi_button_below_map(win, app):
+    """여러 다이 선택 버튼이 (리스트 패널이 아니라) 웨이퍼 맵과 같은 패널 아래에 있다."""
+    dlg = _make_heatmap(win)
+    # btn_multi 와 맵 위젯이 같은 패널(맵 패널)을 공통 조상으로 가진다.
+    assert _ancestor_ids(dlg.btn_multi) & _ancestor_ids(dlg._map)
+    # 상세(리스트) 라벨과는 패널을 공유하지 않는다.
+    assert not (_ancestor_ids(dlg.btn_multi) & {id(dlg.lbl_detail)})
+
+
+def test_heatmap_subdivide_is_5x5(app):
+    from app import heatmap
+    assert (heatmap.SUB_COLS, heatmap.SUB_ROWS) == (5, 5)  # 25 분할
+
+
 def test_heatmap_uncheck_layer_reduces_map_entries(win, app):
     # 조사 모드: 맵 density 는 체크된 layer 전체 defect. layer 를 끄면 entries 가 준다.
     dlg = _make_heatmap(win)
@@ -730,10 +752,13 @@ def test_heatmap_detail_thumb_worker_retained(win, app):
     # 워커가 실행 중 참조로 보관된다(GC 방지).
     assert len(dlg._active_thumb_workers) >= 1
     # 완료까지 대기 → 워커가 done 후 참조 해제 + 썸네일 holder 가 '로딩…' 이 아님.
-    for _ in range(30):
+    # (백그라운드 콜드 캐시 워밍은 부하에 따라 시간이 들쭉날쭉하므로 넉넉히 폴링한다.)
+    for _ in range(120):
         QTest.qWait(50)
         if not dlg._active_thumb_workers:
             break
+    for _ in range(5):  # 마지막 큐 이벤트 flush
+        QCoreApplication.processEvents()
     assert dlg._active_thumb_workers == set()  # done 시 해제됨
     texts = {t.holder.text() for t in dlg._pending_thumbs}
     assert "로딩…" not in texts  # 모두 채워짐(또는 '이미지 없음')
@@ -771,3 +796,44 @@ def test_folder_picker_scan_root_input(app, tmp_path):
     dlg._apply_scan_root()
     assert s.scan_root_path.endswith("Other")
     assert "Other" in dlg.sidebar.topLevelItem(0).text(0)
+
+
+def test_folder_picker_exposes_wafer_selection(app, tmp_path):
+    """wafer 폴더를 고르면 selected_wafer_folder() 로 노출되고, selected_path() 는 상위 LOT."""
+    from app.ui.folder_picker import FolderPickerDialog
+
+    wafer = tmp_path / "LOT" / "LAYER" / "WAFER"
+    wafer.mkdir(parents=True)
+    (wafer / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    s = AppSettings(workspace=str(tmp_path / "ws"))
+    dlg = FolderPickerDialog(s, str(tmp_path / "LOT"))
+    dlg._candidate = wafer
+    dlg._valid_for = None  # 캐시 무시 → classify 재판정
+    assert dlg.selected_wafer_folder() == str(wafer)
+    assert dlg.selected_path() == str(tmp_path / "LOT")  # 보정된 상위 LOT
+
+
+def test_wafer_filter_limits_base_to_one_wafer(win, app):
+    """wafer 필터가 걸리면 기준 defect(=매치)이 그 wafer 로만 한정된다."""
+    from PySide6.QtTest import QTest
+
+    all_wafers = {m.base.wafer_id for m in win.matches}
+    if len(all_wafers) < 2:
+        return  # 샘플에 wafer 가 하나뿐이면 스킵
+    target = sorted(all_wafers)[0]
+    win._wafer_filter = target
+    win._rebuild_all()
+    for _ in range(80):
+        QTest.qWait(50)
+        if win.matches and all(m.base.wafer_id == target for m in win.matches):
+            break
+    assert win.matches
+    assert {m.base.wafer_id for m in win.matches} == {target}
+    # 필터 해제 후 전체로 복원.
+    win._wafer_filter = None
+    win._rebuild_all()
+    for _ in range(80):
+        QTest.qWait(50)
+        if {m.base.wafer_id for m in win.matches} == all_wafers:
+            break
+    assert {m.base.wafer_id for m in win.matches} == all_wafers

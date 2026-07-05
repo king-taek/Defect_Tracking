@@ -1,7 +1,7 @@
 """히트맵 순수 로직 — defect 밀도 격자 구성과 die 하위셀(subcell) 분할.
 
 UI(팝업)와 분리해 단위 테스트로 검증한다. 웨이퍼맵에 defect 위치를 표시/클릭하기 위한
-집계와, die 개수가 적을 때(50개 미만) 각 die 를 4×5(20) 하위셀로 나눠 die 내부 local
+집계와, die 개수가 적을 때(50개 미만) 각 die 를 5×5(25) 하위셀로 나눠 die 내부 local
 좌표(x,y)로 defect 을 구분 배치하는 매핑을 제공한다(항목 4·5).
 """
 
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# die 하위셀 격자(항목 5): die 가 클 때 die 내부를 4열×5행(20칸)으로 나눈다.
-SUB_COLS = 4
+# die 하위셀 격자(항목 5): die 가 클 때 die 내부를 5열×5행(25칸)으로 나눈다.
+SUB_COLS = 5
 SUB_ROWS = 5
 # die 개수가 이 값 미만이면 하위셀 분할을 적용한다.
 SUBDIVIDE_THRESHOLD = 50

@@ -85,7 +85,7 @@ class ClusterMembersPopup(QDialog):
         self.setMinimumWidth(520)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
-        cap = QLabel("거리 50 미만으로 하나로 묶인 defect (클릭=원본)")
+        cap = QLabel("근접해 하나로 묶인 defect (클릭=원본)")
         cap.setObjectName("dim")
         outer.addWidget(cap)
         host = QWidget()
@@ -132,7 +132,7 @@ class ClusteredThumb(QWidget):
         if cluster.extra_count > 0:
             more = QPushButton(f"+{cluster.extra_count}", holder)
             more.setObjectName("mini")
-            more.setToolTip("이 자리에 근접(<50)해 하나로 묶인 defect 을 모두 봅니다.")
+            more.setToolTip("이 자리에 근접해 하나로 묶인 defect 을 모두 봅니다.")
             more.setCursor(Qt.PointingHandCursor)
             more.adjustSize()
             more.move(5, holder.height() - more.height() - 5)

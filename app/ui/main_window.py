@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self._scan_worker: Optional[ScanWorker] = None  # 진행 중 스캔(중단용)
         self._scan_token = 0  # stale 스캔/썸네일 결과 무시용
         self._match_token = 0  # stale 매칭(중첩 요청) 결과 무시용
+        self._wafer_filter: Optional[str] = None  # 특정 wafer 만 보기(wafer 폴더 선택 시)
         self._exporting = False  # Excel 출력 진행 중(중복 방지)
         # 매칭 인덱스 캐시(비교 layer 집합이 같으면 허용오차만 바뀔 때 재사용)
         self._match_sig: object = None
@@ -342,8 +343,31 @@ class MainWindow(QMainWindow):
         dlg = FolderPickerDialog(self.settings, start, self)
         if dlg.exec():
             folder = dlg.selected_path()
+            wafer_folder = dlg.selected_wafer_folder()
             if folder:
-                self._open_folder(folder)
+                if wafer_folder:
+                    self._open_wafer_selection(wafer_folder, folder)
+                else:
+                    self._open_folder(folder)
+
+    def _open_wafer_selection(self, wafer_folder: str, lot: str) -> None:
+        """wafer 폴더를 골랐을 때: 개별 wafer 만 볼지 물어보고, 아니면 LOT 로 회귀한다."""
+        from PySide6.QtWidgets import QMessageBox
+
+        wafer_id = Path(wafer_folder).name
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("wafer 폴더 선택")
+        box.setText(f"wafer 폴더 ‘{wafer_id}’ 를 선택했습니다.\n개별 wafer 의 매칭 정보를 볼까요?")
+        box.setInformativeText("‘전체 LOT 보기’를 누르면 상위 LOT 폴더로 이동합니다.")
+        btn_wafer = box.addButton("이 wafer 만 보기", QMessageBox.YesRole)
+        box.addButton("전체 LOT 보기", QMessageBox.NoRole)
+        box.setDefaultButton(btn_wafer)
+        box.exec()
+        if box.clickedButton() is btn_wafer:
+            self.load_lot(lot, wafer_filter=wafer_id)
+        else:
+            self.load_lot(lot)  # 잘못 고른 경우 → LOT 자동 회귀
 
     def _open_folder(self, folder: str) -> None:
         """선택 폴더의 구조 레벨을 판별해 자재 폴더로 보정하거나 재선택을 안내한다.
@@ -412,10 +436,12 @@ class MainWindow(QMainWindow):
                     f"디바이스 자동 인식: {prod.name}", "info", timeout_ms=2500
                 )
 
-    def load_lot(self, folder: str) -> None:
+    def load_lot(self, folder: str, wafer_filter: Optional[str] = None) -> None:
         # 2차 원본 보호(Section 1.1): 캐시/결과 작업공간이 이 LOT 내부면 차단한다.
         if not self._verify_workspace_outside(folder):
             return
+        # 특정 wafer 만 보기(wafer 폴더를 골라 '이 wafer 만 보기' 선택 시). 없으면 전체.
+        self._wafer_filter = wafer_filter
 
         # 디바이스 자동 인식(스캔 전): 좌표 변환·die 배치를 올바른 제품으로 맞춘다.
         self._auto_select_product(folder)
@@ -653,6 +679,22 @@ class MainWindow(QMainWindow):
         self._base_records_raw = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
+        # 특정 wafer 만 보기: 기준 defect 을 그 wafer 로 한정(매칭은 같은 wafer 안에서만
+        # 일어나므로 비교 layer 는 그대로 두어도 그 wafer 매치만 나온다).
+        if self._wafer_filter:
+            only = [r for r in self._base_records_raw if r.wafer_id == self._wafer_filter]
+            if only:
+                self._base_records_raw = only
+                self.banner.show_message(
+                    f"개별 wafer ‘{self._wafer_filter}’ 만 표시합니다.", "info"
+                )
+            else:
+                # 그 wafer 에 기준 defect 이 없으면 전체로 회귀.
+                self.banner.show_message(
+                    f"wafer ‘{self._wafer_filter}’ 에 기준 defect 이 없어 전체 LOT 를 표시합니다.",
+                    "warn",
+                )
+                self._wafer_filter = None
         if not self._base_records_raw:
             self.matches, self.base_records, self._view_cache = [], [], None
             self._update_match_summary()
@@ -722,6 +764,7 @@ class MainWindow(QMainWindow):
         worker = MatchWorker(
             self._base_records_raw, compare_layers, rbl, tolerance,
             index=idx, fail_index=fidx,
+            cluster_radius=getattr(self.settings, "cluster_radius", None),
         )
         worker.signals.finished.connect(
             lambda ms, offs, t=token, cb=after: self._on_match_done(ms, offs, t, cb)
@@ -1171,6 +1214,7 @@ class MainWindow(QMainWindow):
         current_lot = str(self.lot_index.lot_path) if self.lot_index else None
         old_workspace = self.settings.workspace
         old_output = self.settings.output_folder
+        old_cluster_radius = getattr(self.settings, "cluster_radius", None)
         update_available = bool(self._update_status and self._update_status.available)
         dlg = SettingsDialog(
             self.settings, current_lot, self, update_available=update_available
@@ -1222,6 +1266,9 @@ class MainWindow(QMainWindow):
         if config.dev_mode(s):
             from app import logging_config
             logging_config.setup_logging(s.log_dir_path)
+        # defect 클러스터 거리가 바뀌면 근접 묶음이 달라지므로 재매칭한다.
+        if getattr(s, "cluster_radius", None) != old_cluster_radius and self._base_records_raw:
+            self._rematch(rebuild_grid=True)
         self.banner.show_message("설정을 저장했습니다.", "success")
 
     # ------------------------------------------------------------ 업데이트
