@@ -106,7 +106,6 @@ class SettingsDialog(QDialog):
         self.cmb_font = NoScrollComboBox()
         self.cmb_font.addItem("보통", "normal")
         self.cmb_font.addItem("크게", "large")
-        self.cmb_font.addItem("아주 크게", "xlarge")
         fi = self.cmb_font.findData(getattr(self._settings, "ui_font_size", "normal"))
         self.cmb_font.setCurrentIndex(fi if fi >= 0 else 0)
         self.cmb_font.setToolTip(
