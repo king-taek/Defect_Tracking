@@ -35,9 +35,15 @@ def test_compute_version_format():
     assert major == 1
     assert minor >= 0 and patch >= 1
     v = compute_version.compute_version()
-    assert v == f"1.{minor}.{patch}"
-    # 정규식 치환이 가능한 형식인지(따옴표 포함) 간단 확인
+    # 형식: 1.x.y
     assert v.count(".") == 2
+    parts = tuple(int(x) for x in v.split("."))
+    assert parts[0] == 1
+    # 단조 증가 보장: 계산값 이상이며, HEAD 버전이 있으면 그보다 크다(하락 방지).
+    assert parts >= (1, minor, patch)
+    head = compute_version._head_version()
+    if head is not None:
+        assert parts > head
 
 
 def test_compute_version_write(tmp_path, monkeypatch):

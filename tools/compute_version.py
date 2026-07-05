@@ -7,6 +7,12 @@
   - PATCH = 전체 커밋 수. 워킹트리에 커밋되지 않은 변경이 있으면 +1
             (지금 만들려는 커밋을 미리 반영 → 커밋 후 실제 커밋 수와 일치)
 
+**단조 증가 보장(하락 방지):** git 이력 재작성(예: 기밀 스크럽)으로 커밋 수가 줄어
+계산값이 마지막 커밋(HEAD)의 버전보다 낮아질 수 있다. 이때는 버전이 내려가지 않도록
+HEAD 버전의 PATCH 를 +1 해 **항상 커밋마다 올라가게** 한다. 이력이 다시 자라 계산값이
+HEAD 를 넘어서면 자연스럽게 계산값을 쓴다. (HEAD 기준이라 같은 커밋에서 여러 번 실행해도
+결과가 동일 — 멱등)
+
 런타임이 아니라 **커밋 직전**에 실행해 ``app/__init__.py`` 의 ``__version__`` 을 갱신한다
 (시작 속도에 영향 없음). CLAUDE.md 규칙으로 세션이 바뀌어도 매번 자동 반영된다.
 
@@ -85,8 +91,28 @@ def compute_parts() -> tuple[int, int, int]:
     return 1, minor, patch
 
 
+_VERSION_NUM_RE = re.compile(r'__version__\s*=\s*["\'](\d+)\.(\d+)\.(\d+)["\']')
+
+
+def _head_version() -> tuple[int, int, int] | None:
+    """마지막 커밋(HEAD)의 app/__init__.py 에 박힌 버전(단조 증가 기준선)."""
+    try:
+        text = _git("show", "HEAD:app/__init__.py")
+    except subprocess.CalledProcessError:
+        return None
+    m = _VERSION_NUM_RE.search(text)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
 def compute_version() -> str:
-    major, minor, patch = compute_parts()
+    parts = compute_parts()
+    # 하락 방지: 계산값이 HEAD 버전 이하이면(이력 재작성 등) PATCH 를 +1 해 항상 올린다.
+    head = _head_version()
+    if head is not None and parts <= head:
+        parts = (head[0], head[1], head[2] + 1)
+    major, minor, patch = parts
     return f"{major}.{minor}.{patch}"
 
 
