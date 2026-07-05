@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.63   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.64   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.63"
+__version__ = "1.33.64"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -4558,6 +4558,10 @@ class SettingsDialog(QDialog):
         self.cmb_product.setToolTip("제품별 좌표 변환 상수 — 변경 후 다시 스캔(F5)하세요")
         form.addRow("제품 프로파일", self.cmb_product)
 
+        # 경로를 '직접 입력/붙여넣기' 해도(찾아보기 없이) 제품 목록이 채워지도록,
+        # 편집이 끝나면 그 경로의 DB 를 읽어 콤보를 갱신한다.
+        self.ed_device_db.editingFinished.connect(self._on_device_db_edited)
+
         # 시작 시 DB 경로가 있으면 미리 로드해 제품 목록을 채운다.
         if self._settings.device_db_path:
             self._load_db(self._settings.device_db_path, select=self._settings.product)
@@ -4742,6 +4746,12 @@ class SettingsDialog(QDialog):
                 self.lbl_err.setVisible(True)
         except Exception as exc:  # noqa: BLE001
             self._error(f"디바이스 DB 로드 실패: {exc}")
+
+    def _on_device_db_edited(self) -> None:
+        """디바이스 DB 경로를 직접 입력/붙여넣기로 바꾼 뒤(찾아보기 없이) 제품 목록 갱신."""
+        path = self.ed_device_db.text().strip()
+        if path:
+            self._load_db(path)
 
     def _pick_device_db(self) -> None:
         from pathlib import Path
@@ -6205,6 +6215,34 @@ def scan_lot(
 
 
 
+
+def attach_image_context_menu(widget: QWidget, path_getter) -> None:
+    """위젯에 사진 우클릭 메뉴(경로 복사·파일 열기·폴더 열기)를 붙인다.
+
+    path_getter() 는 표시 중인 이미지 경로를 반환한다(호출 시점 값 사용).
+    메인 그리드(compare_grid)의 우클릭 메뉴와 동일한 동작을 히트맵 썸네일에도 제공한다.
+    """
+    widget.setContextMenuPolicy(Qt.CustomContextMenu)
+
+    def _show(pos) -> None:
+        path = str(path_getter())
+        if not path:
+            return
+        menu = QMenu(widget)
+        menu.addAction("경로 복사", lambda: QGuiApplication.clipboard().setText(path))
+        menu.addAction(
+            "파일 열기",
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)),
+        )
+        menu.addAction(
+            "폴더 열기",
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent))),
+        )
+        menu.exec(widget.mapToGlobal(pos))
+
+    widget.customContextMenuRequested.connect(_show)
+
+
 def _blank_holder(px: int) -> QLabel:
     holder = QLabel()
     holder.setAlignment(Qt.AlignCenter)
@@ -6276,6 +6314,9 @@ class ClickThumb(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(holder)
         self.setCursor(Qt.PointingHandCursor)
+        # 우클릭 → 경로 복사·파일/폴더 열기
+        if record is not None:
+            attach_image_context_menu(self, lambda: record.image_path)
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton and self._record is not None:
@@ -6328,6 +6369,10 @@ class ClusteredThumb(QWidget):
         holder.setCursor(Qt.PointingHandCursor)
         # 대표 클릭 → 뷰어
         holder.mousePressEvent = self._on_rep_click  # type: ignore[assignment]
+        # 우클릭 → 경로 복사·파일/폴더 열기(메인 그리드와 동일)
+        attach_image_context_menu(
+            holder, lambda: self._cluster.representative.image_path
+        )
         # layer 배지
         badge = QLabel(("★ " + layer) if is_base else layer, holder)
         badge.setObjectName("layerBadgeBase" if is_base else "layerBadge")

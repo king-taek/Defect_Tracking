@@ -8,11 +8,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -21,6 +24,33 @@ from PySide6.QtWidgets import (
 from app.clustering import Cluster
 from app.ui import theme
 from app.ui.flow_layout import FlowLayout
+
+
+def attach_image_context_menu(widget: QWidget, path_getter) -> None:
+    """위젯에 사진 우클릭 메뉴(경로 복사·파일 열기·폴더 열기)를 붙인다.
+
+    path_getter() 는 표시 중인 이미지 경로를 반환한다(호출 시점 값 사용).
+    메인 그리드(compare_grid)의 우클릭 메뉴와 동일한 동작을 히트맵 썸네일에도 제공한다.
+    """
+    widget.setContextMenuPolicy(Qt.CustomContextMenu)
+
+    def _show(pos) -> None:
+        path = str(path_getter())
+        if not path:
+            return
+        menu = QMenu(widget)
+        menu.addAction("경로 복사", lambda: QGuiApplication.clipboard().setText(path))
+        menu.addAction(
+            "파일 열기",
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)),
+        )
+        menu.addAction(
+            "폴더 열기",
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent))),
+        )
+        menu.exec(widget.mapToGlobal(pos))
+
+    widget.customContextMenuRequested.connect(_show)
 
 
 def _blank_holder(px: int) -> QLabel:
@@ -94,6 +124,9 @@ class ClickThumb(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(holder)
         self.setCursor(Qt.PointingHandCursor)
+        # 우클릭 → 경로 복사·파일/폴더 열기
+        if record is not None:
+            attach_image_context_menu(self, lambda: record.image_path)
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton and self._record is not None:
@@ -146,6 +179,10 @@ class ClusteredThumb(QWidget):
         holder.setCursor(Qt.PointingHandCursor)
         # 대표 클릭 → 뷰어
         holder.mousePressEvent = self._on_rep_click  # type: ignore[assignment]
+        # 우클릭 → 경로 복사·파일/폴더 열기(메인 그리드와 동일)
+        attach_image_context_menu(
+            holder, lambda: self._cluster.representative.image_path
+        )
         # layer 배지
         badge = QLabel(("★ " + layer) if is_base else layer, holder)
         badge.setObjectName("layerBadgeBase" if is_base else "layerBadge")
