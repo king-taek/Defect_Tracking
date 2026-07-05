@@ -320,6 +320,7 @@ class HeatmapDialog(QDialog):
         self._add_targets: list[int] = []  # '이 위치 출력에 넣기' 대상(매칭된 기준)
         self._pending_thumbs: list = []  # 상세 지연 로딩 썸네일 위젯
         self._thumb_token = 0            # stale 썸네일 로딩 무시
+        self._active_thumb_workers: set = set()  # 실행 중 워커 참조 유지(GC 방지)
         self._hm_align_cache: dict = {}  # observed→alignment 캐시(매 refresh 재계산 방지)
         self._xr = (0.0, 1.0)   # die 내부 local 좌표 범위(subcell 판정용)
         self._yr = (0.0, 1.0)
@@ -752,6 +753,12 @@ class HeatmapDialog(QDialog):
                 snap[i].fill()
 
         worker.signals.ready.connect(_fill)
+        # 워커가 끝날 때까지 참조를 유지한다(안 그러면 GC 로 signals 가 사라져 ready 가
+        # 도착 안 해 썸네일이 '로딩…'에 멈춘다 — 이 버그의 근본 원인).
+        self._active_thumb_workers.add(worker)
+        worker.signals.done.connect(
+            lambda w=worker: self._active_thumb_workers.discard(w)
+        )
         QThreadPool.globalInstance().start(worker)
 
     def _make_group_row(self, group: dict) -> QWidget:

@@ -712,3 +712,62 @@ def test_folder_picker_indent_and_explorer_button(app, tmp_path):
     dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
     assert dlg.sidebar.indentation() == 12
     assert hasattr(dlg, "btn_explorer")
+
+
+# ---- 11차: 로딩 썸네일 멈춤 수정 + Conder Scan 위치 지정 칸 ----
+
+def test_heatmap_detail_thumb_worker_retained(win, app):
+    """상세 지연 썸네일 워커가 참조 유지되어야 GC 로 ready 시그널이 사라지지 않는다."""
+    from PySide6.QtTest import QTest
+    dlg = _make_heatmap(win)
+    keys = list(dlg._groups.keys())
+    if not keys:
+        return
+    dlg._selected_keys = keys[:1]
+    dlg._rebuild_detail()
+    if not dlg._pending_thumbs:
+        return
+    # 워커가 실행 중 참조로 보관된다(GC 방지).
+    assert len(dlg._active_thumb_workers) >= 1
+    # 완료까지 대기 → 워커가 done 후 참조 해제 + 썸네일 holder 가 '로딩…' 이 아님.
+    for _ in range(30):
+        QTest.qWait(50)
+        if not dlg._active_thumb_workers:
+            break
+    assert dlg._active_thumb_workers == set()  # done 시 해제됨
+    texts = {t.holder.text() for t in dlg._pending_thumbs}
+    assert "로딩…" not in texts  # 모두 채워짐(또는 '이미지 없음')
+
+
+def test_thumbnail_cache_atomic_write(app, tmp_path):
+    """썸네일 캐시가 임시 파일→replace 로 원자적으로 써지고, 결과 파일이 완전하다."""
+    from PIL import Image
+    from app.thumbnails import ThumbnailCache
+    src = tmp_path / "img.png"
+    Image.new("RGB", (200, 160), (120, 40, 80)).save(src)
+    cache = ThumbnailCache(str(tmp_path / "cache"))
+    out = cache.get_full_thumbnail(src, max_size=64)
+    assert out is not None and out.exists()
+    # 완전한 PNG 로 다시 열림(부분 파일 아님) + .tmp 잔재 없음.
+    with Image.open(out) as im:
+        im.load()
+    assert not list(out.parent.glob("*.tmp"))
+
+
+def test_folder_picker_scan_root_input(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+    (tmp_path / "ScanData" / "LOT").mkdir(parents=True)
+    s = AppSettings(workspace=str(tmp_path / "ws"), scan_root_path=str(tmp_path / "ScanData"))
+    dlg = FolderPickerDialog(s, str(tmp_path))
+    # 지정 칸이 존재하고 현재 경로가 채워진다.
+    assert hasattr(dlg, "ed_scan_root")
+    assert dlg.ed_scan_root.text().endswith("ScanData")
+    # 명시 경로가 최상위 📌 로 고정된다.
+    top0 = dlg.sidebar.topLevelItem(0).text(0)
+    assert "📌" in top0 and "ScanData" in top0
+    # 새 경로 지정 시 저장·재고정.
+    (tmp_path / "Other").mkdir()
+    dlg.ed_scan_root.setText(str(tmp_path / "Other"))
+    dlg._apply_scan_root()
+    assert s.scan_root_path.endswith("Other")
+    assert "Other" in dlg.sidebar.topLevelItem(0).text(0)

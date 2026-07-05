@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -77,6 +78,9 @@ class ThumbnailCache:
         out = self._cache_path(key)
         if out.exists():
             return out
+        # 원자적 쓰기: 임시 파일에 저장 후 os.replace 로 교체 → 동시 읽기가 부분 파일을 보지
+        # 않게 한다(백그라운드 워밍 워커와 UI fill 이 같은 캐시 파일을 동시에 다룰 수 있음).
+        tmp = out.with_name(f"{out.stem}.{os.getpid()}_{id(path)}.tmp")
         try:
             data = read_only_bytes(path)
             with Image.open(io.BytesIO(data)) as img:
@@ -84,7 +88,12 @@ class ThumbnailCache:
                 if not full and center_ratio < 1.0:
                     img = _center_crop(img, center_ratio)
                 img.thumbnail((target, target), Image.LANCZOS)
-                img.save(out, format="PNG")
+                img.save(tmp, format="PNG")
+            os.replace(tmp, out)
             return out
         except (OSError, ValueError):
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
             return None

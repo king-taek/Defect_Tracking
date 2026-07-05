@@ -197,7 +197,32 @@ class FolderPickerDialog(QDialog):
         body = QHBoxLayout()
         body.setSpacing(10)
 
-        # 좌측: 폴더 구조 트리(지연 로딩) + 접이식 최근/즐겨찾기. 기본 탐색기처럼 탐색.
+        # 좌측: [Conder Scan 위치 지정 칸] + 폴더 구조 트리(지연 로딩) + 접이식 최근/즐겨찾기.
+        left = QVBoxLayout()
+        left.setSpacing(4)
+
+        scan_box = QFrame()
+        scan_box.setObjectName("panel")
+        sb = QVBoxLayout(scan_box)
+        sb.setContentsMargins(8, 6, 8, 8)
+        sb.setSpacing(4)
+        cap = QLabel(f"📌 {getattr(self.settings, 'scan_root_name', '') or '스캔 데이터'} 위치")
+        cap.setStyleSheet(f"font-size:11px; font-weight:700; color:{theme.NEON};")
+        sb.addWidget(cap)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        self.ed_scan_root = QLineEdit(getattr(self.settings, "scan_root_path", "") or "")
+        self.ed_scan_root.setPlaceholderText("스캔 데이터 폴더 경로 — 설정하면 트리 맨 위에 고정")
+        self.ed_scan_root.returnPressed.connect(self._apply_scan_root)
+        row.addWidget(self.ed_scan_root, 1)
+        btn_scan = QPushButton("찾기")
+        btn_scan.setObjectName("mini")
+        btn_scan.setFixedWidth(48)
+        btn_scan.clicked.connect(self._pick_scan_root)
+        row.addWidget(btn_scan)
+        sb.addLayout(row)
+        left.addWidget(scan_box)
+
         self.sidebar = QTreeWidget()
         self.sidebar.setHeaderHidden(True)
         self.sidebar.setFixedWidth(260)
@@ -205,7 +230,12 @@ class FolderPickerDialog(QDialog):
         self.sidebar.setRootIsDecorated(True)
         self.sidebar.itemClicked.connect(self._on_tree_clicked)
         self.sidebar.itemExpanded.connect(self._on_tree_expanded)
-        body.addWidget(self.sidebar)
+        left.addWidget(self.sidebar, 1)
+
+        left_host = QWidget()
+        left_host.setFixedWidth(260)
+        left_host.setLayout(left)
+        body.addWidget(left_host)
 
         right = QVBoxLayout()
         right.setSpacing(6)
@@ -335,13 +365,51 @@ class FolderPickerDialog(QDialog):
         if path:
             self._go_to(self._safe_dir(path))
 
+    def _apply_scan_root(self) -> None:
+        """지정 칸의 스캔 데이터 폴더 경로를 저장·고정하고 그 폴더로 이동."""
+        path = self.ed_scan_root.text().strip()
+        self.settings.scan_root_path = path
+        try:
+            self.settings.save()
+        except Exception:  # noqa: BLE001 - 저장 실패해도 세션 내 반영은 유지
+            pass
+        self._reload_sidebar()
+        if path and Path(path).is_dir():
+            self._go_to(self._safe_dir(path))
+
+    def _pick_scan_root(self) -> None:
+        start = self.ed_scan_root.text().strip() or str(self._cur)
+        if not Path(start).exists():
+            start = str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, "스캔 데이터 폴더 선택", start)
+        if path:
+            self.ed_scan_root.setText(path)
+            self._apply_scan_root()
+
     def _pin_scan_roots(self, search_roots: list[str]) -> None:
-        """각 루트 바로 아래에 scan_root_name 폴더가 있으면 최상위 '📌' 고정 노드로 추가."""
+        """스캔 데이터 폴더를 최상위 '📌' 고정 노드로 추가.
+
+        1) 명시 지정 경로(scan_root_path)가 있으면 그것을 먼저(맨 위). 2) 이후 각 루트 바로
+        아래에서 scan_root_name 폴더를 탐지해 추가(경로 중복 제거).
+        """
+        root = self.sidebar.invisibleRootItem()
+        seen: set[str] = set()
+        # 1) 명시 경로
+        explicit = (getattr(self.settings, "scan_root_path", "") or "").strip()
+        if explicit:
+            try:
+                ok = Path(explicit).is_dir()
+            except OSError:
+                ok = False
+            if ok:
+                key = str(Path(explicit)).rstrip("/\\")
+                seen.add(key)
+                node = self._make_dir_node(root, f"📌 {Path(explicit).name or explicit}", explicit)
+                self._root_nodes.append((explicit, node))
+        # 2) 이름 기반 자동 탐지
         name = (getattr(self.settings, "scan_root_name", "") or "").strip()
         if not name:
             return
-        root = self.sidebar.invisibleRootItem()
-        seen: set[str] = set()
         for r in search_roots:
             try:
                 p = Path(r) / name

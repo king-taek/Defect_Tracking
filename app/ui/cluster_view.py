@@ -53,7 +53,7 @@ def load_thumb_holder(thumb_cache, image_path, px: int, defer: bool = False) -> 
     """썸네일 이미지 QLabel(배지 없음). defer=True 면 '…'만 두고 나중에 fill_holder 로 채운다."""
     holder = _blank_holder(px)
     if defer:
-        holder.setText("…")
+        holder.setText("로딩…")
         return holder
     fill_holder(holder, thumb_cache, image_path, px)
     return holder
