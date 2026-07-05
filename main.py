@@ -106,8 +106,8 @@ def main() -> int:
     # 빌트인 폴백(die_map 없음) 대신 같은 패키지 크기의 DB die_map 제품으로 승격 →
     # 웨이퍼맵이 기본적으로 실제 die 모양으로 표시되도록.
     config.ensure_die_map_product()
-    # 개발자 모드(DEFECT_TRACKER_DEV)일 때만 파일 로그를 남긴다. 일반 사용자에겐 로그를 만들지 않음.
-    if config.dev_mode():
+    # 개발자 모드(환경변수 또는 설정)일 때만 파일 로그를 남긴다. 일반 사용자에겐 로그를 만들지 않음.
+    if config.dev_mode(settings):
         logging_config.setup_logging(settings.log_dir_path)
         logging_config.get_logger().info("애플리케이션 시작 (제품=%s)", settings.product)
 

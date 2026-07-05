@@ -170,13 +170,19 @@ APP_NAME = "Defect Layer Tracker"
 CREDITS = "Designed by JinHan Kim, Developed by HyunTaek Lim"
 
 
-def dev_mode() -> bool:
-    """개발자 모드 여부(환경변수 DEFECT_TRACKER_DEV). 일반 사용자에겐 로그/진단 UI 를 숨긴다.
+def dev_mode(settings=None) -> bool:
+    """개발자 모드 여부. 환경변수 DEFECT_TRACKER_DEV 또는 설정(AppSettings.dev_mode)로 켠다.
 
-    참(1/true/on/yes)일 때만 파일 로그 생성·진단 리포트·설정의 로그 경로 노출을 켠다.
+    - 환경변수가 참(1/true/on/yes/y)이면 **설정보다 우선**해 항상 켜진다(배포/디버그용).
+    - 환경변수가 없으면 전달된 ``settings.dev_mode`` 값을 따른다(설정 창 토글로 저장).
+    켜지면 파일 로그 생성·진단 리포트·설정의 로그 경로 노출이 활성화된다.
     """
     val = os.environ.get("DEFECT_TRACKER_DEV", "").strip().lower()
-    return val in ("1", "true", "on", "yes", "y")
+    if val in ("1", "true", "on", "yes", "y"):
+        return True
+    if settings is not None:
+        return bool(getattr(settings, "dev_mode", False))
+    return False
 
 # 자동 업데이트 대상 저장소(메인 브랜치를 가져와 적용)
 UPDATE_OWNER = "king-taek"
@@ -281,6 +287,7 @@ class AppSettings:
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
     auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인
     update_token: str = ""  # (선택) 비공개 저장소용 GitHub 토큰. public 이면 빈값.
+    dev_mode: bool = False  # 개발자 모드(파일 로그·진단·로그 경로 UI). 설정 창에서 토글.
 
     # ---- 경로 헬퍼 -------------------------------------------------------
     @property

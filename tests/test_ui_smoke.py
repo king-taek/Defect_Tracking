@@ -513,6 +513,31 @@ def test_settings_dialog_constructs(app, tmp_path):
     assert out.workspace == str(tmp_path / "ws2")
 
 
+def test_settings_dialog_dev_mode_toggle(app, tmp_path):
+    """개발자 모드 토글(작은 버튼)이 dev 섹션을 표시/숨기고 설정에 저장된다."""
+    from app import config
+    from app.config import AppSettings
+    from app.ui.settings_dialog import SettingsDialog
+
+    s = AppSettings(workspace=str(tmp_path / "ws"), dev_mode=False)
+    dlg = SettingsDialog(s, current_lot=None)
+    # 기본 꺼짐: 버튼 라벨 '꺼짐', dev 섹션(로그 경로·로그 폴더) 숨김.
+    assert dlg.btn_dev.text() == "꺼짐"
+    assert dlg.btn_dev.isChecked() is False
+    assert dlg._dev_box.isHidden()
+    # 켜면 섹션이 보이고 라벨이 '켜짐'.
+    dlg.btn_dev.setChecked(True)
+    assert dlg.btn_dev.text() == "켜짐"
+    assert not dlg._dev_box.isHidden()
+    # 저장 시 settings.dev_mode 반영 → config.dev_mode 가 True.
+    out = dlg.updated_settings()
+    assert out.dev_mode is True
+    assert config.dev_mode(out) is True
+    # 다시 끄면 False 로 저장.
+    dlg.btn_dev.setChecked(False)
+    assert dlg.updated_settings().dev_mode is False
+
+
 def test_stop_scan_hides_progress(win):
     # 스캔 진행 상태를 흉내내고 _stop_scan 이 진행바/버튼을 숨기고 토큰을 올리는지
     win.progress.setVisible(True)

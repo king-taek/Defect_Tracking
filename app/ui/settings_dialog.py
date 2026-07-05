@@ -69,15 +69,6 @@ class SettingsDialog(QDialog):
         self.ed_output.setPlaceholderText("(비우면 작업공간/exports 사용)")
         form.addRow("출력 폴더", self._with_browse(self.ed_output, self._pick_output))
 
-        # 로그 저장 경로는 개발자 모드(DEFECT_TRACKER_DEV)에서만 노출한다.
-        self.ed_log_dir = None
-        if config.dev_mode():
-            self.ed_log_dir = QLineEdit(self._settings.log_dir)
-            self.ed_log_dir.setPlaceholderText("(비우면 작업공간/logs 사용)")
-            form.addRow(
-                "로그 저장 경로", self._with_browse(self.ed_log_dir, self._pick_log_dir)
-            )
-
         # 디바이스 DB 파일(AOIDeviceDB.xlsx) — 있으면 제품 목록을 확장한다.
         self.ed_device_db = QLineEdit(self._settings.device_db_path)
         self.ed_device_db.setPlaceholderText("(선택) AOIDeviceDB.xlsx 경로")
@@ -120,12 +111,26 @@ class SettingsDialog(QDialog):
         upd_lay.addWidget(self.lbl_update, 1)
         form.addRow("업데이트", upd_host)
 
-        # 진단/로그 폴더 열기 — 개발자 모드(DEFECT_TRACKER_DEV)에서만 노출한다.
-        if config.dev_mode():
-            self.btn_logs = QPushButton("로그 폴더 열기")
-            self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")
-            self.btn_logs.clicked.connect(self._open_logs)
-            form.addRow("진단/로그", self.btn_logs)
+        # 개발자 모드 토글 — 작은 켜짐/꺼짐 버튼. 켜면 아래 dev 섹션(로그 경로·로그 폴더)
+        # 이 나타나고, 저장 시 settings.dev_mode 에 기록된다. 환경변수 DEFECT_TRACKER_DEV
+        # 로 강제 켜진 경우엔 항상 켜짐으로 두고 토글을 비활성화한다.
+        self._dev_env_forced = config.dev_mode()  # settings=None → 환경변수만 반영
+        dev_on = self._dev_env_forced or bool(getattr(self._settings, "dev_mode", False))
+        self.btn_dev = QPushButton("켜짐" if dev_on else "꺼짐")
+        self.btn_dev.setObjectName("mini")
+        self.btn_dev.setCheckable(True)
+        self.btn_dev.setChecked(dev_on)
+        self.btn_dev.setToolTip("파일 로그·진단 리포트·로그 경로 설정을 켭니다.")
+        if self._dev_env_forced:
+            self.btn_dev.setEnabled(False)
+            self.btn_dev.setToolTip("환경변수 DEFECT_TRACKER_DEV 로 강제로 켜져 있습니다.")
+        self.btn_dev.toggled.connect(self._on_dev_toggled)
+        dev_host = QWidget()
+        dev_hl = QHBoxLayout(dev_host)
+        dev_hl.setContentsMargins(0, 0, 0, 0)
+        dev_hl.addWidget(self.btn_dev)
+        dev_hl.addStretch(1)
+        form.addRow("개발자 모드", dev_host)
 
         # 단축키·도움말 보기(상단 밴드에서 이동).
         self.btn_help = QPushButton("단축키 · 도움말 보기")
@@ -133,6 +138,23 @@ class SettingsDialog(QDialog):
         form.addRow("도움말", self.btn_help)
 
         outer.addLayout(form)
+
+        # 개발자 섹션(로그 저장 경로 · 로그 폴더 열기) — 토글로 표시/숨김.
+        self._dev_box = QWidget()
+        dev_form = QFormLayout(self._dev_box)
+        dev_form.setContentsMargins(0, 0, 0, 0)
+        dev_form.setSpacing(10)
+        self.ed_log_dir = QLineEdit(self._settings.log_dir)
+        self.ed_log_dir.setPlaceholderText("(비우면 작업공간/logs 사용)")
+        dev_form.addRow(
+            "로그 저장 경로", self._with_browse(self.ed_log_dir, self._pick_log_dir)
+        )
+        self.btn_logs = QPushButton("로그 폴더 열기")
+        self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")
+        self.btn_logs.clicked.connect(self._open_logs)
+        dev_form.addRow("진단/로그", self.btn_logs)
+        self._dev_box.setVisible(dev_on)
+        outer.addWidget(self._dev_box)
 
         self.lbl_err = QLabel("")
         self.lbl_err.setStyleSheet("color:#f87171;")
@@ -155,6 +177,12 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
+
+    def _on_dev_toggled(self, on: bool) -> None:
+        """개발자 모드 토글 — 버튼 라벨과 dev 섹션 표시를 갱신한다."""
+        self.btn_dev.setText("켜짐" if on else "꺼짐")
+        self._dev_box.setVisible(on)
+        self.adjustSize()
 
     def _open_help(self) -> None:
         from app.ui.help_dialog import ShortcutsDialog
@@ -253,7 +281,7 @@ class SettingsDialog(QDialog):
     def _on_accept(self) -> None:
         workspace = self.ed_workspace.text().strip()
         output = self.ed_output.text().strip()
-        log_dir = self.ed_log_dir.text().strip() if self.ed_log_dir is not None else ""
+        log_dir = self.ed_log_dir.text().strip()
         if not workspace:
             self._error("작업공간 폴더를 지정하세요.")
             return
@@ -263,7 +291,7 @@ class SettingsDialog(QDialog):
                 (workspace, "작업공간"),
                 (output or workspace, "출력"),
             ]
-            if self.ed_log_dir is not None:
+            if self.btn_dev.isChecked():  # 개발자 모드에서만 로그 경로 사용
                 targets.append((log_dir or workspace, "로그"))
             for target, label in targets:
                 if conflicting_source(target, [self._current_lot]) is not None:
@@ -292,8 +320,8 @@ class SettingsDialog(QDialog):
         """다이얼로그 입력을 반영한 설정(저장은 호출 측)."""
         self._settings.workspace = self.ed_workspace.text().strip()
         self._settings.output_folder = self.ed_output.text().strip()
-        if self.ed_log_dir is not None:  # 개발자 모드에서만 로그 경로 편집
-            self._settings.log_dir = self.ed_log_dir.text().strip()
+        self._settings.log_dir = self.ed_log_dir.text().strip()
+        self._settings.dev_mode = self.btn_dev.isChecked()
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
         self._settings.device_db_path = self.ed_device_db.text().strip()

@@ -546,8 +546,8 @@ class MainWindow(QMainWindow):
         status += ")"
         self.nav.set_status(status)
         self.nav.set_status_tooltip(self._failure_summary(failed))
-        # 좌표 추출 실패 진단 리포트는 개발자 모드(DEFECT_TRACKER_DEV)에서만 파일로 남긴다.
-        report_path = self._write_diag_report(index) if config.dev_mode() else None
+        # 좌표 추출 실패 진단 리포트는 개발자 모드(환경변수 또는 설정)에서만 파일로 남긴다.
+        report_path = self._write_diag_report(index) if config.dev_mode(self.settings) else None
         if failed:
             self.banner.show_message(
                 f"{len(failed)}개 이미지의 좌표를 추출하지 못했습니다(상태표시줄에 상세).",
@@ -1217,6 +1217,11 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             self.banner.show_message(f"설정 저장 실패: {exc}", "error", timeout_ms=0)
             return
+        # 개발자 모드를 방금 켰다면 재시작 없이 파일 로그를 바로 시작한다(setup_logging 은
+        # 중복 핸들러를 막으므로 반복 호출해도 안전). 끄는 것은 다음 실행부터 반영된다.
+        if config.dev_mode(s):
+            from app import logging_config
+            logging_config.setup_logging(s.log_dir_path)
         self.banner.show_message("설정을 저장했습니다.", "success")
 
     # ------------------------------------------------------------ 업데이트
