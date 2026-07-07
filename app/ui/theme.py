@@ -64,7 +64,7 @@ QLabel {{
 }}
 QLabel#dim {{ color: {TEXT_DIM}; }}
 QLabel#title {{ font-size: 16px; font-weight: 700; color: {TEXT}; }}
-QLabel#meta {{ font-size: 11px; color: {TEXT}; }}
+QLabel#meta {{ font-size: 13px; color: {TEXT}; }}
 QLabel#lotName {{ font-size: 13px; font-weight: 600; color: {BASE_GLOW}; }}
 QLabel#section {{ font-size: 11px; font-weight: 700; color: {TEXT_DIM};
     letter-spacing: 1px; }}
