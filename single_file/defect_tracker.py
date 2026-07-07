@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.70   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.71   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.70"
+__version__ = "1.33.71"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -4980,9 +4980,13 @@ class WaferMapWidget(QWidget):
         self.update()
 
     def _cell_rect(self, col: int, row: int) -> QRect:
-        """실좌표(col,row)를 원점 오프셋을 적용한 픽셀 사각형으로."""
+        """실좌표(col,row)를 원점 오프셋을 적용한 픽셀 사각형으로.
+
+        die row 0 을 화면 맨 아래에 그린다(왼쪽아래 0,0 표준, 위로 갈수록 row 증가).
+        """
         x = _GAP + (col - self._origin_col) * (_CELL + _GAP)
-        y = _GAP + (row - self._origin_row) * (_CELL + _GAP)
+        dr_from_bottom = (self._rows - 1) - (row - self._origin_row)
+        y = _GAP + dr_from_bottom * (_CELL + _GAP)
         return QRect(x, y, _CELL, _CELL)
 
     def paintEvent(self, event):  # noqa: N802
@@ -5019,7 +5023,8 @@ class WaferMapWidget(QWidget):
         dr = (pos.y() - _GAP) // (_CELL + _GAP)
         if 0 <= dc < self._cols and 0 <= dr < self._rows:
             col = int(dc) + self._origin_col
-            row = int(dr) + self._origin_row
+            # row 0 이 화면 맨 아래이므로(_cell_rect 와 대칭) 세로 인덱스를 반전 복원한다.
+            row = self._origin_row + (self._rows - 1 - int(dr))
             if (col, row) in self._states:
                 self.die_clicked.emit(col, row)
 
@@ -8199,8 +8204,11 @@ class HeatmapWaferMap(QWidget):
 
     def _die_origin(self, col: int, row: int) -> tuple[int, int]:
         dw, dh = self._die_w(), self._die_h()
+        # die row 0 을 화면 맨 아래에 그린다(왼쪽아래 0,0 표준, 위로 갈수록 row 증가).
+        # die 내부 하위셀은 여전히 왼쪽위 원점(위→아래) 규약을 유지한다.
+        dr_from_bottom = (self._rows - 1) - (row - self._origin_row)
         return (self._GAP + (col - self._origin_col) * (dw + self._GAP),
-                self._GAP + (row - self._origin_row) * (dh + self._GAP))
+                self._GAP + dr_from_bottom * (dh + self._GAP))
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
@@ -8271,7 +8279,8 @@ class HeatmapWaferMap(QWidget):
         if not (0 <= dc < self._cols and 0 <= dr < self._rows):
             return None
         col = int(dc) + self._origin_col
-        row = int(dr) + self._origin_row
+        # row 0 이 화면 맨 아래이므로(_die_origin 과 대칭) 세로 인덱스를 반전 복원한다.
+        row = self._origin_row + (self._rows - 1 - int(dr))
         if self._subdivide:
             ox, oy = self._die_origin(col, row)
             sc = min(SUB_COLS - 1, max(0, (pos.x() - ox) // self._SUBCELL_PX))
@@ -8622,29 +8631,34 @@ class HeatmapDialog(QDialog):
         }
         die_count = len(observed)
         subdivide = should_subdivide(die_count)
-        xr, yr = local_ranges([r for _, r in entries])
+        prod = active_product()
+        # 하위셀(die 5×5)은 '표시 중 defect 분포'가 아니라 die pitch 절대 프레임([0,pitch))으로
+        # 버킷팅한다. 그래야 레이어 선택(record 집합)이 바뀌어도 같은 defect 이 항상 같은 칸에
+        # 오고, 관측 분포의 상대 위치가 아니라 die 내부 실제 위치를 반영한다.
+        xr = (0.0, float(prod.camtek_pitch_x))
+        yr = (0.0, float(prod.camtek_pitch_y))
         self._xr, self._yr, self._subdivide = xr, yr, subdivide
 
-        # 웨이퍼 '모양'과 defect '정합'을 분리한다. 모양은 항상 die_map 자체(고정 좌표)로
-        # 그려 정합 오차가 모양에 구멍/잘림을 만들지 못하게 하고, defect 밀도는 정합 이동
-        # (shift)만큼 die_map 좌표계로 옮겨 올린다.
-        prod = active_product()
+        # 웨이퍼 '모양'과 defect '정합'을 분리한다. 모양(die_map)만 정합 이동만큼 관측 좌표계로
+        # 옮겨 그리고, defect 밀도·die 라벨은 raw 관측(physical) die 좌표 그대로 둔다 —
+        # 라벨이 die_map 좌표가 아니라 실제 die 로 표기되게(예: (5,4) 를 (5,1) 로 밀지 않게).
         valid = None
-        shift = (0, 0)
         caption = prod.name if prod.source == "db" else ""  # 제품명만(‘모양 정합’ 미표기)
         if prod.die_map:
+            align = Alignment(0, 0, 0.0)
             if observed:
                 # 정합은 관측 die 집합·제품이 같으면 재계산 불필요 → 캐시(매 refresh 비용 절감).
                 ckey = (prod.name, frozenset(observed))
-                align = self._hm_align_cache.get(ckey)
-                if align is None:
-                    align = align_observed_to_diemap(observed, prod.die_map)
-                    self._hm_align_cache[ckey] = align
-                shift = (align.dcol, align.drow)
-            valid = set(prod.die_map)  # 모양 = die_map 그대로(항상 온전한 wafer 형태)
-        self._align_shift = shift
+                cached = self._hm_align_cache.get(ckey)
+                if cached is None:
+                    cached = align_observed_to_diemap(observed, prod.die_map)
+                    self._hm_align_cache[ckey] = cached
+                align = cached
+            # 모양만 관측 프레임으로 옮긴다(die_map + shift). 밀도/라벨은 관측 좌표 유지.
+            valid = shifted_die_map(prod.die_map, align)
+        # 밀도/키는 관측 좌표 그대로 → _shift_key 는 항등, 라벨이 physical die 로 나온다.
+        self._align_shift = (0, 0)
 
-        # 밀도/그룹 키를 die_map 좌표계로 맞춘다(관측 좌표 − shift).
         density_groups = group_defects(entries, subdivide, xr, yr)
         density = {self._shift_key(k): len(v) for k, v in density_groups.items()}
         # 매치만 상세용 그룹(base index)은 항상 기준 defect 전체로, 동일 subdivide/range 로 키 정합.
@@ -8652,7 +8666,7 @@ class HeatmapDialog(QDialog):
         self._groups = {self._shift_key(k): v for k, v in base_groups.items()}
         self._selected_keys = [k for k in keep if k in density]
 
-        observed_dm = {(c - shift[0], r - shift[1]) for c, r in observed}
+        observed_dm = observed  # 관측 좌표 그대로(모양만 옮겼으므로 shift 불필요)
         paint_valid = (valid | observed_dm) if valid else None
         if paint_valid is not None:
             # 내용 bounding box 로 정규화(맵이 여백에 떠 보이거나 잘리지 않게).

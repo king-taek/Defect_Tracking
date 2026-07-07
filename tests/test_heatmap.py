@@ -45,6 +45,32 @@ def test_subcell_of_corners():
     assert 0 <= sc < heatmap.SUB_COLS and 0 <= sr < heatmap.SUB_ROWS
 
 
+def test_subcell_of_pitch_frame_is_absolute():
+    """하위셀을 die pitch 절대 프레임([0,pitch))으로 버킷팅하면 관측 분포와 무관하게
+    die 내부 실제 위치로 고정된다(회귀: 예전엔 관측 min/max 상대라 레이어 조합에 따라
+    같은 defect 이 다른 칸으로 이동했다)."""
+    # 실제 PIDS7 defect 좌표(24500.96, 6764.95), die pitch ≈ 37248×44905.
+    xr, yr = (0.0, 37248.0), (0.0, 44905.0)
+    assert heatmap.subcell_of(24500.96, 6764.95, xr, yr) == (3, 0)
+    # 범위가 고정이므로 다른 record 존재 여부와 무관하게 항상 같은 칸.
+    assert heatmap.subcell_of(24500.96, 6764.95, xr, yr) == (3, 0)
+
+
+def test_group_defects_subcell_stable_regardless_of_other_records():
+    """고정 pitch 범위에서는 같은 (x,y) defect 의 하위셀이 다른 record 유무와 무관하게 같다."""
+    xr, yr = (0.0, 37248.0), (0.0, 44905.0)
+    target = _rec(0, 2, 24500.96, 6764.95)
+    only = heatmap.group_defects([(0, target)], subdivide=True, x_range=xr, y_range=yr)
+    withothers = heatmap.group_defects(
+        [(0, target), (1, _rec(1, 4, 7497.0, 31062.0)), (2, _rec(3, 3, 100.0, 200.0))],
+        subdivide=True, x_range=xr, y_range=yr,
+    )
+    key_only = next(iter(only))
+    key_with = next(k for k in withothers if k.col == 0 and k.row == 2)
+    assert (key_only.sub_col, key_only.sub_row) == (3, 0)
+    assert (key_with.sub_col, key_with.sub_row) == (3, 0)
+
+
 def test_group_defects_die_level():
     entries = [(0, _rec(1, 2, 0, 0)), (1, _rec(1, 2, 5, 5)), (2, _rec(3, 4, 0, 0))]
     groups = heatmap.group_defects(entries, subdivide=False)

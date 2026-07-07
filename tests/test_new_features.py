@@ -429,6 +429,66 @@ def test_heatmap_density_counts_clusters_as_one(app):
     assert sum(dlg._map._density.values()) == 2
 
 
+def test_heatmap_subcell_uses_die_pitch_not_observed_range(app):
+    """하위셀이 die pitch 절대 프레임으로 계산돼 레이어(record) 조합과 무관하게 고정된다.
+
+    회귀: 예전엔 표시 중 record 의 관측 min/max 상대라, 같은 defect 이 다른 레이어를
+    추가하면 다른 칸으로 이동했다(사용자 보고: (0,4)→(4,4)→(3,4)).
+    """
+    from app.ui.heatmap_dialog import HeatmapDialog
+    from app.models import BaseDefectMatches, DefectRecord
+    from app import config
+    from pathlib import Path
+
+    def mk(name, col, row, x, y):
+        base = DefectRecord(image_path=Path(name), wafer_id="W1", layer="LYA4",
+                            layer_folder="LYA4", col=col, row=row, x=x, y=y)
+        return BaseDefectMatches(base=base)
+
+    prod = config.active_product()
+    # PIDS7 defect (24500.96, 6764.95) → pitch 기준 (3,0).
+    target = mk("/t.jpg", 0, 2, 24500.96, 6764.95)
+    exp_sc = int(24500.96 / prod.camtek_pitch_x * 5)
+    exp_sr = int(6764.95 / prod.camtek_pitch_y * 5)
+
+    # (a) 대상 defect 만
+    rbl = {"LYA4": [target.base]}
+    dlg = HeatmapDialog([target], "LYA4", [], None, lambda i: None, AppSettings(),
+                        records_by_layer=rbl)
+    k_only = dlg._key_for_record(target.base)
+    # (b) 다른 die 의 defect 들을 함께 추가(관측 범위가 크게 달라짐)
+    others = [mk("/o1.jpg", 1, 4, 7497.0, 31062.0), mk("/o2.jpg", 3, 3, 100.0, 200.0)]
+    rbl2 = {"LYA4": [target.base] + [o.base for o in others]}
+    dlg2 = HeatmapDialog([target] + others, "LYA4", [], None, lambda i: None, AppSettings(),
+                         records_by_layer=rbl2)
+    k_with = dlg2._key_for_record(target.base)
+
+    assert (k_only.sub_col, k_only.sub_row) == (exp_sc, exp_sr)
+    assert (k_with.sub_col, k_with.sub_row) == (exp_sc, exp_sr), "record 조합이 달라도 하위셀 불변"
+    assert (k_only.col, k_only.row) == (0, 2)  # die 라벨은 physical 관측 좌표
+
+
+def test_heatmap_wafermap_row0_at_bottom_roundtrip(app):
+    """웨이퍼맵이 row 0 을 화면 맨 아래에 그리고(왼쪽아래 0,0), 클릭 히트테스트가 대칭."""
+    from app.ui.heatmap_dialog import HeatmapWaferMap
+    from app.heatmap import HeatKey
+    from PySide6.QtCore import QPoint
+
+    wm = HeatmapWaferMap()
+    density = {HeatKey(0, 0): 3, HeatKey(0, 3): 5}
+    wm.set_data(1, 4, None, False, density, origin=(0, 0))
+    # row 0 은 row 3 보다 화면상 아래(픽셀 y 가 큼)에 온다.
+    _, y0 = wm._die_origin(0, 0)
+    _, y3 = wm._die_origin(0, 3)
+    assert y0 > y3, "row 0 이 화면 맨 아래여야 한다"
+    # 왕복: 각 die 중심 픽셀을 클릭하면 원래 (col,row) 로 복원된다.
+    for col, row in [(0, 0), (0, 3)]:
+        ox, oy = wm._die_origin(col, row)
+        pt = QPoint(ox + wm._DIE_PX // 2, oy + wm._DIE_PX // 2)
+        key = wm._key_at(pt)
+        assert key is not None and (key.col, key.row) == (col, row)
+
+
 # ---- 8차: 히트맵 모드/드래그/클러스터 · 폴더트리 · 출력 · 도움말 ----
 
 def _make_heatmap(win):

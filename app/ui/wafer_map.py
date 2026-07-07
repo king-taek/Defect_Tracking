@@ -72,9 +72,13 @@ class WaferMapWidget(QWidget):
         self.update()
 
     def _cell_rect(self, col: int, row: int) -> QRect:
-        """실좌표(col,row)를 원점 오프셋을 적용한 픽셀 사각형으로."""
+        """실좌표(col,row)를 원점 오프셋을 적용한 픽셀 사각형으로.
+
+        die row 0 을 화면 맨 아래에 그린다(왼쪽아래 0,0 표준, 위로 갈수록 row 증가).
+        """
         x = _GAP + (col - self._origin_col) * (_CELL + _GAP)
-        y = _GAP + (row - self._origin_row) * (_CELL + _GAP)
+        dr_from_bottom = (self._rows - 1) - (row - self._origin_row)
+        y = _GAP + dr_from_bottom * (_CELL + _GAP)
         return QRect(x, y, _CELL, _CELL)
 
     def paintEvent(self, event):  # noqa: N802
@@ -111,6 +115,7 @@ class WaferMapWidget(QWidget):
         dr = (pos.y() - _GAP) // (_CELL + _GAP)
         if 0 <= dc < self._cols and 0 <= dr < self._rows:
             col = int(dc) + self._origin_col
-            row = int(dr) + self._origin_row
+            # row 0 이 화면 맨 아래이므로(_cell_rect 와 대칭) 세로 인덱스를 반전 복원한다.
+            row = self._origin_row + (self._rows - 1 - int(dr))
             if (col, row) in self._states:
                 self.die_clicked.emit(col, row)
