@@ -273,6 +273,7 @@ def _build_record_for_image(
                 row=kla_res.row,
                 x=kla_res.x,
                 y=kla_res.y,
+                die_pitch_y=kla_res.die_pitch_y,
             )
         trail.append(f"KLA: {kla_res.reason}")
         return DefectRecord(

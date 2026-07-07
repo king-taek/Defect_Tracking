@@ -55,6 +55,9 @@ class DefectRecord:
     dx_size: Optional[float] = None  # defect 크기 X (파일명에 있을 때)
     dy_size: Optional[float] = None  # defect 크기 Y
     d_area: Optional[float] = None  # defect 면적
+    # KLA info 의 실제 DiePitchY. 세부 정보 표시(KLA 규약 좌표 = DiePitchY-Y)에만 쓰고
+    # 매칭에는 관여하지 않는다. Camtek 등 info 가 없는 소스는 None(표시 시 제품 pitch 폴백).
+    die_pitch_y: Optional[float] = None
 
     @property
     def ok(self) -> bool:

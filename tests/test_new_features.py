@@ -866,6 +866,17 @@ def test_image_viewer_info_shows_camtek_and_kla_coords(app):
     assert d._meta.objectName() == "meta"
     assert d._meta.textFormat() == _Qt.PlainText
 
+    # KLA 소스 record 는 저장된 실제 DiePitchY 로 KLA 좌표를 정확히 계산한다(제품 pitch 아님).
+    kla_rec = DefectRecord(
+        image_path=Path("/x/W_-2_1_31_1.jpg"), wafer_id="00RXM179XYE0",
+        layer="RDL4", layer_folder="RDL4", col=1, row=4, x=7497.0, y=31062.0,
+        die_pitch_y=44905.301)
+    dk = ImageViewerDialog(kla_rec)
+    tk = dk._info_text()
+    assert "coordinate (Camtek): (7497, 31062)" in tk
+    # KLA y = round(DiePitchY - y) = round(44905.301 - 31062) = 13843 = 원래 YREL
+    assert "coordinate (KLA): (7497, 13843)" in tk
+
 
 def test_folder_picker_indent_and_explorer_button(app, tmp_path):
     from app.ui.folder_picker import FolderPickerDialog

@@ -48,6 +48,7 @@ class KlaResult:
     row: Optional[int] = None
     x: Optional[float] = None
     y: Optional[float] = None
+    die_pitch_y: Optional[float] = None  # info 의 실제 DiePitchY(세부 정보 표시용)
     reason: str = ""  # 진단용: 실패 사유(성공이면 빈 문자열)
 
 
@@ -284,7 +285,8 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
         )
     x = round(xrel)
     y = round(parsed.die_pitch_y - yrel)
-    return KlaResult(status=ParseStatus.OK, col=col, row=row, x=float(x), y=float(y))
+    return KlaResult(status=ParseStatus.OK, col=col, row=row, x=float(x), y=float(y),
+                     die_pitch_y=float(parsed.die_pitch_y))
 
 
 def convert_kla(info_path: str | Path, jpg_filename: str) -> KlaResult:

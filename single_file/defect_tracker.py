@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.72   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.73   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.72"
+__version__ = "1.33.73"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -815,6 +815,9 @@ class DefectRecord:
     dx_size: Optional[float] = None  # defect 크기 X (파일명에 있을 때)
     dy_size: Optional[float] = None  # defect 크기 Y
     d_area: Optional[float] = None  # defect 면적
+    # KLA info 의 실제 DiePitchY. 세부 정보 표시(KLA 규약 좌표 = DiePitchY-Y)에만 쓰고
+    # 매칭에는 관여하지 않는다. Camtek 등 info 가 없는 소스는 None(표시 시 제품 pitch 폴백).
+    die_pitch_y: Optional[float] = None
 
     @property
     def ok(self) -> bool:
@@ -3003,6 +3006,7 @@ class KlaResult:
     row: Optional[int] = None
     x: Optional[float] = None
     y: Optional[float] = None
+    die_pitch_y: Optional[float] = None  # info 의 실제 DiePitchY(세부 정보 표시용)
     reason: str = ""  # 진단용: 실패 사유(성공이면 빈 문자열)
 
 
@@ -3239,7 +3243,8 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
         )
     x = round(xrel)
     y = round(parsed.die_pitch_y - yrel)
-    return KlaResult(status=ParseStatus.OK, col=col, row=row, x=float(x), y=float(y))
+    return KlaResult(status=ParseStatus.OK, col=col, row=row, x=float(x), y=float(y),
+                     die_pitch_y=float(parsed.die_pitch_y))
 
 
 def convert_kla(info_path: str | Path, jpg_filename: str) -> KlaResult:
@@ -4205,12 +4210,14 @@ class ImageViewerDialog(QDialog):
 
         record 의 (x,y) 는 매칭을 위해 top-left 원점(Camtek 규약)으로 저장된다.
         KLA 규약은 within-die Y 를 DiePitchY 기준으로 반전한 값(YREL)이며 X 는 동일하다.
-        DiePitchY 는 활성 제품의 camtek_pitch_y 를 쓴다(Camtek 전용 폴더엔 info 가 없으므로).
+        DiePitchY 는 record 에 저장된 info 실측값(die_pitch_y)을 우선 쓰고, 없으면(Camtek 등
+        info 가 없는 소스) 활성 제품의 camtek_pitch_y 로 폴백한다.
         """
         r = self.record
         if r.x is None or r.y is None:
             return None
-        pitch_y = active_product().camtek_pitch_y
+        pitch_y = r.die_pitch_y if r.die_pitch_y is not None \
+            else active_product().camtek_pitch_y
         camtek = (round(r.x), round(r.y))
         kla = (round(r.x), round(pitch_y - r.y))
         return camtek, kla
@@ -6049,6 +6056,7 @@ def _build_record_for_image(
                 row=kla_res.row,
                 x=kla_res.x,
                 y=kla_res.y,
+                die_pitch_y=kla_res.die_pitch_y,
             )
         trail.append(f"KLA: {kla_res.reason}")
         return DefectRecord(

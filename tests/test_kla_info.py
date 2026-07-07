@@ -25,6 +25,8 @@ def test_kla_worked_example():
     assert res.row == 4
     assert round(res.x) == 4629
     assert round(res.y) == 5351
+    # 세부 정보 표시(KLA 규약 좌표)용으로 실제 DiePitchY 를 결과에 담는다.
+    assert abs(res.die_pitch_y - 44905.301) < 1e-3
 
 
 def test_kla_die_pitch_y_parsed():

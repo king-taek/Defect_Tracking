@@ -136,12 +136,14 @@ class ImageViewerDialog(QDialog):
 
         record 의 (x,y) 는 매칭을 위해 top-left 원점(Camtek 규약)으로 저장된다.
         KLA 규약은 within-die Y 를 DiePitchY 기준으로 반전한 값(YREL)이며 X 는 동일하다.
-        DiePitchY 는 활성 제품의 camtek_pitch_y 를 쓴다(Camtek 전용 폴더엔 info 가 없으므로).
+        DiePitchY 는 record 에 저장된 info 실측값(die_pitch_y)을 우선 쓰고, 없으면(Camtek 등
+        info 가 없는 소스) 활성 제품의 camtek_pitch_y 로 폴백한다.
         """
         r = self.record
         if r.x is None or r.y is None:
             return None
-        pitch_y = config.active_product().camtek_pitch_y
+        pitch_y = r.die_pitch_y if r.die_pitch_y is not None \
+            else config.active_product().camtek_pitch_y
         camtek = (round(r.x), round(r.y))
         kla = (round(r.x), round(pitch_y - r.y))
         return camtek, kla
