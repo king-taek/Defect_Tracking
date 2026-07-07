@@ -842,6 +842,31 @@ def test_image_viewer_scrollbars_off_and_anchor_zoom(app):
     d._zoom_at_cursor(1.2)  # null 이미지에서도 예외 없이 no-op
 
 
+def test_image_viewer_info_shows_camtek_and_kla_coords(app):
+    """사진 클릭 정보에 pos 대신 coordinate(Camtek·KLA 두 규약)가 표시되고,
+    표시 라벨이 '정보 복사' 텍스트와 동일하며 작은 글씨(objectName=meta)다."""
+    from PySide6.QtCore import Qt as _Qt
+    from app.ui.image_viewer import ImageViewerDialog
+    from app.models import DefectRecord
+    from app import config
+    from pathlib import Path
+
+    rec = DefectRecord(
+        image_path=Path("/x/R_TB500_NLP-PIDS7_00RXM180XYH1_2_2_Over Sized Bump_27313.72_35564.77.jpg"),
+        wafer_id="00RXM180XYH1", layer="PIDS7", layer_folder="PIDS7",
+        col=2, row=2, x=27313.72, y=35564.77, defect_name="Over Sized Bump")
+    d = ImageViewerDialog(rec)
+    txt = d._info_text()
+    pitch_y = config.active_product().camtek_pitch_y
+    assert "pos:" not in txt, "pos 필드는 coordinate 로 대체됐다"
+    assert "coordinate (Camtek): (27314, 35565)" in txt
+    assert f"coordinate (KLA): (27314, {round(pitch_y - 35564.77)})" in txt
+    # 사진을 열면 같은 정보가 텍스트로(작은 글씨) 그대로 표시된다.
+    assert d._meta.text() == txt
+    assert d._meta.objectName() == "meta"
+    assert d._meta.textFormat() == _Qt.PlainText
+
+
 def test_folder_picker_indent_and_explorer_button(app, tmp_path):
     from app.ui.folder_picker import FolderPickerDialog
     dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))

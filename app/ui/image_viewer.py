@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app import config
 from app.models import DefectRecord
-from app.ui import theme
 
 _MIN_SCALE = 0.1
 _MAX_SCALE = 8.0
@@ -67,14 +67,12 @@ class ImageViewerDialog(QDialog):
         outer.setContentsMargins(12, 12, 12, 12)
         outer.setSpacing(8)
 
-        rec = self.record
-        meta = QLabel(
-            f"<b>{rec.layer}</b> · wafer {rec.wafer_id} · die({rec.col},{rec.row}) · "
-            f"pos {rec.position_key} · <span style='color:{theme.TEXT_DIM}'>"
-            f"{rec.image_path}</span>"
-        )
+        # 사진을 열면 '정보 복사'와 동일한 라벨링된 정보를 그대로 텍스트로 보여준다(작은 글씨).
+        meta = QLabel(self._info_text())
+        meta.setTextFormat(Qt.PlainText)
         meta.setWordWrap(True)
-        meta.setObjectName("title")
+        meta.setObjectName("meta")
+        self._meta = meta
         # 정보 텍스트를 드래그 선택·복사 가능하게(Ctrl+C). 마우스 커서도 텍스트형으로.
         meta.setTextInteractionFlags(
             Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
@@ -133,15 +131,34 @@ class ImageViewerDialog(QDialog):
         self._scroll.setWidget(self._canvas)
         outer.addWidget(self._scroll, 1)
 
+    def _coord_versions(self):
+        """die 내부 좌표를 Camtek·KLA 두 규약으로 반환. (x,y) 없으면 None.
+
+        record 의 (x,y) 는 매칭을 위해 top-left 원점(Camtek 규약)으로 저장된다.
+        KLA 규약은 within-die Y 를 DiePitchY 기준으로 반전한 값(YREL)이며 X 는 동일하다.
+        DiePitchY 는 활성 제품의 camtek_pitch_y 를 쓴다(Camtek 전용 폴더엔 info 가 없으므로).
+        """
+        r = self.record
+        if r.x is None or r.y is None:
+            return None
+        pitch_y = config.active_product().camtek_pitch_y
+        camtek = (round(r.x), round(r.y))
+        kla = (round(r.x), round(pitch_y - r.y))
+        return camtek, kla
+
     def _info_text(self) -> str:
-        """클립보드 복사용 정돈된 정보 텍스트."""
+        """표시·클립보드 복사용 정돈된 정보 텍스트."""
         r = self.record
         parts = [
             f"layer: {r.layer}",
             f"wafer: {r.wafer_id}",
             f"die: ({r.col},{r.row})",
-            f"pos: {r.position_key}",
         ]
+        cv = self._coord_versions()
+        if cv is not None:
+            (cx, cy), (kx, ky) = cv
+            parts.append(f"coordinate (Camtek): ({cx}, {cy})")
+            parts.append(f"coordinate (KLA): ({kx}, {ky})")
         if r.defect_name:
             parts.append(f"defect: {r.defect_name}")
         if r.dx_size is not None or r.dy_size is not None or r.d_area is not None:

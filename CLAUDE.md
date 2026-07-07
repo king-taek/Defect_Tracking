@@ -31,7 +31,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q
 UI 는 오프스크린 스모크, 순수 로직은 단위 테스트로 검증한다. 새 동작은 회귀 테스트 동반.
 
 ## Git 워크플로
-- 작업 브랜치 `claude/material-comparison-ui-yl27ie` 에서 개발 → 테스트 통과 후 `main` 으로
-  fast-forward 머지 → push. 기능 단위로 커밋한다.
+- **현재 체크아웃된 작업 브랜치**(세션/작업마다 다름)에서 개발 → 테스트 통과 후 `main` 으로
+  fast-forward 머지 → push. 기능 단위로 커밋한다. (브랜치 이름을 여기 고정하지 않는다 —
+  새 브랜치로 옮겨도 이 규칙이 그대로 적용되도록.)
 - 기밀(고객 디바이스 좌표가 담긴 `Origin/*.xlsx`, `*.xlsm`)은 커밋 금지(.gitignore 유지).
   외부 `AOIDeviceDB.xlsx` 는 런타임에만 읽고 저장소에 포함하지 않는다.
