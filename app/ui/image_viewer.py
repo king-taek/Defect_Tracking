@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
-from app.models import DefectRecord
+from app.models import DefectRecord, Source
 
 _MIN_SCALE = 0.1
 _MAX_SCALE = 8.0
@@ -159,8 +159,12 @@ class ImageViewerDialog(QDialog):
         cv = self._coord_versions()
         if cv is not None:
             (cx, cy), (kx, ky) = cv
-            parts.append(f"coordinate (Camtek): ({cx}, {cy})")
-            parts.append(f"coordinate (KLA): ({kx}, {ky})")
+            # 사진을 실제 scan 한 도구의 좌표가 measured, 반대 규약으로 환산한 값이 calculated.
+            kla_scanned = r.source == Source.KLA
+            camtek_tag = "calculated" if kla_scanned else "measured"
+            kla_tag = "measured" if kla_scanned else "calculated"
+            parts.append(f"coordinate (Camtek): ({cx}, {cy}) -> {camtek_tag}")
+            parts.append(f"coordinate (KLA): ({kx}, {ky}) -> {kla_tag}")
         if r.defect_name:
             parts.append(f"defect: {r.defect_name}")
         if r.dx_size is not None or r.dy_size is not None or r.d_area is not None:

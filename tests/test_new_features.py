@@ -847,35 +847,37 @@ def test_image_viewer_info_shows_camtek_and_kla_coords(app):
     표시 라벨이 '정보 복사' 텍스트와 동일하며 작은 글씨(objectName=meta)다."""
     from PySide6.QtCore import Qt as _Qt
     from app.ui.image_viewer import ImageViewerDialog
-    from app.models import DefectRecord
+    from app.models import DefectRecord, Source
     from app import config
     from pathlib import Path
 
+    # Camtek scan → Camtek 이 measured, KLA 는 환산(calculated).
     rec = DefectRecord(
         image_path=Path("/x/R_TB500_NLP-PIDS7_00RXM180XYH1_2_2_Over Sized Bump_27313.72_35564.77.jpg"),
         wafer_id="00RXM180XYH1", layer="PIDS7", layer_folder="PIDS7",
+        source=Source.CAMTEK_FILENAME,
         col=2, row=2, x=27313.72, y=35564.77, defect_name="Over Sized Bump")
     d = ImageViewerDialog(rec)
     txt = d._info_text()
     pitch_y = config.active_product().camtek_pitch_y
     assert "pos:" not in txt, "pos 필드는 coordinate 로 대체됐다"
-    assert "coordinate (Camtek): (27314, 35565)" in txt
-    assert f"coordinate (KLA): (27314, {round(pitch_y - 35564.77)})" in txt
+    assert "coordinate (Camtek): (27314, 35565) -> measured" in txt
+    assert f"coordinate (KLA): (27314, {round(pitch_y - 35564.77)}) -> calculated" in txt
     # 사진을 열면 같은 정보가 텍스트로(작은 글씨) 그대로 표시된다.
     assert d._meta.text() == txt
     assert d._meta.objectName() == "meta"
     assert d._meta.textFormat() == _Qt.PlainText
 
-    # KLA 소스 record 는 저장된 실제 DiePitchY 로 KLA 좌표를 정확히 계산한다(제품 pitch 아님).
+    # KLA scan → 저장된 실제 DiePitchY 로 KLA 좌표를 정확히 계산하고, KLA 가 measured.
     kla_rec = DefectRecord(
         image_path=Path("/x/W_-2_1_31_1.jpg"), wafer_id="00RXM179XYE0",
-        layer="RDL4", layer_folder="RDL4", col=1, row=4, x=7497.0, y=31062.0,
-        die_pitch_y=44905.301)
+        layer="RDL4", layer_folder="RDL4", source=Source.KLA,
+        col=1, row=4, x=7497.0, y=31062.0, die_pitch_y=44905.301)
     dk = ImageViewerDialog(kla_rec)
     tk = dk._info_text()
-    assert "coordinate (Camtek): (7497, 31062)" in tk
+    assert "coordinate (Camtek): (7497, 31062) -> calculated" in tk
     # KLA y = round(DiePitchY - y) = round(44905.301 - 31062) = 13843 = 원래 YREL
-    assert "coordinate (KLA): (7497, 13843)" in tk
+    assert "coordinate (KLA): (7497, 13843) -> measured" in tk
 
 
 def test_folder_picker_indent_and_explorer_button(app, tmp_path):

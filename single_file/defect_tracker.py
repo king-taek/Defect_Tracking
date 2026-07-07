@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.73   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.74   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.73"
+__version__ = "1.33.74"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -4233,8 +4233,12 @@ class ImageViewerDialog(QDialog):
         cv = self._coord_versions()
         if cv is not None:
             (cx, cy), (kx, ky) = cv
-            parts.append(f"coordinate (Camtek): ({cx}, {cy})")
-            parts.append(f"coordinate (KLA): ({kx}, {ky})")
+            # 사진을 실제 scan 한 도구의 좌표가 measured, 반대 규약으로 환산한 값이 calculated.
+            kla_scanned = r.source == Source.KLA
+            camtek_tag = "calculated" if kla_scanned else "measured"
+            kla_tag = "measured" if kla_scanned else "calculated"
+            parts.append(f"coordinate (Camtek): ({cx}, {cy}) -> {camtek_tag}")
+            parts.append(f"coordinate (KLA): ({kx}, {ky}) -> {kla_tag}")
         if r.defect_name:
             parts.append(f"defect: {r.defect_name}")
         if r.dx_size is not None or r.dy_size is not None or r.d_area is not None:
