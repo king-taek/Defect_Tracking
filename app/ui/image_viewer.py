@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
-from app.models import DefectRecord, Source
+from app.models import DefectRecord
 
 _MIN_SCALE = 0.1
 _MAX_SCALE = 8.0
@@ -53,6 +53,9 @@ class ImageViewerDialog(QDialog):
         self._image = self._load(record.image_path)
         self._build()
         self._apply_scale(fit=True)
+        # 최초 표시 전엔 viewport 크기가 아직 확정되지 않아 잘려 보일 수 있다 —
+        # 첫 showEvent 에서 실제 크기로 한 번 더 정확히 재계산한다.
+        self._fit_pending = True
 
         QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self.accept)
         QShortcut(QKeySequence.ZoomIn, self, activated=lambda: self._zoom(1.25))
@@ -156,25 +159,14 @@ class ImageViewerDialog(QDialog):
     def _info_text(self) -> str:
         """표시·클립보드 복사용 정돈된 정보 텍스트."""
         r = self.record
-        parts = [
-            f"layer: {r.layer}",
-            f"wafer: {r.wafer_id}",
-            f"die: ({r.col},{r.row})",
-        ]
+        parts = [f"Layer: {r.layer} / Wafer: {r.wafer_id} / die: ({r.col},{r.row})"]
         cv = self._coord_versions()
         if cv is not None:
             (cx, cy), (kx, ky) = cv
-            # 사진을 실제 scan 한 도구의 좌표가 measured, 반대 규약으로 환산한 값이 calculated.
-            kla_scanned = r.source == Source.KLA
-            camtek_tag = "calculated" if kla_scanned else "measured"
-            kla_tag = "measured" if kla_scanned else "calculated"
-            parts.append(f"coordinate (Camtek): ({cx}, {cy}) -> {camtek_tag}")
-            parts.append(f"coordinate (KLA): ({kx}, {ky}) -> {kla_tag}")
+            parts.append(f"좌표: Camtek: ({cx},{cy}) / KLA: ({kx},{ky})")
         if r.defect_name:
-            parts.append(f"defect: {r.defect_name}")
-        if r.dx_size is not None or r.dy_size is not None or r.d_area is not None:
-            parts.append(f"size: dx={r.dx_size}, dy={r.dy_size}, area={r.d_area}")
-        parts.append(f"path: {r.image_path}")
+            parts.append(f"Defect: {r.defect_name}")
+        parts.append(f"Path: {r.image_path}")
         return "\n".join(parts)
 
     def _copy_info(self) -> None:
@@ -278,6 +270,12 @@ class ImageViewerDialog(QDialog):
                 self._canvas.setCursor(Qt.OpenHandCursor)
                 return True
         return super().eventFilter(obj, event)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if self._fit_pending:
+            self._fit_pending = False
+            self._apply_scale(fit=True)
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)

@@ -819,24 +819,17 @@ def test_main_matching_is_async(win, app):
     assert hasattr(win, "busy") and hasattr(win, "_match_token")
 
 
-def test_heatmap_fullscreen_toggle(win, app):
-    """전체화면 토글 버튼이 반복해서 최대화↔복원을 오갈 수 있어야 한다(재현성 회귀)."""
+def test_heatmap_fullscreen_uses_native_window_button(win, app):
+    """커스텀 버튼이 아니라 OS 제목표시줄의 진짜 최대화 버튼을 쓴다."""
+    from PySide6.QtCore import Qt as _Qt
+
     dlg = _make_heatmap(win)
     for _ in range(5):
         QCoreApplication.processEvents()
+    assert not hasattr(dlg, "btn_fullscreen")
+    assert not hasattr(dlg, "_toggle_fullscreen")
+    assert dlg.windowFlags() & _Qt.WindowMaximizeButtonHint
     assert dlg.isMaximized()
-    assert dlg.btn_fullscreen.text() == "창 크기로"
-    dlg._toggle_fullscreen()
-    for _ in range(5):
-        QCoreApplication.processEvents()
-    assert not dlg.isMaximized()
-    assert dlg.btn_fullscreen.text() == "전체화면"
-    # 한 번 작아진 뒤에도 다시 전체화면으로 돌아갈 수 있어야 한다.
-    dlg._toggle_fullscreen()
-    for _ in range(5):
-        QCoreApplication.processEvents()
-    assert dlg.isMaximized()
-    assert dlg.btn_fullscreen.text() == "창 크기로"
 
 
 def test_heatmap_thumb_size_slider_default_30_percent(win, app):
@@ -847,6 +840,27 @@ def test_heatmap_thumb_size_slider_default_30_percent(win, app):
     dlg.sld_thumb.setValue(60)
     assert dlg._thumb_px == 300
     assert dlg.lbl_thumb_pct.text() == "60%"
+
+
+def test_heatmap_thumb_size_slider_debounces_when_many_photos(win, app):
+    """사진이 20장 넘으면 슬라이더가 멈춘 뒤(디바운스)에만 다시 그린다."""
+    dlg = _make_heatmap(win)
+    dlg._pending_thumbs = list(range(25))  # 20장 초과 흉내
+    dlg.sld_thumb.setValue(50)
+    assert dlg._thumb_px == 250  # 값 자체는 즉시 갱신
+    assert dlg._thumb_resize_timer.isActive()
+    assert dlg._pending_thumbs == list(range(25)), "타이머 만료 전엔 다시 그리면 안 된다"
+    dlg._thumb_resize_timer.timeout.emit()  # 슬라이더가 멈춘 뒤(디바운스 만료) 시뮬레이션
+    assert dlg._pending_thumbs == [], "만료되면 _rebuild_detail 이 호출돼야 한다"
+
+
+def test_heatmap_thumb_size_slider_immediate_when_few_photos(win, app):
+    """사진이 20장 이하면 슬라이더를 움직일 때마다 바로 반영한다."""
+    dlg = _make_heatmap(win)
+    dlg._pending_thumbs = list(range(5))
+    dlg.sld_thumb.setValue(70)
+    assert not dlg._thumb_resize_timer.isActive()
+    assert dlg._pending_thumbs == [], "20장 이하면 즉시 _rebuild_detail 이 호출돼야 한다"
 
 
 def test_heatmap_detail_thumbs_deferred(win, app):
@@ -872,16 +886,15 @@ def test_image_viewer_scrollbars_off_and_anchor_zoom(app):
     d._zoom_at_cursor(1.2)  # null 이미지에서도 예외 없이 no-op
 
 
-def test_image_viewer_info_shows_camtek_and_kla_coords(app):
-    """사진 클릭 정보에 pos 대신 coordinate(Camtek·KLA 두 규약)가 표시되고,
-    표시 라벨이 '정보 복사' 텍스트와 동일하며 작은 글씨(objectName=meta)다."""
+def test_image_viewer_info_compact_format(app):
+    """정보 텍스트가 'Layer/Wafer/die' 한 줄 + '좌표: Camtek/KLA' 한 줄 +
+    Defect/Path 로 간결하게 표시되고(측정/계산 태그·size 줄 없음), 표시 라벨이
+    '정보 복사' 텍스트와 동일하며 작은 글씨(objectName=meta)다."""
     from PySide6.QtCore import Qt as _Qt
     from app.ui.image_viewer import ImageViewerDialog
     from app.models import DefectRecord, Source
-    from app import config
     from pathlib import Path
 
-    # Camtek scan → Camtek 이 measured, KLA 는 환산(calculated).
     rec = DefectRecord(
         image_path=Path("/x/R_TB500_NLP-PIDS7_00RXM180XYH1_2_2_Over Sized Bump_27313.72_35564.77.jpg"),
         wafer_id="00RXM180XYH1", layer="PIDS7", layer_folder="PIDS7",
@@ -889,25 +902,28 @@ def test_image_viewer_info_shows_camtek_and_kla_coords(app):
         col=2, row=2, x=27313.72, y=35564.77, defect_name="Over Sized Bump")
     d = ImageViewerDialog(rec)
     txt = d._info_text()
-    pitch_y = config.active_product().camtek_pitch_y
-    assert "pos:" not in txt, "pos 필드는 coordinate 로 대체됐다"
-    assert "coordinate (Camtek): (27314, 35565) -> measured" in txt
-    assert f"coordinate (KLA): (27314, {round(pitch_y - 35564.77)}) -> calculated" in txt
+    assert "measured" not in txt and "calculated" not in txt
+    assert "size:" not in txt.lower()
+    assert "Layer: PIDS7 / Wafer: 00RXM180XYH1 / die: (2,2)" in txt
+    assert "좌표: Camtek: (27314,35565) / KLA:" in txt
+    assert "Defect: Over Sized Bump" in txt
+    assert f"Path: {rec.image_path}" in txt
     # 사진을 열면 같은 정보가 텍스트로(작은 글씨) 그대로 표시된다.
     assert d._meta.text() == txt
     assert d._meta.objectName() == "meta"
     assert d._meta.textFormat() == _Qt.PlainText
 
-    # KLA scan → 저장된 실제 DiePitchY 로 KLA 좌표를 정확히 계산하고, KLA 가 measured.
+    # KLA scan → 저장된 실제 DiePitchY 로 KLA 좌표를 정확히 계산한다.
     kla_rec = DefectRecord(
         image_path=Path("/x/W_-2_1_31_1.jpg"), wafer_id="00RXM179XYE0",
         layer="RDL4", layer_folder="RDL4", source=Source.KLA,
         col=1, row=4, x=7497.0, y=31062.0, die_pitch_y=44905.301)
     dk = ImageViewerDialog(kla_rec)
     tk = dk._info_text()
-    assert "coordinate (Camtek): (7497, 31062) -> calculated" in tk
     # KLA y = round(DiePitchY - y) = round(44905.301 - 31062) = 13843 = 원래 YREL
-    assert "coordinate (KLA): (7497, 13843) -> measured" in tk
+    assert "좌표: Camtek: (7497,31062) / KLA: (7497,13843)" in tk
+    # defect_name 이 없으면 Defect 줄은 생략된다.
+    assert "Defect:" not in tk
 
 
 def test_image_viewer_shorter_default_and_resizable(app):
@@ -923,6 +939,22 @@ def test_image_viewer_shorter_default_and_resizable(app):
     # 최대화 버튼 힌트가 켜져 있어야 창이 확실히 리사이즈 가능한 일반 창으로 동작한다.
     assert d.windowFlags() & _Qt.WindowMaximizeButtonHint
     assert d.isSizeGripEnabled()
+
+
+def test_image_viewer_recomputes_fit_on_first_show(app):
+    """첫 표시 전 계산한 맞춤 배율을 showEvent 에서 실제 크기로 재계산해 잘림을 없앤다."""
+    from app.ui.image_viewer import ImageViewerDialog
+    from app.models import DefectRecord
+    from pathlib import Path
+
+    d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
+                                       layer="L", layer_folder="L", col=1, row=1, x=0.0, y=0.0))
+    assert d._fit_pending is True  # 생성 직후엔 아직 정확한 크기로 재계산 전
+    d.show()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert d._fit_pending is False  # 첫 showEvent 에서 소비됨
+    d.close()
 
 
 def test_image_viewer_zoom_buttons_have_large_glyph_style(app):
@@ -946,6 +978,8 @@ def test_folder_picker_goto_scan_root_button(app, tmp_path):
     s = AppSettings(workspace=str(tmp_path / "ws"), scan_root_path=str(target))
     dlg = FolderPickerDialog(s, str(tmp_path))
     assert hasattr(dlg, "btn_goto_scan")
+    # '이동' 버튼 높이가 주소창(ed_scan_root)과 같아야 한다.
+    assert dlg.btn_goto_scan.height() == dlg.ed_scan_root.sizeHint().height()
     visited = []
     dlg._go_to = lambda p: visited.append(p)  # noqa: E731 - 실제 탐색 대신 호출만 확인
     dlg._goto_scan_root()

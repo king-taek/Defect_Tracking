@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Callable, Optional
 
-from PySide6.QtCore import QRect, Qt, QThreadPool, Signal
+from PySide6.QtCore import QRect, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -323,7 +323,16 @@ class HeatmapDialog(QDialog):
         # 상세 목록 사진 크기(퍼센트, 100%=_THUMB_PX). 기본 30%가 기존 고정 크기와 같다.
         self._thumb_percent = 30
         self._thumb_px = int(_THUMB_PX * self._thumb_percent / 100)
+        # 사진이 많으면(20장 초과) 슬라이더 드래그 중 매 틱 재렌더링이 버벅이므로
+        # 슬라이더가 멈춘 뒤(디바운스)에만 반영한다. 적으면 실시간 반영.
+        self._thumb_resize_timer = QTimer(self)
+        self._thumb_resize_timer.setSingleShot(True)
+        self._thumb_resize_timer.setInterval(300)
+        self._thumb_resize_timer.timeout.connect(self._rebuild_detail)
         self.setWindowTitle("Defect 히트맵")
+        # 최대화 버튼 힌트를 켜면 제목표시줄에 실제 OS 최대화/복원 버튼이 생겨
+        # 창을 줄인 뒤에도 다시 최대화할 수 있다(커스텀 버튼 대신 OS 가 상태 관리).
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
         self.setMinimumSize(900, 600)
 
         self._groups: dict[HeatKey, list[int]] = {}
@@ -441,11 +450,6 @@ class HeatmapDialog(QDialog):
             self.cmb_wafer.setCurrentText(self._current_wafer)
         self.cmb_wafer.currentTextChanged.connect(self._on_wafer_changed)
         bar.addWidget(self.cmb_wafer)
-        # 시작이 이미 최대화 상태이므로 버튼은 "창 크기로"부터 시작한다.
-        self.btn_fullscreen = QPushButton("창 크기로")
-        self.btn_fullscreen.setObjectName("mini")
-        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
-        bar.addWidget(self.btn_fullscreen)
         outer.addLayout(bar)
 
         # 조사할 layer(기준 개념 없음): 모든 layer 를 체크박스로, 체크된 것들의 defect 을 교차 조사.
@@ -565,14 +569,6 @@ class HeatmapDialog(QDialog):
         return panel
 
     # ---- 웨이퍼맵 / 상호작용 ----------------------------------------
-    def _toggle_fullscreen(self) -> None:
-        if self.isMaximized():
-            self.showNormal()
-            self.btn_fullscreen.setText("전체화면")
-        else:
-            self.showMaximized()
-            self.btn_fullscreen.setText("창 크기로")
-
     def _on_wafer_changed(self, wafer: str) -> None:
         self._current_wafer = wafer
         self._selected_keys = []
@@ -730,7 +726,11 @@ class HeatmapDialog(QDialog):
         self._thumb_percent = value
         self._thumb_px = int(_THUMB_PX * value / 100)
         self.lbl_thumb_pct.setText(f"{value}%")
-        self._rebuild_detail()
+        if len(self._pending_thumbs) <= 20:
+            self._rebuild_detail()
+        else:
+            # 사진이 많으면 슬라이더가 멈춘 뒤(디바운스)에만 다시 그린다.
+            self._thumb_resize_timer.start()
 
     def _rebuild_detail(self) -> None:
         self._clear_detail()

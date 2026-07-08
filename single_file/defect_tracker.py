@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.76   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.77   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.76"
+__version__ = "1.33.77"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -4157,6 +4157,9 @@ class ImageViewerDialog(QDialog):
         self._image = self._load(record.image_path)
         self._build()
         self._apply_scale(fit=True)
+        # 최초 표시 전엔 viewport 크기가 아직 확정되지 않아 잘려 보일 수 있다 —
+        # 첫 showEvent 에서 실제 크기로 한 번 더 정확히 재계산한다.
+        self._fit_pending = True
 
         QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self.accept)
         QShortcut(QKeySequence.ZoomIn, self, activated=lambda: self._zoom(1.25))
@@ -4260,25 +4263,14 @@ class ImageViewerDialog(QDialog):
     def _info_text(self) -> str:
         """표시·클립보드 복사용 정돈된 정보 텍스트."""
         r = self.record
-        parts = [
-            f"layer: {r.layer}",
-            f"wafer: {r.wafer_id}",
-            f"die: ({r.col},{r.row})",
-        ]
+        parts = [f"Layer: {r.layer} / Wafer: {r.wafer_id} / die: ({r.col},{r.row})"]
         cv = self._coord_versions()
         if cv is not None:
             (cx, cy), (kx, ky) = cv
-            # 사진을 실제 scan 한 도구의 좌표가 measured, 반대 규약으로 환산한 값이 calculated.
-            kla_scanned = r.source == Source.KLA
-            camtek_tag = "calculated" if kla_scanned else "measured"
-            kla_tag = "measured" if kla_scanned else "calculated"
-            parts.append(f"coordinate (Camtek): ({cx}, {cy}) -> {camtek_tag}")
-            parts.append(f"coordinate (KLA): ({kx}, {ky}) -> {kla_tag}")
+            parts.append(f"좌표: Camtek: ({cx},{cy}) / KLA: ({kx},{ky})")
         if r.defect_name:
-            parts.append(f"defect: {r.defect_name}")
-        if r.dx_size is not None or r.dy_size is not None or r.d_area is not None:
-            parts.append(f"size: dx={r.dx_size}, dy={r.dy_size}, area={r.d_area}")
-        parts.append(f"path: {r.image_path}")
+            parts.append(f"Defect: {r.defect_name}")
+        parts.append(f"Path: {r.image_path}")
         return "\n".join(parts)
 
     def _copy_info(self) -> None:
@@ -4382,6 +4374,12 @@ class ImageViewerDialog(QDialog):
                 self._canvas.setCursor(Qt.OpenHandCursor)
                 return True
         return super().eventFilter(obj, event)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if self._fit_pending:
+            self._fit_pending = False
+            self._apply_scale(fit=True)
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -7595,27 +7593,26 @@ class FolderPickerDialog(QDialog):
         sb.setSpacing(4)
         cap = QLabel(f"📌 {getattr(self.settings, 'scan_root_name', '') or '스캔 데이터'} 위치")
         cap.setStyleSheet(f"font-size:11px; font-weight:700; color:{NEON};")
-        sb.addWidget(cap)
+        cap_row = QHBoxLayout()
+        cap_row.setSpacing(4)
+        cap_row.addWidget(cap, 1)
+        btn_scan = QPushButton("찾기")
+        btn_scan.setObjectName("mini")
+        btn_scan.setFixedWidth(48)
+        btn_scan.clicked.connect(self._pick_scan_root)
+        cap_row.addWidget(btn_scan, 0)
+        sb.addLayout(cap_row)
         row = QHBoxLayout()
         row.setSpacing(4)
         self.ed_scan_root = QLineEdit(getattr(self.settings, "scan_root_path", "") or "")
         self.ed_scan_root.setPlaceholderText("스캔 데이터 폴더 경로 — 설정하면 트리 맨 위에 고정")
         self.ed_scan_root.returnPressed.connect(self._apply_scan_root)
         row.addWidget(self.ed_scan_root, 1)
-        btn_col = QVBoxLayout()
-        btn_col.setSpacing(2)
-        btn_scan = QPushButton("찾기")
-        btn_scan.setObjectName("mini")
-        btn_scan.setFixedWidth(48)
-        btn_scan.clicked.connect(self._pick_scan_root)
-        btn_col.addWidget(btn_scan)
         self.btn_goto_scan = QPushButton("이동")
-        self.btn_goto_scan.setObjectName("mini")
-        self.btn_goto_scan.setFixedWidth(48)
         self.btn_goto_scan.setToolTip("지정된 Conder Scan 폴더 위치로 이동")
         self.btn_goto_scan.clicked.connect(self._goto_scan_root)
-        btn_col.addWidget(self.btn_goto_scan)
-        row.addLayout(btn_col)
+        self.btn_goto_scan.setFixedHeight(self.ed_scan_root.sizeHint().height())
+        row.addWidget(self.btn_goto_scan, 0)
         sb.addLayout(row)
         left.addWidget(scan_box)
 
@@ -8452,7 +8449,16 @@ class HeatmapDialog(QDialog):
         # 상세 목록 사진 크기(퍼센트, 100%=_THUMB_PX). 기본 30%가 기존 고정 크기와 같다.
         self._thumb_percent = 30
         self._thumb_px = int(heatmap_dialog__THUMB_PX * self._thumb_percent / 100)
+        # 사진이 많으면(20장 초과) 슬라이더 드래그 중 매 틱 재렌더링이 버벅이므로
+        # 슬라이더가 멈춘 뒤(디바운스)에만 반영한다. 적으면 실시간 반영.
+        self._thumb_resize_timer = QTimer(self)
+        self._thumb_resize_timer.setSingleShot(True)
+        self._thumb_resize_timer.setInterval(300)
+        self._thumb_resize_timer.timeout.connect(self._rebuild_detail)
         self.setWindowTitle("Defect 히트맵")
+        # 최대화 버튼 힌트를 켜면 제목표시줄에 실제 OS 최대화/복원 버튼이 생겨
+        # 창을 줄인 뒤에도 다시 최대화할 수 있다(커스텀 버튼 대신 OS 가 상태 관리).
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
         self.setMinimumSize(900, 600)
 
         self._groups: dict[HeatKey, list[int]] = {}
@@ -8570,11 +8576,6 @@ class HeatmapDialog(QDialog):
             self.cmb_wafer.setCurrentText(self._current_wafer)
         self.cmb_wafer.currentTextChanged.connect(self._on_wafer_changed)
         bar.addWidget(self.cmb_wafer)
-        # 시작이 이미 최대화 상태이므로 버튼은 "창 크기로"부터 시작한다.
-        self.btn_fullscreen = QPushButton("창 크기로")
-        self.btn_fullscreen.setObjectName("mini")
-        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
-        bar.addWidget(self.btn_fullscreen)
         outer.addLayout(bar)
 
         # 조사할 layer(기준 개념 없음): 모든 layer 를 체크박스로, 체크된 것들의 defect 을 교차 조사.
@@ -8694,14 +8695,6 @@ class HeatmapDialog(QDialog):
         return panel
 
     # ---- 웨이퍼맵 / 상호작용 ----------------------------------------
-    def _toggle_fullscreen(self) -> None:
-        if self.isMaximized():
-            self.showNormal()
-            self.btn_fullscreen.setText("전체화면")
-        else:
-            self.showMaximized()
-            self.btn_fullscreen.setText("창 크기로")
-
     def _on_wafer_changed(self, wafer: str) -> None:
         self._current_wafer = wafer
         self._selected_keys = []
@@ -8858,7 +8851,11 @@ class HeatmapDialog(QDialog):
         self._thumb_percent = value
         self._thumb_px = int(heatmap_dialog__THUMB_PX * value / 100)
         self.lbl_thumb_pct.setText(f"{value}%")
-        self._rebuild_detail()
+        if len(self._pending_thumbs) <= 20:
+            self._rebuild_detail()
+        else:
+            # 사진이 많으면 슬라이더가 멈춘 뒤(디바운스)에만 다시 그린다.
+            self._thumb_resize_timer.start()
 
     def _rebuild_detail(self) -> None:
         self._clear_detail()
