@@ -233,11 +233,20 @@ class FolderPickerDialog(QDialog):
         self.ed_scan_root.setPlaceholderText("스캔 데이터 폴더 경로 — 설정하면 트리 맨 위에 고정")
         self.ed_scan_root.returnPressed.connect(self._apply_scan_root)
         row.addWidget(self.ed_scan_root, 1)
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(2)
         btn_scan = QPushButton("찾기")
         btn_scan.setObjectName("mini")
         btn_scan.setFixedWidth(48)
         btn_scan.clicked.connect(self._pick_scan_root)
-        row.addWidget(btn_scan)
+        btn_col.addWidget(btn_scan)
+        self.btn_goto_scan = QPushButton("이동")
+        self.btn_goto_scan.setObjectName("mini")
+        self.btn_goto_scan.setFixedWidth(48)
+        self.btn_goto_scan.setToolTip("지정된 Conder Scan 폴더 위치로 이동")
+        self.btn_goto_scan.clicked.connect(self._goto_scan_root)
+        btn_col.addWidget(self.btn_goto_scan)
+        row.addLayout(btn_col)
         sb.addLayout(row)
         left.addWidget(scan_box)
 
@@ -403,6 +412,14 @@ class FolderPickerDialog(QDialog):
         if path:
             self.ed_scan_root.setText(path)
             self._apply_scan_root()
+
+    def _goto_scan_root(self) -> None:
+        """지정 칸에 이미 저장된 스캔 데이터 폴더 경로로 바로 이동."""
+        path = self.ed_scan_root.text().strip()
+        if path and Path(path).is_dir():
+            self._go_to(self._safe_dir(path))
+        else:
+            self._set_banner("too_high", "지정된 폴더가 없거나 존재하지 않습니다.")
 
     def _pin_scan_roots(self, search_roots: list[str]) -> None:
         """스캔 데이터 폴더를 최상위 '📌' 고정 노드로 추가.

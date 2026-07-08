@@ -125,6 +125,12 @@ QPushButton#mini:checked {{
     font-weight: 700;
 }}
 QPushButton#mini:checked:hover {{ background-color: {NEON}; }}
+/* 확대 화면 줌 −/＋ 버튼 — 버튼 크기는 그대로 두고 글자만 키운다 */
+QPushButton#zoomGlyph {{
+    font-size: 20px;
+    font-weight: 700;
+    padding: 2px 0;
+}}
 
 /* 스크롤 영역은 기본 흰 배경 대신 투명(뒤 패널이 비치게) */
 QScrollArea {{ background: transparent; border: none; }}

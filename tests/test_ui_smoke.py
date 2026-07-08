@@ -66,6 +66,19 @@ def test_tolerance_change_preserves_index(win):
     assert win.current == 3, "허용오차 변경이 현재 인덱스를 리셋하면 안 된다"
 
 
+def test_cluster_radius_change_preserves_index_and_saves(win):
+    """사이드바(허용 오차 바로 아래)로 옮긴 클러스터 길이 스핀박스가 배선돼 있는지."""
+    win._goto(2)
+    assert win.current == 2
+    win.top.spn_cluster.setValue(80.0)  # cluster_radius_changed → _cluster_timer 디바운스 시작
+    assert win._cluster_timer.isActive()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert win.current == 2, "클러스터 길이 변경이 현재 인덱스를 리셋하면 안 된다"
+    win._save_prefs()
+    assert win.settings.cluster_radius == 80.0
+
+
 def test_set_layers_rereview_default(app):
     from app.ui.controls import SideBar
 
@@ -315,7 +328,12 @@ def test_wafer_map_updates(win):
     item = win.matches[0]
     win._update_wafer_map(item)
     assert win.wafer_map._cols >= 1 and win.wafer_map._rows >= 1
-    assert (item.base.col, item.base.row) in win.wafer_map._states
+    # 미매칭은 무시하고 매칭만 히트맵 색으로 표시한다.
+    key = (item.base.col, item.base.row)
+    if win._match_status(item) == "matched":
+        assert key in win.wafer_map._states
+    else:
+        assert key not in win.wafer_map._states
 
 
 def test_wafer_map_paints_observed_die_outside_device_shape(win):
@@ -354,7 +372,15 @@ def test_wafer_map_paints_observed_die_outside_device_shape(win):
         assert win.wafer_map._valid is not None
         # 수정 전에는 missing die 가 valid 밖이라 그려지지 않았을 것 — 이제는 포함돼야 한다.
         assert missing in win.wafer_map._valid
-        assert missing in win.wafer_map._states
+        # 색칠(states)은 매칭된 die 만 — missing 이 매칭이면 색칠도, 아니면 빈칸이어야 한다.
+        missing_match = next(
+            m for m in win.matches
+            if m.base.wafer_id == wafer and (m.base.col, m.base.row) == missing
+        )
+        if win._match_status(missing_match) == "matched":
+            assert missing in win.wafer_map._states
+        else:
+            assert missing not in win.wafer_map._states
     finally:
         config.set_active_product(prod.key)
         config.PRODUCTS.pop("TESTDEV_PARTIAL", None)
@@ -525,16 +551,18 @@ def test_settings_dialog_dev_mode_toggle(app, tmp_path):
     assert dlg.updated_settings().dev_mode is False
 
 
-def test_settings_dialog_cluster_radius(app, tmp_path):
-    """defect 클러스터 거리 스핀박스가 설정을 읽고/쓴다."""
-    from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+def test_sidebar_cluster_radius(app):
+    """DEFECT 클러스터 길이 스핀박스가 허용 오차 바로 아래(사이드바)에서 값을 읽고/쓴다."""
+    from app.ui.controls import SideBar
 
-    s = AppSettings(workspace=str(tmp_path / "ws"), cluster_radius=42.0)
-    dlg = SettingsDialog(s, current_lot=None)
-    assert dlg.spn_cluster.value() == 42.0
-    dlg.spn_cluster.setValue(75.0)
-    assert dlg.updated_settings().cluster_radius == 75.0
+    sb = SideBar()
+    sb.set_cluster_radius(42.0)
+    assert sb.cluster_radius() == 42.0
+    received = []
+    sb.cluster_radius_changed.connect(received.append)
+    sb.spn_cluster.setValue(75.0)
+    assert sb.cluster_radius() == 75.0
+    assert received == [75.0]
 
 
 def test_stop_scan_hides_progress(win):

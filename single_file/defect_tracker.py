@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.75   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.76   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -59,14 +59,14 @@ from urllib.request import Request, urlopen
 from PIL import Image
 from PySide6.QtCore import QDir, QEasingCurve, QEvent, QEventLoop, QMargins, QObject, QParallelAnimationGroup, QPoint, QPropertyAnimation, QRect, QRectF, QRunnable, QSize, QStorageInfo, QThreadPool, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QShortcut
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLayout, QLayoutItem, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplashScreen, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLayout, QLayoutItem, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplashScreen, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.75"
+__version__ = "1.33.76"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -1377,6 +1377,12 @@ QPushButton#mini:checked {{
     font-weight: 700;
 }}
 QPushButton#mini:checked:hover {{ background-color: {NEON}; }}
+/* 확대 화면 줌 −/＋ 버튼 — 버튼 크기는 그대로 두고 글자만 키운다 */
+QPushButton#zoomGlyph {{
+    font-size: 20px;
+    font-weight: 700;
+    padding: 2px 0;
+}}
 
 /* 스크롤 영역은 기본 흰 배경 대신 투명(뒤 패널이 비치게) */
 QScrollArea {{ background: transparent; border: none; }}
@@ -3528,7 +3534,7 @@ class BusyOverlay(QWidget):
 # =============================================================================
 """좌측 사이드바 컨트롤 및 하단 탐색 바 (문서 Section 8.1, 8.3, 8.5).
 
-사이드바(세로): 자재 폴더 선택 / 자재명 / 기준 Layer / 허용 오차 /
+사이드바(세로): 자재 폴더 선택 / 자재명 / 기준 Layer / 허용 오차 / DEFECT 클러스터 길이 /
 비교 Layer(체크, 세로 스크롤) / 설정·업데이트·결과 출력하기
 탐색 바: 이전 / 현재 index·전체 / 다음
 
@@ -3577,6 +3583,7 @@ class SideBar(QFrame):
     base_layer_changed = Signal(str)
     compare_layers_changed = Signal()
     tolerance_changed = Signal(float)
+    cluster_radius_changed = Signal(float)
     export_requested = Signal()
     settings_requested = Signal()
     update_requested = Signal()
@@ -3634,6 +3641,21 @@ class SideBar(QFrame):
         )
         self.spn_tol.valueChanged.connect(self.tolerance_changed)
         outer.addWidget(self.spn_tol)
+
+        # ── DEFECT 클러스터 길이 (허용 오차 바로 아래)
+        outer.addWidget(self._section_label("DEFECT 클러스터 길이"))
+        self.spn_cluster = NoScrollDoubleSpinBox()
+        self.spn_cluster.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spn_cluster.setRange(0.0, 100000.0)
+        self.spn_cluster.setDecimals(1)
+        self.spn_cluster.setSingleStep(5.0)
+        self.spn_cluster.setValue(DEFAULT_CLUSTER_RADIUS)
+        self.spn_cluster.setToolTip(
+            "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어"
+            " 대표 1장+'+n' 으로 봅니다."
+        )
+        self.spn_cluster.valueChanged.connect(self.cluster_radius_changed)
+        outer.addWidget(self.spn_cluster)
 
         # 실시간 매칭 요약(허용오차 튜닝 피드백)
         self.lbl_match = QLabel("")
@@ -3859,6 +3881,14 @@ class SideBar(QFrame):
 
     def tolerance(self) -> float:
         return self.spn_tol.value()
+
+    def cluster_radius(self) -> float:
+        return self.spn_cluster.value()
+
+    def set_cluster_radius(self, value: float) -> None:
+        self.spn_cluster.blockSignals(True)
+        self.spn_cluster.setValue(value)
+        self.spn_cluster.blockSignals(False)
 
 
 class NavBar(QFrame):
@@ -4111,8 +4141,11 @@ class ImageViewerDialog(QDialog):
         super().__init__(parent)
         self.record = record
         self.setWindowTitle(f"원본 보기 — {Path(record.image_path).name}")
-        self.setMinimumSize(640, 520)
-        self.resize(960, 760)
+        # 최대화 버튼 힌트를 켜면 창이 확실히 리사이즈 가능한 일반 창으로 동작한다.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setSizeGripEnabled(True)
+        self.setMinimumSize(640, 440)
+        self.resize(960, 620)
         self._scale = 1.0
         self._fit = True
         # 클릭-드래그 패닝 상태(항목 6)
@@ -4166,9 +4199,11 @@ class ImageViewerDialog(QDialog):
         self.btn_fit.setCheckable(False)
         self.btn_fit.clicked.connect(self._toggle_fit)
         btn_zoom_out = QPushButton("－")
+        btn_zoom_out.setObjectName("zoomGlyph")
         btn_zoom_out.setFixedWidth(40)
         btn_zoom_out.clicked.connect(lambda: self._zoom(0.8))
         btn_zoom_in = QPushButton("＋")
+        btn_zoom_in.setObjectName("zoomGlyph")
         btn_zoom_in.setFixedWidth(40)
         btn_zoom_in.clicked.connect(lambda: self._zoom(1.25))
         self.lbl_zoom = QLabel("100%")
@@ -4597,19 +4632,6 @@ class SettingsDialog(QDialog):
         if self._settings.device_db_path:
             self._load_db(self._settings.device_db_path, select=self._settings.product)
 
-        # defect 근접 클러스터링 거리 — 같은 die 안에서 이 값 미만이면 하나로 묶는다.
-        self.spn_cluster = QDoubleSpinBox()
-        self.spn_cluster.setRange(0.0, 100000.0)
-        self.spn_cluster.setDecimals(1)
-        self.spn_cluster.setSingleStep(5.0)
-        self.spn_cluster.setValue(
-            getattr(self._settings, "cluster_radius", DEFAULT_CLUSTER_RADIUS)
-        )
-        self.spn_cluster.setToolTip(
-            "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어 대표 1장+‘+n’ 으로 봅니다."
-        )
-        form.addRow("defect 클러스터 거리", self.spn_cluster)
-
         # 전체 UI 글자 크기(보통/크게).
         self.cmb_font = NoScrollComboBox()
         self.cmb_font.addItem("보통", "normal")
@@ -4868,7 +4890,6 @@ class SettingsDialog(QDialog):
         self._settings.output_folder = self.ed_output.text().strip()
         self._settings.log_dir = self.ed_log_dir.text().strip()
         self._settings.dev_mode = self.btn_dev.isChecked()
-        self._settings.cluster_radius = self.spn_cluster.value()
         self._settings.auto_update_check = self.chk_update.isChecked()
         self._settings.product = self.cmb_product.currentData() or DEFAULT_PRODUCT
         self._settings.device_db_path = self.ed_device_db.text().strip()
@@ -4946,7 +4967,7 @@ def show_status(splash: QSplashScreen, text: str) -> None:
 die 클릭 시 해당 기준 사진으로 점프한다. 리뷰 현황을 한눈에 본다.
 
 상태 색:
-  matched(매칭)=초록, none(전무)=빨강, 기준없음=빈칸.
+  matched(매칭)=초록. 미매칭·기준없음은 빈칸(무시).
 """
 
 
@@ -4958,7 +4979,6 @@ _GAP = 2
 
 _STATE_COLORS = {
     "matched": MATCH,
-    "none": NOMATCH,
 }
 
 
@@ -7582,11 +7602,20 @@ class FolderPickerDialog(QDialog):
         self.ed_scan_root.setPlaceholderText("스캔 데이터 폴더 경로 — 설정하면 트리 맨 위에 고정")
         self.ed_scan_root.returnPressed.connect(self._apply_scan_root)
         row.addWidget(self.ed_scan_root, 1)
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(2)
         btn_scan = QPushButton("찾기")
         btn_scan.setObjectName("mini")
         btn_scan.setFixedWidth(48)
         btn_scan.clicked.connect(self._pick_scan_root)
-        row.addWidget(btn_scan)
+        btn_col.addWidget(btn_scan)
+        self.btn_goto_scan = QPushButton("이동")
+        self.btn_goto_scan.setObjectName("mini")
+        self.btn_goto_scan.setFixedWidth(48)
+        self.btn_goto_scan.setToolTip("지정된 Conder Scan 폴더 위치로 이동")
+        self.btn_goto_scan.clicked.connect(self._goto_scan_root)
+        btn_col.addWidget(self.btn_goto_scan)
+        row.addLayout(btn_col)
         sb.addLayout(row)
         left.addWidget(scan_box)
 
@@ -7752,6 +7781,14 @@ class FolderPickerDialog(QDialog):
         if path:
             self.ed_scan_root.setText(path)
             self._apply_scan_root()
+
+    def _goto_scan_root(self) -> None:
+        """지정 칸에 이미 저장된 스캔 데이터 폴더 경로로 바로 이동."""
+        path = self.ed_scan_root.text().strip()
+        if path and Path(path).is_dir():
+            self._go_to(self._safe_dir(path))
+        else:
+            self._set_banner("too_high", "지정된 폴더가 없거나 존재하지 않습니다.")
 
     def _pin_scan_roots(self, search_roots: list[str]) -> None:
         """스캔 데이터 폴더를 최상위 '📌' 고정 노드로 추가.
@@ -8135,7 +8172,7 @@ wafer 선택에서 '전체'를 고르면 모든 wafer 의 defect 을 한 장에 
 
 
 _ALL_WAFERS = "전체"
-heatmap_dialog__THUMB_PX = 150  # 상세 목록 썸네일 크기(고정)
+heatmap_dialog__THUMB_PX = 500  # 상세 목록 썸네일 100% 기준 크기(슬라이더로 퍼센트 조절)
 
 
 # 히트맵 die 색(배경 theme.BG 위에서 잘 보이도록 밝게). 배경/빈 die 와 구분된다.
@@ -8412,6 +8449,9 @@ class HeatmapDialog(QDialog):
         self._cluster_radius = (
             getattr(settings, "cluster_radius", None) or DEFAULT_CLUSTER_RADIUS
         )
+        # 상세 목록 사진 크기(퍼센트, 100%=_THUMB_PX). 기본 30%가 기존 고정 크기와 같다.
+        self._thumb_percent = 30
+        self._thumb_px = int(heatmap_dialog__THUMB_PX * self._thumb_percent / 100)
         self.setWindowTitle("Defect 히트맵")
         self.setMinimumSize(900, 600)
 
@@ -8432,7 +8472,7 @@ class HeatmapDialog(QDialog):
 
         self._build()
         # 시작 시 전체화면(최대화). exec 모달에서도 유지된다.
-        self.setWindowState(Qt.WindowMaximized)
+        self.showMaximized()
         self._refresh_map()
 
     # ---- 데이터 헬퍼 -------------------------------------------------
@@ -8530,6 +8570,11 @@ class HeatmapDialog(QDialog):
             self.cmb_wafer.setCurrentText(self._current_wafer)
         self.cmb_wafer.currentTextChanged.connect(self._on_wafer_changed)
         bar.addWidget(self.cmb_wafer)
+        # 시작이 이미 최대화 상태이므로 버튼은 "창 크기로"부터 시작한다.
+        self.btn_fullscreen = QPushButton("창 크기로")
+        self.btn_fullscreen.setObjectName("mini")
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+        bar.addWidget(self.btn_fullscreen)
         outer.addLayout(bar)
 
         # 조사할 layer(기준 개념 없음): 모든 layer 를 체크박스로, 체크된 것들의 defect 을 교차 조사.
@@ -8616,6 +8661,18 @@ class HeatmapDialog(QDialog):
         self.lbl_detail = QLabel("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
         self.lbl_detail.setObjectName("dim")
         head.addWidget(self.lbl_detail, 1)
+        head.addWidget(QLabel("사진 크기"), 0)
+        self.sld_thumb = QSlider(Qt.Horizontal)
+        self.sld_thumb.setRange(10, 100)
+        self.sld_thumb.setValue(self._thumb_percent)
+        self.sld_thumb.setFixedWidth(110)
+        self.sld_thumb.setToolTip("상세 목록 사진 크기 조절")
+        self.sld_thumb.valueChanged.connect(self._on_thumb_size_changed)
+        head.addWidget(self.sld_thumb, 0)
+        self.lbl_thumb_pct = QLabel(f"{self._thumb_percent}%")
+        self.lbl_thumb_pct.setObjectName("dim")
+        self.lbl_thumb_pct.setFixedWidth(32)
+        head.addWidget(self.lbl_thumb_pct, 0)
         self.btn_add_all = QPushButton("이 위치 출력에 넣기")
         self.btn_add_all.setObjectName("mini")
         self.btn_add_all.setToolTip("선택 위치의 매칭된 기준 defect 을 출력 트레이에 담습니다.")
@@ -8637,6 +8694,14 @@ class HeatmapDialog(QDialog):
         return panel
 
     # ---- 웨이퍼맵 / 상호작용 ----------------------------------------
+    def _toggle_fullscreen(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            self.btn_fullscreen.setText("전체화면")
+        else:
+            self.showMaximized()
+            self.btn_fullscreen.setText("창 크기로")
+
     def _on_wafer_changed(self, wafer: str) -> None:
         self._current_wafer = wafer
         self._selected_keys = []
@@ -8789,6 +8854,12 @@ class HeatmapDialog(QDialog):
         if isinstance(record, DefectRecord):
             ImageViewerDialog(record, self).exec()
 
+    def _on_thumb_size_changed(self, value: int) -> None:
+        self._thumb_percent = value
+        self._thumb_px = int(heatmap_dialog__THUMB_PX * value / 100)
+        self.lbl_thumb_pct.setText(f"{value}%")
+        self._rebuild_detail()
+
     def _rebuild_detail(self) -> None:
         self._clear_detail()
         self._pending_thumbs = []  # 이번 상세의 지연 썸네일 모음(비동기 로딩)
@@ -8877,7 +8948,7 @@ class HeatmapDialog(QDialog):
     def _clustered_thumb(self, cluster: Cluster, layer: str, is_base: bool) -> QWidget:
         # 지연 로딩: 위젯은 즉시 만들고, 썸네일은 백그라운드로 캐시를 구운 뒤 채운다.
         w = _ClusteredThumb(cluster, layer, is_base, self._thumb_cache,
-                            self._open_viewer, heatmap_dialog__THUMB_PX, defer=True)
+                            self._open_viewer, self._thumb_px, defer=True)
         self._pending_thumbs.append(w)
         return w
 
@@ -9223,6 +9294,11 @@ class MainWindow(QMainWindow):
         self._tol_timer.setSingleShot(True)
         self._tol_timer.setInterval(250)
         self._tol_timer.timeout.connect(lambda: self._rematch(rebuild_grid=False))
+        # 클러스터 길이는 근접 묶음이 달라지므로 재매칭 시 grid 도 다시 만든다.
+        self._cluster_timer = QTimer(self)
+        self._cluster_timer.setSingleShot(True)
+        self._cluster_timer.setInterval(250)
+        self._cluster_timer.timeout.connect(lambda: self._rematch(rebuild_grid=True))
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._maybe_check_update()
@@ -9317,6 +9393,7 @@ class MainWindow(QMainWindow):
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
         self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
         self.top.tolerance_changed.connect(lambda _: self._tol_timer.start())
+        self.top.cluster_radius_changed.connect(lambda _: self._cluster_timer.start())
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
@@ -9472,6 +9549,9 @@ class MainWindow(QMainWindow):
         # 0.0(정확 일치)도 유효한 사용자 설정이므로 falsy 검사로 떨어뜨리지 않는다.
         if self.settings.tolerance is not None:
             self.top.set_tolerance(self.settings.tolerance)
+        self.top.set_cluster_radius(
+            getattr(self.settings, "cluster_radius", None) or DEFAULT_CLUSTER_RADIUS
+        )
 
     # ----------------------------------------------------------- 폴더/스캔
     def _choose_folder(self) -> None:
@@ -10024,6 +10104,7 @@ class MainWindow(QMainWindow):
 
     def _save_prefs(self) -> None:
         self.settings.tolerance = self.top.tolerance()
+        self.settings.cluster_radius = self.top.cluster_radius()
         self.settings.base_layer = self.top.base_layer()
         self.settings.compare_layers = self.top.compare_layers()
 
@@ -10235,14 +10316,18 @@ class MainWindow(QMainWindow):
 
         wafer = item.base.wafer_id
         states: dict[tuple[int, int], str] = {}
+        observed: set[tuple[int, int]] = set()
         for m in self.matches:
             b = m.base
             if b.wafer_id != wafer or b.col is None or b.row is None:
                 continue
             if b.col < 0 or b.row < 0:
                 continue
-            states[(b.col, b.row)] = self._match_status(m)
-        observed = set(states.keys())
+            observed.add((b.col, b.row))
+            status = self._match_status(m)
+            # 미매칭은 무시하고 매칭만 히트맵으로 표시한다(모양 정합용 observed 는 전체 유지).
+            if status == "matched":
+                states[(b.col, b.row)] = status
 
         prod = active_product()
         valid: Optional[set] = None
@@ -10317,7 +10402,6 @@ class MainWindow(QMainWindow):
         current_lot = str(self.lot_index.lot_path) if self.lot_index else None
         old_workspace = self.settings.workspace
         old_output = self.settings.output_folder
-        old_cluster_radius = getattr(self.settings, "cluster_radius", None)
         old_font = getattr(self.settings, "ui_font_size", "normal")
         update_available = bool(self._update_status and self._update_status.available)
         dlg = SettingsDialog(
@@ -10398,9 +10482,6 @@ class MainWindow(QMainWindow):
         # 중복 핸들러를 막으므로 반복 호출해도 안전). 끄는 것은 다음 실행부터 반영된다.
         if dev_mode(s):
             setup_logging(s.log_dir_path)
-        # defect 클러스터 거리가 바뀌면 근접 묶음이 달라지므로 재매칭한다.
-        if getattr(s, "cluster_radius", None) != old_cluster_radius and self._base_records_raw:
-            self._rematch(rebuild_grid=True)
         # 글자 크기(보통/크게)가 바뀌면 테마를 다시 적용해 대부분 즉시 반영한다.
         if getattr(s, "ui_font_size", "normal") != old_font:
             from PySide6.QtWidgets import QApplication

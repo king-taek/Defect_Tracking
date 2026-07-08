@@ -1,6 +1,6 @@
 """좌측 사이드바 컨트롤 및 하단 탐색 바 (문서 Section 8.1, 8.3, 8.5).
 
-사이드바(세로): 자재 폴더 선택 / 자재명 / 기준 Layer / 허용 오차 /
+사이드바(세로): 자재 폴더 선택 / 자재명 / 기준 Layer / 허용 오차 / DEFECT 클러스터 길이 /
 비교 Layer(체크, 세로 스크롤) / 설정·업데이트·결과 출력하기
 탐색 바: 이전 / 현재 index·전체 / 다음
 
@@ -67,6 +67,7 @@ class SideBar(QFrame):
     base_layer_changed = Signal(str)
     compare_layers_changed = Signal()
     tolerance_changed = Signal(float)
+    cluster_radius_changed = Signal(float)
     export_requested = Signal()
     settings_requested = Signal()
     update_requested = Signal()
@@ -124,6 +125,21 @@ class SideBar(QFrame):
         )
         self.spn_tol.valueChanged.connect(self.tolerance_changed)
         outer.addWidget(self.spn_tol)
+
+        # ── DEFECT 클러스터 길이 (허용 오차 바로 아래)
+        outer.addWidget(self._section_label("DEFECT 클러스터 길이"))
+        self.spn_cluster = NoScrollDoubleSpinBox()
+        self.spn_cluster.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spn_cluster.setRange(0.0, 100000.0)
+        self.spn_cluster.setDecimals(1)
+        self.spn_cluster.setSingleStep(5.0)
+        self.spn_cluster.setValue(config.DEFAULT_CLUSTER_RADIUS)
+        self.spn_cluster.setToolTip(
+            "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어"
+            " 대표 1장+'+n' 으로 봅니다."
+        )
+        self.spn_cluster.valueChanged.connect(self.cluster_radius_changed)
+        outer.addWidget(self.spn_cluster)
 
         # 실시간 매칭 요약(허용오차 튜닝 피드백)
         self.lbl_match = QLabel("")
@@ -349,6 +365,14 @@ class SideBar(QFrame):
 
     def tolerance(self) -> float:
         return self.spn_tol.value()
+
+    def cluster_radius(self) -> float:
+        return self.spn_cluster.value()
+
+    def set_cluster_radius(self, value: float) -> None:
+        self.spn_cluster.blockSignals(True)
+        self.spn_cluster.setValue(value)
+        self.spn_cluster.blockSignals(False)
 
 
 class NavBar(QFrame):

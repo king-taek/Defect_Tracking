@@ -64,7 +64,7 @@ def test_collision_rename_preserved(tmp_path):
 
     # 값이 서로 다른 충돌 상수들이 각기 보존됐는지
     assert (mod.export_dialog__COLUMNS, mod.nomatch_gallery__COLUMNS) == (3, 4)
-    assert (mod.export_dialog__THUMB_PX, mod.heatmap_dialog__THUMB_PX) == (180, 150)
+    assert (mod.export_dialog__THUMB_PX, mod.heatmap_dialog__THUMB_PX) == (180, 500)
     assert mod.folder_picker__NUM_RE.pattern != mod.camtek_filename__NUM_RE.pattern
 
 

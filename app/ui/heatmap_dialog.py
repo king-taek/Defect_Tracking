@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -40,7 +41,7 @@ from app.thumbnails import ThumbnailCache
 from app.ui import theme
 
 _ALL_WAFERS = "전체"
-_THUMB_PX = 150  # 상세 목록 썸네일 크기(고정)
+_THUMB_PX = 500  # 상세 목록 썸네일 100% 기준 크기(슬라이더로 퍼센트 조절)
 
 
 # 히트맵 die 색(배경 theme.BG 위에서 잘 보이도록 밝게). 배경/빈 die 와 구분된다.
@@ -319,6 +320,9 @@ class HeatmapDialog(QDialog):
         self._cluster_radius = (
             getattr(settings, "cluster_radius", None) or config.DEFAULT_CLUSTER_RADIUS
         )
+        # 상세 목록 사진 크기(퍼센트, 100%=_THUMB_PX). 기본 30%가 기존 고정 크기와 같다.
+        self._thumb_percent = 30
+        self._thumb_px = int(_THUMB_PX * self._thumb_percent / 100)
         self.setWindowTitle("Defect 히트맵")
         self.setMinimumSize(900, 600)
 
@@ -339,7 +343,7 @@ class HeatmapDialog(QDialog):
 
         self._build()
         # 시작 시 전체화면(최대화). exec 모달에서도 유지된다.
-        self.setWindowState(Qt.WindowMaximized)
+        self.showMaximized()
         self._refresh_map()
 
     # ---- 데이터 헬퍼 -------------------------------------------------
@@ -437,6 +441,11 @@ class HeatmapDialog(QDialog):
             self.cmb_wafer.setCurrentText(self._current_wafer)
         self.cmb_wafer.currentTextChanged.connect(self._on_wafer_changed)
         bar.addWidget(self.cmb_wafer)
+        # 시작이 이미 최대화 상태이므로 버튼은 "창 크기로"부터 시작한다.
+        self.btn_fullscreen = QPushButton("창 크기로")
+        self.btn_fullscreen.setObjectName("mini")
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+        bar.addWidget(self.btn_fullscreen)
         outer.addLayout(bar)
 
         # 조사할 layer(기준 개념 없음): 모든 layer 를 체크박스로, 체크된 것들의 defect 을 교차 조사.
@@ -523,6 +532,18 @@ class HeatmapDialog(QDialog):
         self.lbl_detail = QLabel("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
         self.lbl_detail.setObjectName("dim")
         head.addWidget(self.lbl_detail, 1)
+        head.addWidget(QLabel("사진 크기"), 0)
+        self.sld_thumb = QSlider(Qt.Horizontal)
+        self.sld_thumb.setRange(10, 100)
+        self.sld_thumb.setValue(self._thumb_percent)
+        self.sld_thumb.setFixedWidth(110)
+        self.sld_thumb.setToolTip("상세 목록 사진 크기 조절")
+        self.sld_thumb.valueChanged.connect(self._on_thumb_size_changed)
+        head.addWidget(self.sld_thumb, 0)
+        self.lbl_thumb_pct = QLabel(f"{self._thumb_percent}%")
+        self.lbl_thumb_pct.setObjectName("dim")
+        self.lbl_thumb_pct.setFixedWidth(32)
+        head.addWidget(self.lbl_thumb_pct, 0)
         self.btn_add_all = QPushButton("이 위치 출력에 넣기")
         self.btn_add_all.setObjectName("mini")
         self.btn_add_all.setToolTip("선택 위치의 매칭된 기준 defect 을 출력 트레이에 담습니다.")
@@ -544,6 +565,14 @@ class HeatmapDialog(QDialog):
         return panel
 
     # ---- 웨이퍼맵 / 상호작용 ----------------------------------------
+    def _toggle_fullscreen(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            self.btn_fullscreen.setText("전체화면")
+        else:
+            self.showMaximized()
+            self.btn_fullscreen.setText("창 크기로")
+
     def _on_wafer_changed(self, wafer: str) -> None:
         self._current_wafer = wafer
         self._selected_keys = []
@@ -697,6 +726,12 @@ class HeatmapDialog(QDialog):
         if isinstance(record, DefectRecord):
             ImageViewerDialog(record, self).exec()
 
+    def _on_thumb_size_changed(self, value: int) -> None:
+        self._thumb_percent = value
+        self._thumb_px = int(_THUMB_PX * value / 100)
+        self.lbl_thumb_pct.setText(f"{value}%")
+        self._rebuild_detail()
+
     def _rebuild_detail(self) -> None:
         self._clear_detail()
         self._pending_thumbs = []  # 이번 상세의 지연 썸네일 모음(비동기 로딩)
@@ -786,7 +821,7 @@ class HeatmapDialog(QDialog):
     def _clustered_thumb(self, cluster: Cluster, layer: str, is_base: bool) -> QWidget:
         # 지연 로딩: 위젯은 즉시 만들고, 썸네일은 백그라운드로 캐시를 구운 뒤 채운다.
         w = _ClusteredThumb(cluster, layer, is_base, self._thumb_cache,
-                            self._open_viewer, _THUMB_PX, defer=True)
+                            self._open_viewer, self._thumb_px, defer=True)
         self._pending_thumbs.append(w)
         return w
 

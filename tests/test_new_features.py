@@ -819,6 +819,36 @@ def test_main_matching_is_async(win, app):
     assert hasattr(win, "busy") and hasattr(win, "_match_token")
 
 
+def test_heatmap_fullscreen_toggle(win, app):
+    """전체화면 토글 버튼이 반복해서 최대화↔복원을 오갈 수 있어야 한다(재현성 회귀)."""
+    dlg = _make_heatmap(win)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert dlg.isMaximized()
+    assert dlg.btn_fullscreen.text() == "창 크기로"
+    dlg._toggle_fullscreen()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert not dlg.isMaximized()
+    assert dlg.btn_fullscreen.text() == "전체화면"
+    # 한 번 작아진 뒤에도 다시 전체화면으로 돌아갈 수 있어야 한다.
+    dlg._toggle_fullscreen()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert dlg.isMaximized()
+    assert dlg.btn_fullscreen.text() == "창 크기로"
+
+
+def test_heatmap_thumb_size_slider_default_30_percent(win, app):
+    """사진 크기 슬라이더 기본값이 30%(기존 고정 크기 150px)와 같다."""
+    dlg = _make_heatmap(win)
+    assert dlg.sld_thumb.value() == 30
+    assert dlg._thumb_px == 150
+    dlg.sld_thumb.setValue(60)
+    assert dlg._thumb_px == 300
+    assert dlg.lbl_thumb_pct.text() == "60%"
+
+
 def test_heatmap_detail_thumbs_deferred(win, app):
     dlg = _make_heatmap(win)
     keys = list(dlg._groups.keys())
@@ -878,6 +908,48 @@ def test_image_viewer_info_shows_camtek_and_kla_coords(app):
     assert "coordinate (Camtek): (7497, 31062) -> calculated" in tk
     # KLA y = round(DiePitchY - y) = round(44905.301 - 31062) = 13843 = 원래 YREL
     assert "coordinate (KLA): (7497, 13843) -> measured" in tk
+
+
+def test_image_viewer_shorter_default_and_resizable(app):
+    from PySide6.QtCore import Qt as _Qt
+    from app.ui.image_viewer import ImageViewerDialog
+    from app.models import DefectRecord
+    from pathlib import Path
+    d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
+                                       layer="L", layer_folder="L", col=1, row=1, x=0.0, y=0.0))
+    # 기본 크기가 이전(960x760)보다 세로로 짧다.
+    assert d.size().height() < 760
+    assert d.minimumHeight() < 520
+    # 최대화 버튼 힌트가 켜져 있어야 창이 확실히 리사이즈 가능한 일반 창으로 동작한다.
+    assert d.windowFlags() & _Qt.WindowMaximizeButtonHint
+    assert d.isSizeGripEnabled()
+
+
+def test_image_viewer_zoom_buttons_have_large_glyph_style(app):
+    from app.ui.image_viewer import ImageViewerDialog
+    from app.models import DefectRecord
+    from pathlib import Path
+    d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
+                                       layer="L", layer_folder="L", col=1, row=1, x=0.0, y=0.0))
+    zoom_btns = [
+        b for b in d.findChildren(type(d.btn_fit))
+        if b.objectName() == "zoomGlyph"
+    ]
+    assert len(zoom_btns) == 2
+
+
+def test_folder_picker_goto_scan_root_button(app, tmp_path):
+    from app.ui.folder_picker import FolderPickerDialog
+
+    target = tmp_path / "ConderScan"
+    target.mkdir()
+    s = AppSettings(workspace=str(tmp_path / "ws"), scan_root_path=str(target))
+    dlg = FolderPickerDialog(s, str(tmp_path))
+    assert hasattr(dlg, "btn_goto_scan")
+    visited = []
+    dlg._go_to = lambda p: visited.append(p)  # noqa: E731 - 실제 탐색 대신 호출만 확인
+    dlg._goto_scan_root()
+    assert visited, "지정된 폴더로 이동을 시도해야 한다"
 
 
 def test_folder_picker_indent_and_explorer_button(app, tmp_path):

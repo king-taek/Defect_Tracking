@@ -3,7 +3,7 @@
 die 클릭 시 해당 기준 사진으로 점프한다. 리뷰 현황을 한눈에 본다.
 
 상태 색:
-  matched(매칭)=초록, none(전무)=빨강, 기준없음=빈칸.
+  matched(매칭)=초록. 미매칭·기준없음은 빈칸(무시).
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ _GAP = 2
 
 _STATE_COLORS = {
     "matched": theme.MATCH,
-    "none": theme.NOMATCH,
 }
 
 

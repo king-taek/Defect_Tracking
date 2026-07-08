@@ -37,8 +37,11 @@ class ImageViewerDialog(QDialog):
         super().__init__(parent)
         self.record = record
         self.setWindowTitle(f"원본 보기 — {Path(record.image_path).name}")
-        self.setMinimumSize(640, 520)
-        self.resize(960, 760)
+        # 최대화 버튼 힌트를 켜면 창이 확실히 리사이즈 가능한 일반 창으로 동작한다.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setSizeGripEnabled(True)
+        self.setMinimumSize(640, 440)
+        self.resize(960, 620)
         self._scale = 1.0
         self._fit = True
         # 클릭-드래그 패닝 상태(항목 6)
@@ -92,9 +95,11 @@ class ImageViewerDialog(QDialog):
         self.btn_fit.setCheckable(False)
         self.btn_fit.clicked.connect(self._toggle_fit)
         btn_zoom_out = QPushButton("－")
+        btn_zoom_out.setObjectName("zoomGlyph")
         btn_zoom_out.setFixedWidth(40)
         btn_zoom_out.clicked.connect(lambda: self._zoom(0.8))
         btn_zoom_in = QPushButton("＋")
+        btn_zoom_in.setObjectName("zoomGlyph")
         btn_zoom_in.setFixedWidth(40)
         btn_zoom_in.clicked.connect(lambda: self._zoom(1.25))
         self.lbl_zoom = QLabel("100%")

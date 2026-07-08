@@ -104,6 +104,11 @@ class MainWindow(QMainWindow):
         self._tol_timer.setSingleShot(True)
         self._tol_timer.setInterval(250)
         self._tol_timer.timeout.connect(lambda: self._rematch(rebuild_grid=False))
+        # 클러스터 길이는 근접 묶음이 달라지므로 재매칭 시 grid 도 다시 만든다.
+        self._cluster_timer = QTimer(self)
+        self._cluster_timer.setSingleShot(True)
+        self._cluster_timer.setInterval(250)
+        self._cluster_timer.timeout.connect(lambda: self._rematch(rebuild_grid=True))
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._maybe_check_update()
@@ -198,6 +203,7 @@ class MainWindow(QMainWindow):
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
         self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
         self.top.tolerance_changed.connect(lambda _: self._tol_timer.start())
+        self.top.cluster_radius_changed.connect(lambda _: self._cluster_timer.start())
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
@@ -353,6 +359,9 @@ class MainWindow(QMainWindow):
         # 0.0(정확 일치)도 유효한 사용자 설정이므로 falsy 검사로 떨어뜨리지 않는다.
         if self.settings.tolerance is not None:
             self.top.set_tolerance(self.settings.tolerance)
+        self.top.set_cluster_radius(
+            getattr(self.settings, "cluster_radius", None) or config.DEFAULT_CLUSTER_RADIUS
+        )
 
     # ----------------------------------------------------------- 폴더/스캔
     def _choose_folder(self) -> None:
@@ -908,6 +917,7 @@ class MainWindow(QMainWindow):
 
     def _save_prefs(self) -> None:
         self.settings.tolerance = self.top.tolerance()
+        self.settings.cluster_radius = self.top.cluster_radius()
         self.settings.base_layer = self.top.base_layer()
         self.settings.compare_layers = self.top.compare_layers()
 
@@ -1121,14 +1131,18 @@ class MainWindow(QMainWindow):
 
         wafer = item.base.wafer_id
         states: dict[tuple[int, int], str] = {}
+        observed: set[tuple[int, int]] = set()
         for m in self.matches:
             b = m.base
             if b.wafer_id != wafer or b.col is None or b.row is None:
                 continue
             if b.col < 0 or b.row < 0:
                 continue
-            states[(b.col, b.row)] = self._match_status(m)
-        observed = set(states.keys())
+            observed.add((b.col, b.row))
+            status = self._match_status(m)
+            # 미매칭은 무시하고 매칭만 히트맵으로 표시한다(모양 정합용 observed 는 전체 유지).
+            if status == "matched":
+                states[(b.col, b.row)] = status
 
         prod = config.active_product()
         valid: Optional[set] = None
@@ -1204,7 +1218,6 @@ class MainWindow(QMainWindow):
         current_lot = str(self.lot_index.lot_path) if self.lot_index else None
         old_workspace = self.settings.workspace
         old_output = self.settings.output_folder
-        old_cluster_radius = getattr(self.settings, "cluster_radius", None)
         old_font = getattr(self.settings, "ui_font_size", "normal")
         update_available = bool(self._update_status and self._update_status.available)
         dlg = SettingsDialog(
@@ -1287,9 +1300,6 @@ class MainWindow(QMainWindow):
         if config.dev_mode(s):
             from app import logging_config
             logging_config.setup_logging(s.log_dir_path)
-        # defect 클러스터 거리가 바뀌면 근접 묶음이 달라지므로 재매칭한다.
-        if getattr(s, "cluster_radius", None) != old_cluster_radius and self._base_records_raw:
-            self._rematch(rebuild_grid=True)
         # 글자 크기(보통/크게)가 바뀌면 테마를 다시 적용해 대부분 즉시 반영한다.
         if getattr(s, "ui_font_size", "normal") != old_font:
             from PySide6.QtWidgets import QApplication
