@@ -84,8 +84,10 @@ class MainWindow(QMainWindow):
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
         # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
-        # 출력 담기 트레이: 담은 BaseDefectMatches 스냅샷 목록(base image_path 로 중복 제거).
-        # 스냅샷이라 기준 layer·자재(LOT)를 바꿔도 담은 것이 그대로 유지된다.
+        # 출력 담기 트레이: (BaseDefectMatches, 태그) 튜플 목록(base image_path 로 중복 제거).
+        # 태그는 ExportTrayDialog 의 '전체 추가' 묶음 표시용(None=개별) — 그대로 저장해야
+        # 다이얼로그를 다시 열어도 묶음이 유지된다. 스냅샷이라 기준 layer·자재(LOT)를
+        # 바꿔도 담은 것이 그대로 유지된다.
         self._export_tray: list = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
@@ -951,10 +953,14 @@ class MainWindow(QMainWindow):
         self._add_indices_to_export([self.current])
 
     def _tray_keys(self) -> set:
-        return {str(m.base.image_path) for m in self._export_tray}
+        return {str(m.base.image_path) for m, _tag in self._export_tray}
 
     def _add_indices_to_export(self, indices: list[int]) -> None:
-        """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시)."""
+        """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시).
+
+        개별로 담는 항목은 태그 없음(개별 카드) — 묶음(태그)은 ExportTrayDialog 의
+        '전체 추가' 버튼에서만 생기고, tagged_selected() 로 트레이에 그대로 저장된다.
+        """
         keys = self._tray_keys()
         added = 0
         for i in indices:
@@ -962,7 +968,7 @@ class MainWindow(QMainWindow):
                 m = self.matches[i]
                 k = str(m.base.image_path)
                 if k not in keys:
-                    self._export_tray.append(m)
+                    self._export_tray.append((m, None))
                     keys.add(k)
                     added += 1
         self._update_add_export_button()
@@ -1474,8 +1480,9 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         selected = dlg.selected()  # list[BaseDefectMatches]
-        # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지).
-        self._export_tray = list(selected)
+        # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지) — 태그 포함으로
+        # 저장해야 다음에 다시 열어도 '전체 추가'로 묶은 요약 카드가 풀리지 않는다.
+        self._export_tray = dlg.tagged_selected()
         self._update_add_export_button()
         # '확인'(저장만) → 트레이 상태만 저장하고 닫는다. Excel 출력은 나중에.
         if not dlg.wants_export():

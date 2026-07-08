@@ -2,7 +2,7 @@
 
 선택된 기준 사진들에 대해 기준 layer 사진과 비교 layer 매칭 결과를 깔끔한 Excel 로 출력한다.
 포함 정보: LOT명, wafer ID, 기준/비교 layer, col_row_x_y 위치, 허용 오차, 매칭 여부,
-이미지 썸네일, 원본 경로(추적용, 무수정).
+이미지 썸네일, 원본 경로(클릭하면 원본을 여는 링크, 무수정).
 
 저장 경로는 반드시 assert_output_safe 게이트를 통과해야 하며, 원본 폴더 내부면 차단된다.
 원본 이미지는 read-only 로만 읽는다(썸네일 캐시를 통해).
@@ -68,6 +68,23 @@ def _place_image(ws, thumb_cache, rec, row, col) -> None:
             cell.value = "(이미지 로드 실패)"
             return
     cell.value = "(이미지 없음)"
+
+
+def _place_path_link(ws, row, col, image_path) -> None:
+    """(row,col) 셀에 원본 파일명을 표시하고 클릭하면 원본을 여는 링크를 건다.
+
+    원본을 통째로 심으면(고화질) 파일이 수백 MB~GB 로 불어나므로, 대신 항상
+    최신 원본을 가리키는 가벼운 링크로 연결한다.
+    """
+    p = Path(image_path)
+    cell = ws.cell(row=row, column=col, value=p.name)
+    cell.font = Font(color=_NEON, size=8, underline="single")
+    cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    cell.border = _BORDER
+    try:
+        cell.hyperlink = p.resolve().as_uri()
+    except (OSError, ValueError):
+        pass  # 링크 실패해도 파일명 텍스트는 남는다
 
 
 def export_excel(
@@ -225,10 +242,17 @@ def export_excel(
         ws.row_dimensions[r].height = 48
         r += 1
 
-        # 원본 경로 행 (추적용)
+        # 원본 경로 행 — 클릭하면 원본을 바로 연다(기준 + 각 매칭된 비교 defect 별로).
         _set_cell(ws, r, 1, "원본경로", bold=True, align="center", fill=_LIGHT)
-        _set_cell(ws, r, 2, str(base.image_path), color=_GREY, wrap=True, size=8)
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=n_cols)
+        _place_path_link(ws, r, 2, base.image_path)
+        for ci, mr in enumerate(results):
+            rec = mr.matched
+            if rec is not None:
+                _place_path_link(ws, r, 3 + ci, rec.image_path)
+            else:
+                ws.cell(row=r, column=3 + ci).border = _BORDER
+        for ci in range(len(results), max_cmp):
+            ws.cell(row=r, column=3 + ci).border = _BORDER
         ws.row_dimensions[r].height = 24
         r += 1
         r += 1  # 블록 간 간격

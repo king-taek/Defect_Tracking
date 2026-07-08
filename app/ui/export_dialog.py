@@ -37,7 +37,7 @@ class ExportTrayDialog(QDialog):
 
     def __init__(
         self,
-        entries: list[BaseDefectMatches],
+        entries: list[BaseDefectMatches | tuple[BaseDefectMatches, Optional[str]]],
         thumb_cache: Optional[ThumbnailCache] = None,
         all_matched: Optional[list[BaseDefectMatches]] = None,
         all_matched_label: str = "기준 layer 매치 전체",
@@ -51,8 +51,11 @@ class ExportTrayDialog(QDialog):
         # 요약 카드 하나로 보여준다 — None 이면 개별 카드).
         self._tagged: list[tuple[BaseDefectMatches, Optional[str]]] = []
         self._keys: set[str] = set()
-        for m in entries:
-            self._add(m)
+        # entries 는 평범한 BaseDefectMatches 또는 (item, tag) 튜플 둘 다 받는다 —
+        # main_window 가 트레이를 태그 포함으로 저장해 다시 열어도 묶음이 유지되게 한다.
+        for entry in entries:
+            m, tag = entry if isinstance(entry, tuple) else (entry, None)
+            self._add(m, tag)
         # 이번 LOT 의 매칭 있는 기준 사진(전체 추가 버튼용).
         self._all_matched = list(all_matched or [])
         self._all_matched_label = all_matched_label
@@ -365,3 +368,7 @@ class ExportTrayDialog(QDialog):
     def selected(self) -> list[BaseDefectMatches]:
         """최종 출력 대상 스냅샷 목록(담긴 순서 유지, 태그 무시하고 평탄화)."""
         return [m for m, _tag in self._tagged]
+
+    def tagged_selected(self) -> list[tuple[BaseDefectMatches, Optional[str]]]:
+        """태그 포함 최종 목록 — 트레이에 그대로 저장해 두면 다음에 열어도 묶음이 유지된다."""
+        return list(self._tagged)

@@ -50,12 +50,12 @@ def test_filter_dropdown_removed(win):
 
 
 def test_export_tray_add_and_persist(win):
-    # 트레이는 BaseDefectMatches 스냅샷을 담고, layer/자재가 바뀌어도 유지된다(항목 1).
+    # 트레이는 (BaseDefectMatches, 태그) 스냅샷을 담고, layer/자재가 바뀌어도 유지된다(항목 1).
     win._goto(0)
     assert win._export_tray == []
     p0 = str(win.matches[0].base.image_path)
     win._add_current_to_export()
-    assert [str(m.base.image_path) for m in win._export_tray] == [p0]
+    assert [str(m.base.image_path) for m, _tag in win._export_tray] == [p0]
     win._add_current_to_export()  # 중복 무시
     assert len(win._export_tray) == 1
     win._goto(1)
@@ -89,6 +89,33 @@ def test_export_tray_dialog_remove_and_add_all(win, app):
     }
     dlg._clear_all()
     assert dlg.selected() == []
+
+
+def test_export_tray_group_persists_across_reopen(win, app):
+    """'전체 추가'로 묶은 태그가 확인 후 트레이에 저장했다가 다시 열어도 유지돼야 한다.
+
+    회귀: 예전엔 ExportTrayDialog.selected() 가 태그를 버린 평탄화 목록만 반환하고
+    main_window._export_tray 에 그대로 저장해, 다이얼로그를 다시 열면 묶음(요약 카드)이
+    개별 사진 카드 여러 장으로 풀어졌다.
+    """
+    from app.ui.export_dialog import ExportTrayDialog
+
+    all_matched = [m for m in win.matches if win._match_status(m) != "none"]
+    if len(all_matched) < 2:
+        return
+    dlg = ExportTrayDialog(
+        [], win.thumb_cache, all_matched=all_matched, all_matched_label="테스트 묶음"
+    )
+    dlg._add_all_matched()
+    tagged = dlg.tagged_selected()
+    assert tagged and all(tag == "테스트 묶음" for _m, tag in tagged)
+
+    # main_window._export() 가 트레이에 저장하는 것과 동일한 경로.
+    win._export_tray = tagged
+    dlg2 = ExportTrayDialog(list(win._export_tray), win.thumb_cache)
+    assert dlg2.tagged_selected() == tagged
+    tag_values = {tag for _m, tag in dlg2._tagged}
+    assert tag_values == {"테스트 묶음"}  # 개별(None)로 풀리지 않았다
 
 
 def test_export_tray_dialog_ok_vs_export(win, app):
@@ -315,6 +342,35 @@ def test_excel_no_top_item_header(win, app, tmp_path):
     firsts = {row[0] for row in ws.iter_rows(values_only=True) if row}
     assert "항목" not in firsts
     assert "Layer" in firsts  # 블록별 Layer 행은 있다
+
+
+def test_excel_original_path_is_hyperlink(win, app, tmp_path):
+    """'원본경로' 셀이 텍스트가 아니라 클릭하면 원본을 여는 링크여야 한다(고화질 심기 대신).
+
+    엑셀에 원본을 통째로 심으면(고화질) 파일이 수백 MB~GB 로 불어나므로, 대신 항상
+    최신 원본을 가리키는 가벼운 하이퍼링크로 연결한다.
+    """
+    from pathlib import Path
+    from app.export.excel_report import export_excel
+    from openpyxl import load_workbook
+
+    out = tmp_path / "o.xlsx"
+    sel = win.matches[:1]
+    base = sel[0].base
+    export_excel(out, lot_name="L", base_layer=win.top.base_layer(),
+                 compare_layers=win.top.compare_layers(), tolerance=100.0,
+                 selected=sel, thumb_cache=win.thumb_cache,
+                 source_roots=[win.lot_index.lot_path])
+    wb = load_workbook(out)
+    ws = wb.active
+    row_idx = next(
+        r for r in range(1, ws.max_row + 1)
+        if ws.cell(row=r, column=1).value == "원본경로"
+    )
+    cell = ws.cell(row=row_idx, column=2)
+    assert cell.value == Path(base.image_path).name
+    assert cell.hyperlink is not None
+    assert cell.hyperlink.target == Path(base.image_path).resolve().as_uri()
 
 
 def test_grid_rollback_base_top_left(win):
