@@ -147,6 +147,60 @@ class MatchWorker(QRunnable):
             self.signals.error.emit(str(exc))
 
 
+class AllLayersMatchSignals(QObject):
+    progress = Signal(int, int)  # cur, total (layer 단위)
+    finished = Signal(list)      # list[BaseDefectMatches]
+    error = Signal(str)
+
+
+class AllLayersMatchWorker(QRunnable):
+    """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 백그라운드에서 합친다.
+
+    '기준 layer 없이 전체 매치'는 layer 수만큼 전체 매칭을 다시 도는 무거운 작업이라
+    UI 스레드에서 돌리면 완료될 때까지 앱이 멈춘다 — MatchWorker 와 같은 이유로 백그라운드로 뺀다.
+    """
+
+    def __init__(self, layers, records_by_layer, records_for_layer, tolerance, wafer_filter=None):
+        super().__init__()
+        self.layers = layers
+        self.records_by_layer = records_by_layer
+        self.records_for_layer = records_for_layer
+        self.tolerance = tolerance
+        self.wafer_filter = wafer_filter
+        self.signals = AllLayersMatchSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from app import matcher
+            from app.clustering import collapse_matches
+
+            total = len(self.layers)
+            seen: set[str] = set()
+            out = []
+            for i, base_layer in enumerate(self.layers):
+                self.signals.progress.emit(i, total)
+                base_records = [r for r in self.records_for_layer(base_layer) if r.ok]
+                if self.wafer_filter:
+                    base_records = [r for r in base_records if r.wafer_id == self.wafer_filter]
+                if base_records:
+                    compare_layers = [lyr for lyr in self.layers if lyr != base_layer]
+                    matches, _ = matcher.match_all_with_offsets(
+                        base_records, compare_layers, self.records_by_layer, self.tolerance,
+                    )
+                    for m in collapse_matches(matches):
+                        if any(r.is_match for r in m.results):
+                            k = str(m.base.image_path)
+                            if k not in seen:
+                                seen.add(k)
+                                out.append(m)
+            self.signals.progress.emit(total, total)
+            self.signals.finished.emit(out)
+        except Exception as exc:  # noqa: BLE001 - 워커 예외는 UI 로 전달
+            _log.exception("전체 layer 매치 워커 실패")
+            self.signals.error.emit(str(exc))
+
+
 class ExportSignals(QObject):
     progress = Signal(int, int)  # cur, total
     finished = Signal(str)       # output path

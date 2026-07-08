@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -80,6 +81,24 @@ def write_version(root: Path, sha: str) -> None:
     version_file(root).write_text(
         json.dumps({"commit": sha}, indent=2), encoding="utf-8"
     )
+
+
+_VERSION_STR_RE = re.compile(r'__version__\s*=\s*["\']([^"\']+)["\']')
+
+
+def read_installed_version(root: Optional[Path] = None) -> Optional[str]:
+    """설치 루트의 app/__init__.py 에서 __version__ 문자열을 읽는다.
+
+    실행 중 프로세스의 app.__version__ 은 시작 시점에 고정되므로, 업데이트 직후
+    "방금 받은" 버전을 사람이 읽을 문구로 보여주려면 디스크에서 새로 읽어야 한다.
+    """
+    root = root or app_root()
+    try:
+        text = (root / "app" / "__init__.py").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = _VERSION_STR_RE.search(text)
+    return m.group(1) if m else None
 
 
 def current_sha(root: Optional[Path] = None) -> Optional[str]:

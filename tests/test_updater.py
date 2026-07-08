@@ -92,6 +92,18 @@ def test_current_sha_from_version_json(tmp_path):
     assert updater.current_sha(tmp_path) == "deadbeef"
 
 
+def test_read_installed_version_parses_dunder_version(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "__init__.py").write_text(
+        '"""docstring"""\n__version__ = "1.42.7"\n', encoding="utf-8"
+    )
+    assert updater.read_installed_version(tmp_path) == "1.42.7"
+
+
+def test_read_installed_version_missing_file_returns_none(tmp_path):
+    assert updater.read_installed_version(tmp_path) is None
+
+
 def test_fetch_remote_sha_parses_json():
     class FakeResp:
         def __init__(self, payload):

@@ -108,7 +108,9 @@ class MainWindow(QMainWindow):
         self._cluster_timer = QTimer(self)
         self._cluster_timer.setSingleShot(True)
         self._cluster_timer.setInterval(250)
-        self._cluster_timer.timeout.connect(lambda: self._rematch(rebuild_grid=True))
+        self._cluster_timer.timeout.connect(
+            lambda: self._rematch(rebuild_grid=True, refresh_strip=True)
+        )
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._maybe_check_update()
@@ -738,8 +740,8 @@ class MainWindow(QMainWindow):
         # 무거운 매칭은 백그라운드에서(로딩 오버레이), 완료되면 화면을 재구성한다.
         self._start_match(self._after_rebuild)
 
-    def _after_rebuild(self) -> None:
-        """매칭 완료 후: 스트립/썸네일/그리드/탐색 재구성(기준 layer·새 LOT)."""
+    def _strip_captions_and_tooltips(self) -> tuple[list[str], list[str]]:
+        """현재 self.matches 로 상단 썸네일 스트립의 캡션·툴팁을 만든다."""
         captions, tooltips = [], []
         for m in self.matches:
             r = m.base
@@ -754,6 +756,11 @@ class MainWindow(QMainWindow):
             if extra:
                 tt += f" · 근접중복 +{extra}"
             tooltips.append(tt)
+        return captions, tooltips
+
+    def _after_rebuild(self) -> None:
+        """매칭 완료 후: 스트립/썸네일/그리드/탐색 재구성(기준 layer·새 LOT)."""
+        captions, tooltips = self._strip_captions_and_tooltips()
         self.strip.set_items(captions, tooltips, on_progress=self.busy.pump)
         self._start_thumbnails()
         self.busy.pump()
@@ -772,14 +779,23 @@ class MainWindow(QMainWindow):
         self._refresh_strip_marks()
         self._update_add_export_button()
 
-    def _rematch(self, rebuild_grid: bool) -> None:
-        """비교 토글/허용오차 변경: 재매칭(비동기). 현재 인덱스는 유지(범위 clamp)."""
+    def _rematch(self, rebuild_grid: bool, refresh_strip: bool = False) -> None:
+        """비교 토글/허용오차/클러스터 길이 변경: 재매칭(비동기). 현재 인덱스는 유지(범위 clamp).
+
+        refresh_strip: 클러스터 길이 변경처럼 base 클러스터링 자체(그룹 개수·대표·+n)가
+        바뀔 수 있는 경우 True — 상단 썸네일 스트립의 아이템(캡션·이미지)도 다시 만든다.
+        허용오차/비교 layer 토글은 클러스터링을 바꾸지 않으므로 기본값(False)이면 충분하다.
+        """
         if self.lot_index is None or not self._base_records_raw:
             return
         self._save_prefs()
-        self._start_match(lambda: self._after_rematch(rebuild_grid))
+        self._start_match(lambda: self._after_rematch(rebuild_grid, refresh_strip))
 
-    def _after_rematch(self, rebuild_grid: bool) -> None:
+    def _after_rematch(self, rebuild_grid: bool, refresh_strip: bool = False) -> None:
+        if refresh_strip:
+            captions, tooltips = self._strip_captions_and_tooltips()
+            self.strip.set_items(captions, tooltips, on_progress=self.busy.pump)
+            self._start_thumbnails()
         if rebuild_grid:
             self._rebuild_grid()
         if self.matches:
@@ -1340,18 +1356,23 @@ class MainWindow(QMainWindow):
             )
             if answer == QMessageBox.Yes:
                 self._do_update(status)
-            elif not manual:
-                self.banner.show_message(
-                    "상단 '업데이트' 버튼으로 언제든 업데이트할 수 있습니다.", "info"
-                )
+            else:
+                if manual:
+                    self.nav.set_status("")
+                else:
+                    self.banner.show_message(
+                        "상단 '업데이트' 버튼으로 언제든 업데이트할 수 있습니다.", "info"
+                    )
         else:
             self.top.set_update_available(False)
             if manual:
                 if status.error:
+                    self.nav.set_status("업데이트 확인 실패")
                     self.banner.show_message(
                         f"업데이트 확인 실패: {status.error}", "warn", timeout_ms=6000
                     )
                 else:
+                    self.nav.set_status("최신 버전입니다")
                     self.banner.show_message("이미 최신 버전입니다.", "success")
 
     def _do_update(self, status) -> None:
@@ -1372,10 +1393,17 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.top.set_update_busy(False)
         if ok:
+            # __version__ 은 프로세스 시작 시 고정값이라 방금 받은 버전을 보려면
+            # 디스크에 갱신된 app/__init__.py 를 새로 읽어야 한다.
+            new_version = updater.read_installed_version()
+            done_msg = (
+                f"최신 버전({new_version})으로 업데이트 되었습니다."
+                if new_version else "최신 버전으로 업데이트 되었습니다."
+            )
             QMessageBox.information(
                 self,
                 "업데이트 완료",
-                f"{message}\n\n프로그램을 종료합니다. 다시 시작해 주세요.",
+                f"{done_msg}\n\n프로그램을 종료합니다. 다시 시작해 주세요.",
             )
             self.close()
         else:
@@ -1391,49 +1419,36 @@ class MainWindow(QMainWindow):
         return name or "compare"
 
     # ------------------------------------------------------------ 출력
-    def _compute_all_layers_matched(self, progress=None) -> list[BaseDefectMatches]:
-        """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 합친다.
+    def _provide_all_layers_matched(self, on_progress, on_done) -> None:
+        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자.
 
-        기준 layer 종속 없이 '전체 매치'를 담기 위한 것. base image_path 로 중복 제거하고,
-        현재 wafer 필터가 걸려 있으면 그 wafer 로 한정한다. (layer 수만큼 매칭을 다시 돌림)
-        진행도는 progress(cur, total) 콜백으로 알린다(layer 단위).
+        모든 layer 를 각각 기준으로 매칭해 어느 layer 에서든 매치된 defect 을 합치는
+        무거운(layer 수만큼 재매칭) 작업이라 백그라운드 워커(AllLayersMatchWorker)로
+        돌리고, 진행은 on_progress(cur, total), 완료 결과는 on_done(list) 로 전달한다
+        (UI 스레드를 막지 않아야 로딩 오버레이가 실제로 애니메이션된다).
         """
-        from app.clustering import collapse_matches
-
         if self.lot_index is None:
-            return []
-        layers = self.lot_index.layer_canonicals()
-        rbl = self.lot_index.records_by_layer()
-        tolerance = self.top.tolerance()
-        total = len(layers)
-        seen: set[str] = set()
-        out: list[BaseDefectMatches] = []
-        for i, base_layer in enumerate(layers):
-            if progress is not None:
-                progress(i, total)  # layer i 처리 시작(진행 표시)
-            base_records = [
-                r for r in self.lot_index.records_for_layer(base_layer) if r.ok
-            ]
-            if self._wafer_filter:
-                base_records = [r for r in base_records if r.wafer_id == self._wafer_filter]
-            if base_records:
-                compare_layers = [lyr for lyr in layers if lyr != base_layer]
-                matches, _ = matcher.match_all_with_offsets(
-                    base_records, compare_layers, rbl, tolerance
-                )
-                for m in collapse_matches(matches):
-                    if self._match_status(m) != "none":
-                        k = str(m.base.image_path)
-                        if k not in seen:
-                            seen.add(k)
-                            out.append(m)
-        if progress is not None:
-            progress(total, total)
-        return out
+            on_done([])
+            return
+        from app.workers import AllLayersMatchWorker
 
-    def _provide_all_layers_matched(self, progress=None) -> list[BaseDefectMatches]:
-        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자(진행 콜백 지원)."""
-        return self._compute_all_layers_matched(progress)
+        worker = AllLayersMatchWorker(
+            self.lot_index.layer_canonicals(),
+            self.lot_index.records_by_layer(),
+            self.lot_index.records_for_layer,
+            self.top.tolerance(),
+            wafer_filter=self._wafer_filter,
+        )
+        worker.signals.progress.connect(on_progress)
+        worker.signals.finished.connect(on_done)
+
+        def _on_error(msg: str) -> None:
+            self.banner.show_message(f"전체 매치 계산 실패: {msg}", "error", timeout_ms=6000)
+            on_done([])
+
+        worker.signals.error.connect(_on_error)
+        self._track_worker(worker, worker.signals.finished, worker.signals.error)
+        self.pool.start(worker)
 
     def _export(self) -> None:
         if not self.matches:
@@ -1447,10 +1462,16 @@ class MainWindow(QMainWindow):
         dlg = ExportTrayDialog(
             list(self._export_tray), self.thumb_cache,
             all_matched=all_matched,
+            all_matched_label=f"기준 '{self.top.base_layer()}' 매치 전체",
             all_layers_provider=self._provide_all_layers_matched,
             parent=self,
         )
-        if not dlg.exec():
+        accepted = dlg.exec()
+        # 이벤트 루프로 돌아가는 즉시 실제로 파괴되게 한다(BusyOverlay 등 자식이 orphan
+        # 으로 남아 이벤트 필터가 죽은 wrapper 를 호출하는 것을 방지). deleteLater() 는
+        # 지연 삭제라 아래에서 dlg 를 계속 읽는 것은 안전하다.
+        dlg.deleteLater()
+        if not accepted:
             return
         selected = dlg.selected()  # list[BaseDefectMatches]
         # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지).

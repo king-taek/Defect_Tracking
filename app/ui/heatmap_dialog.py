@@ -309,7 +309,6 @@ class HeatmapDialog(QDialog):
         super().__init__(parent)
         self.matches = matches
         self._base_layer = base_layer
-        self._compare_layers = list(compare_layers)
         self._thumb_cache = thumb_cache
         self._on_add = on_add_to_export
         self._settings = settings
@@ -402,11 +401,6 @@ class HeatmapDialog(QDialog):
                 continue
             out.append((i, b))
         return out
-
-    def _is_matched(self, bi: int) -> bool:
-        """메인 비교 layer 중 하나 이상에서 매치되면 True('출력에 넣기' 대상 판정)."""
-        m = self.matches[bi]
-        return any((r := m.for_layer(lyr)) and r.is_match for lyr in self._compare_layers)
 
     def _all_defect_entries(self) -> list[tuple[int, object]]:
         """체크된 layer 의 좌표 OK defect(맵 density 용). 기준 특별취급 없음.
@@ -735,16 +729,17 @@ class HeatmapDialog(QDialog):
     def _rebuild_detail(self) -> None:
         self._clear_detail()
         self._pending_thumbs = []  # 이번 상세의 지연 썸네일 모음(비동기 로딩)
-        # 상시 조사 모드: 체크된 layer 를 교차 매칭해 표시. '출력에 넣기' 대상은 선택 위치의
-        # 매칭된 메인 기준 defect(출력은 기준 layer 기반).
-        self._add_targets = [bi for bi in self._union_indices() if self._is_matched(bi)]
-        self.btn_add_all.setEnabled(bool(self._add_targets))
+        self._add_targets = []
         if not self._selected_keys:
+            self.btn_add_all.setEnabled(False)
             self.lbl_detail.setText("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
             return
         n_loc = len(self._selected_keys)
         loc = (self._key_label(self._selected_keys[0]) if n_loc == 1 else f"{n_loc}개 위치")
+        # _add_targets 는 _build_all_detail 이 화면에 실제로 그린 교차매치 그룹에서 채운다
+        # (예전엔 self._compare_layers 스냅샷으로 따로 판정해 화면 표시와 어긋났었다).
         self._build_all_detail(loc)
+        self.btn_add_all.setEnabled(bool(self._add_targets))
         # 썸네일은 백그라운드로 캐시를 구운 뒤 채워, 클릭 즉시 목록이 뜨고 멈추지 않게 한다.
         self._start_detail_thumbs()
 
@@ -775,6 +770,16 @@ class HeatmapDialog(QDialog):
         self.lbl_detail.setText(
             f"{loc} — 교차매치 {len(matched)}그룹 · 개별(미매칭) {len(individual)}개"
         )
+        # '출력에 넣기' 대상 = 화면에 표시된 교차매치 그룹 중 기준 layer 를 포함한 것
+        # (출력은 기준 layer 기반이므로 기준 layer 가 없는 그룹은 대상이 될 수 없다).
+        base_by_path = {str(m.base.image_path): i for i, m in enumerate(self.matches)}
+        for g in matched:
+            cl = g.get(self._base_layer)
+            if cl is None:
+                continue
+            bi = base_by_path.get(str(cl.representative.image_path))
+            if bi is not None:
+                self._add_targets.append(bi)
 
     def _make_individual_section(self, groups: list[dict]) -> QWidget:
         """개별(미매칭) 단일-layer 그룹들을 layer 배지+대표(+n) 컴팩트 카드로 가로 나열."""

@@ -7,6 +7,7 @@ info/success/warn/error 레벨별 색상, 선택적 액션 버튼, 자동 소멸
 
 from __future__ import annotations
 
+import warnings
 from typing import Callable, Optional
 
 from PySide6.QtCore import (
@@ -166,10 +167,15 @@ class NotificationBanner(QFrame):
         self._fade.setEndValue(0.0)
         self._collapse.setStartValue(self.maximumHeight())
         self._collapse.setEndValue(0)
-        try:
-            self._group.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        # _after_hide 가 이미 자기 자신을 disconnect 해두므로 대개 연결이 없다 —
+        # PySide 는 그 경우 예외가 아니라 RuntimeWarning 을 내므로 여기서 억제한다.
+        # (연속 dismiss() 로 아직 연결이 남아있는 드문 경우엔 정상적으로 끊어진다.)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                self._group.finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
         self._group.finished.connect(self._after_hide)
         self._group.start()
 

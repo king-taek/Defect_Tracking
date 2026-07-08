@@ -104,16 +104,36 @@ def test_export_tray_dialog_ok_vs_export(win, app):
 
 
 def test_export_all_layers_button_unions_matches(win, app):
-    """'모든 매치(기준 없이)'는 모든 layer 를 기준으로 한 매치를 합쳐 담는다."""
-    from app.ui.export_dialog import ExportTrayDialog
-    provider = win._provide_all_layers_matched
-    expected = {str(m.base.image_path) for m in provider()}
+    """'모든 매치(기준 없이)'는 모든 layer 를 기준으로 한 매치를 백그라운드로 합쳐 담는다.
+
+    회귀: 예전엔 이 계산이 UI 스레드에서 동기 실행돼 앱이 멈췄다 — 이제
+    AllLayersMatchWorker 로 백그라운드에서 돈다(QThreadPool). 또한 버튼 한 번에 대량
+    추가된 항목은 사진 카드 대신 하나의 요약 태그로 묶인다.
+    """
+    from PySide6.QtCore import QThreadPool
+    from app.ui.export_dialog import ExportTrayDialog, _ALL_LAYERS_TAG
+
+    results: dict = {}
+    win._provide_all_layers_matched(
+        lambda cur, total: None, lambda items: results.setdefault("items", items)
+    )
+    QThreadPool.globalInstance().waitForDone(5000)
+    for _ in range(20):
+        QCoreApplication.processEvents()
+    expected = {str(m.base.image_path) for m in results.get("items", [])}
     if not expected:
         return
-    dlg = ExportTrayDialog([], win.thumb_cache, all_layers_provider=provider)
+
+    dlg = ExportTrayDialog(
+        [], win.thumb_cache, all_layers_provider=win._provide_all_layers_matched
+    )
     assert hasattr(dlg, "btn_add_all_layers")
     dlg._add_all_layers()
+    QThreadPool.globalInstance().waitForDone(5000)
+    for _ in range(20):
+        QCoreApplication.processEvents()
     assert {str(m.base.image_path) for m in dlg.selected()} == expected
+    assert any(tag == _ALL_LAYERS_TAG for _m, tag in dlg._tagged)
     # 현재 기준 layer 매치(all_matched)보다 크거나 같아야(여러 layer 합집합).
     cur = {str(m.base.image_path) for m in win.matches if win._match_status(m) != "none"}
     assert cur.issubset(expected)
@@ -550,12 +570,38 @@ def test_heatmap_uncheck_layer_reduces_map_entries(win, app):
         assert len(dlg._map_entries()) < full
 
 
-def test_heatmap_add_targets_are_matched(win, app):
+def test_heatmap_add_targets_match_displayed_cross_layer_groups(win, app):
+    """'출력에 넣기' 대상 개수가 화면에 표시된 교차매치 그룹(기준 layer 포함) 개수와 같아야 한다.
+
+    회귀: 예전엔 다이얼로그 생성 시점에 고정된 self._compare_layers 로 판정해(_is_matched),
+    화면에 실제 표시되는 교차매치 판정(_col_checks 기준, cross_layer_groups)과 어긋나
+    버튼 활성화가 들쭉날쭉하고 '넣기'를 눌러도 일부만 담겼다.
+    """
+    from collections import defaultdict
+    from app.clustering import cluster_records, cross_layer_groups
+
     dlg = _make_heatmap(win)
     dlg._selected_keys = list(dlg._groups.keys())
     dlg._rebuild_detail()
-    # '출력에 넣기' 대상은 선택 위치의 매칭된 메인 기준 defect.
-    assert all(dlg._is_matched(bi) for bi in dlg._add_targets)
+
+    by_layer = defaultdict(list)
+    for lyr, rec in dlg._records_at_selection():
+        by_layer[lyr].append(rec)
+    layer_to_clusters = {
+        lyr: cluster_records(recs, dlg._cluster_radius) for lyr, recs in by_layer.items()
+    }
+    groups = cross_layer_groups(layer_to_clusters, dlg._tolerance)
+    matched_with_base = [g for g in groups if len(g) >= 2 and dlg._base_layer in g]
+    assert len(dlg._add_targets) == len(matched_with_base)
+    assert dlg.btn_add_all.isEnabled() == bool(matched_with_base)
+
+
+def test_heatmap_add_targets_enable_consistent_across_selections(win, app):
+    """서로 다른 위치를 연속 선택해도 버튼 활성화가 매번 add_targets 유무와 일치해야 한다."""
+    dlg = _make_heatmap(win)
+    for k in dlg._groups.keys():
+        dlg._on_selection_changed([k])
+        assert dlg.btn_add_all.isEnabled() == bool(dlg._add_targets)
 
 
 def test_heatmap_map_caption_has_counts(win, app):
@@ -779,6 +825,42 @@ def test_busy_overlay_start_stop(app):
     b.set_progress(2, 4)
     b.stop()
     assert b.isHidden()
+
+
+def test_busy_overlay_event_filter_survives_missing_host(app):
+    """_host 가 없는(재래핑된) 인스턴스로 eventFilter 가 불려도 죽지 않아야 한다.
+
+    회귀: ExportTrayDialog 처럼 매번 새로 만들어지는 다이얼로그의 BusyOverlay 가
+    orphan 으로 남으면, shiboken 이 __init__ 없이 재래핑한 인스턴스로 eventFilter 를
+    호출해 AttributeError: 'BusyOverlay' object has no attribute '_host' 가 났다.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QWidget
+    from app.ui.busy_overlay import BusyOverlay
+
+    host = QWidget()
+    b = BusyOverlay(host)
+    del b._host  # 재래핑(__init__ 미실행) 상황 흉내
+    assert b.eventFilter(host, QEvent(QEvent.Resize)) is False
+
+
+def test_notification_banner_dismiss_no_warning(app):
+    """dismiss() 가 연결된 슬롯 없이 disconnect() 해도 RuntimeWarning 이 새지 않아야 한다."""
+    import warnings
+    from PySide6.QtWidgets import QWidget
+    from app.ui.notifications import NotificationBanner
+
+    parent = QWidget()
+    parent.show()  # dismiss() 의 isVisible() 가드를 실제 사용처럼 통과시키기 위해 필요
+    banner = NotificationBanner(parent)
+    banner.show_message("테스트", "info", timeout_ms=0)
+    banner.dismiss()
+    banner._after_hide()  # 애니메이션 완료를 흉내(스스로 disconnect)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        banner.dismiss()  # 이제 finished 에 연결된 슬롯이 없음 — 예전엔 여기서 RuntimeWarning
+    assert not any(issubclass(w.category, RuntimeWarning) for w in caught)
+    parent.close()
 
 
 def test_match_worker_runs_and_collapses(app):

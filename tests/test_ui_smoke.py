@@ -79,6 +79,39 @@ def test_cluster_radius_change_preserves_index_and_saves(win):
     assert win.settings.cluster_radius == 80.0
 
 
+def test_cluster_radius_refresh_strip_rebuilds_thumbnail_items(win):
+    """클러스터 길이 변경(refresh_strip=True)은 그룹 수가 바뀌면 상단 스트립도 다시 채운다.
+
+    회귀: rebuild_grid=True 는 비교 layer 토글과 공유돼, 예전엔 이 경로에서 비교
+    그리드만 다시 만들고 스트립 아이템(캡션·개수)은 옛 데이터로 남아 있었다.
+    """
+    win._goto(0)
+    before_count = len(win.strip._thumbs)
+    # 클러스터 길이가 바뀌어 그룹 하나가 합쳐졌다고 가정 — self.matches 를 한 칸 줄인다.
+    if len(win.matches) < 2:
+        return
+    win.matches = win.matches[:-1]
+    win.base_records = [m.base for m in win.matches]
+    win._after_rematch(rebuild_grid=True, refresh_strip=True)
+    assert len(win.strip._thumbs) == len(win.matches) != before_count
+    assert [t.caption.text() for t in win.strip._thumbs] == win._strip_captions_and_tooltips()[0]
+
+
+def test_tolerance_rematch_does_not_rebuild_strip_items(win):
+    """허용오차 변경(refresh_strip=False, 기본값)은 스트립 아이템을 다시 만들지 않는다.
+
+    클러스터링 자체가 안 바뀌므로 기존 위젯 재사용이 맞다 — 위 회귀 수정이 이 경로까지
+    건드리지 않았는지 확인.
+    """
+    win._goto(0)
+    before_count = len(win.strip._thumbs)
+    if len(win.matches) < 2:
+        return
+    win.matches = win.matches[:-1]
+    win._after_rematch(rebuild_grid=False, refresh_strip=False)
+    assert len(win.strip._thumbs) == before_count  # 그대로(재구성 안 됨)
+
+
 def test_set_layers_rereview_default(app):
     from app.ui.controls import SideBar
 
@@ -490,11 +523,49 @@ def test_update_check_available_sets_flag(win, monkeypatch):
 
 
 def test_update_check_uptodate_manual_banner(win):
+    """수동 확인 결과 최신 버전이면(팝업 없이) 상태 라벨이 '확인 중...'에서 갱신돼야 한다.
+
+    회귀: 예전엔 이 분기가 배너만 띄우고 nav 상태 라벨을 갱신하지 않아
+    '업데이트 확인 중...' 이 화면에 그대로 남아 있었다.
+    """
     from app import updater
 
+    win.nav.set_status("업데이트 확인 중...")
     st = updater.UpdateStatus(available=False, local="a", remote="a", method="zip")
     win._on_update_checked(st, manual=True)  # 모달 없음(available=False)
     assert win.top.btn_settings.text() == "⚙ 설정"
+    assert win.nav.lbl_status.text() == "최신 버전입니다"
+
+
+def test_update_check_error_manual_updates_status(win):
+    from app import updater
+
+    win.nav.set_status("업데이트 확인 중...")
+    st = updater.UpdateStatus(available=False, local="a", remote=None, method="zip", error="네트워크 오류")
+    win._on_update_checked(st, manual=True)
+    assert win.nav.lbl_status.text() == "업데이트 확인 실패"
+
+
+def test_update_finished_message_shows_new_version(win, monkeypatch):
+    """업데이트 완료 메시지가 '몇 개 파일 갱신' 대신 새 버전 번호를 보여줘야 한다.
+
+    __version__ 은 프로세스 시작 시 고정값이라 업데이트 직후에도 구버전을 가리키므로,
+    디스크에서 새로 읽은 updater.read_installed_version() 값을 써야 한다.
+    """
+    from app import updater
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(updater, "read_installed_version", lambda: "1.99.0")
+    shown = {}
+
+    def fake_info(self, title, text):
+        shown["text"] = text
+
+    monkeypatch.setattr(QMessageBox, "information", fake_info)
+    monkeypatch.setattr(win, "close", lambda: None)
+    win._on_update_finished(True, "72개 파일을 갱신했습니다.")
+    assert "최신 버전(1.99.0)으로 업데이트 되었습니다." in shown["text"]
+    assert "72개 파일" not in shown["text"]
 
 
 def test_settings_dialog_update_button_requests(app, tmp_path):

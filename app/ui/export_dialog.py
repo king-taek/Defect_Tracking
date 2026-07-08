@@ -29,6 +29,7 @@ from app.ui.busy_overlay import BusyOverlay
 
 _COLUMNS = 3
 _THUMB_PX = 180  # 카드 썸네일 크기(크게)
+_ALL_LAYERS_TAG = "이번 LOT의 모든 매치된 defect"
 
 
 class ExportTrayDialog(QDialog):
@@ -39,18 +40,23 @@ class ExportTrayDialog(QDialog):
         entries: list[BaseDefectMatches],
         thumb_cache: Optional[ThumbnailCache] = None,
         all_matched: Optional[list[BaseDefectMatches]] = None,
-        all_layers_provider: Optional[Callable[[], list[BaseDefectMatches]]] = None,
+        all_matched_label: str = "기준 layer 매치 전체",
+        all_layers_provider: Optional[
+            Callable[[Callable[[int, int], None], Callable[[list], None]], None]
+        ] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        # 담긴 항목(스냅샷). base image_path 로 중복 제거하며 유지한다.
-        self._kept: list[BaseDefectMatches] = []
+        # 담긴 항목(스냅샷) + 담긴 경로(버튼 하나로 한 번에 담긴 묶음은 사진 카드 대신
+        # 요약 카드 하나로 보여준다 — None 이면 개별 카드).
+        self._tagged: list[tuple[BaseDefectMatches, Optional[str]]] = []
         self._keys: set[str] = set()
         for m in entries:
             self._add(m)
         # 이번 LOT 의 매칭 있는 기준 사진(전체 추가 버튼용).
         self._all_matched = list(all_matched or [])
-        # 모든 layer 를 기준으로 매치를 합쳐 담는 공급자(느릴 수 있어 클릭 시 계산).
+        self._all_matched_label = all_matched_label
+        # 모든 layer 를 기준으로 매치를 합쳐 담는 공급자(무거워 백그라운드로 계산 — 콜백형).
         self._all_layers_provider = all_layers_provider
         self._thumb_cache = thumb_cache
         self._wants_export = False  # True=Excel 출력, False=저장만(확인)
@@ -65,12 +71,12 @@ class ExportTrayDialog(QDialog):
     def _key(item: BaseDefectMatches) -> str:
         return str(item.base.image_path)
 
-    def _add(self, item: BaseDefectMatches) -> bool:
+    def _add(self, item: BaseDefectMatches, tag: Optional[str] = None) -> bool:
         k = self._key(item)
         if k in self._keys:
             return False
         self._keys.add(k)
-        self._kept.append(item)
+        self._tagged.append((item, tag))
         return True
 
     def _build(self) -> None:
@@ -179,9 +185,25 @@ class ExportTrayDialog(QDialog):
 
     def _populate(self) -> None:
         self._clear_grid()
-        for i, item in enumerate(self._kept):
-            self._grid.addWidget(self._make_card(item), i // _COLUMNS, i % _COLUMNS)
-        shown = len(self._kept)
+        # 태그 없는 항목은 개별 사진 카드로, 같은 태그(버튼 한 번에 대량 추가)는
+        # 사진 수백 장 대신 하나의 요약 카드로 묶어 보여준다.
+        tag_order: list[Optional[str]] = []
+        tag_items: dict[Optional[str], list[BaseDefectMatches]] = {}
+        for item, tag in self._tagged:
+            if tag not in tag_items:
+                tag_items[tag] = []
+                tag_order.append(tag)
+            tag_items[tag].append(item)
+        cells: list[QWidget] = []
+        for tag in tag_order:
+            items = tag_items[tag]
+            if tag is None:
+                cells.extend(self._make_card(m) for m in items)
+            else:
+                cells.append(self._make_batch_card(tag, items))
+        for i, w in enumerate(cells):
+            self._grid.addWidget(w, i // _COLUMNS, i % _COLUMNS)
+        shown = len(self._tagged)
         self.title.setText(f"담은 사진 — 총 {shown}장")
         self._empty.setVisible(shown == 0)
         self.btn_export.setEnabled(shown > 0)
@@ -249,48 +271,97 @@ class ExportTrayDialog(QDialog):
         lay.addWidget(cap, alignment=Qt.AlignHCenter)
         return card
 
+    def _make_batch_card(self, tag: str, items: list[BaseDefectMatches]) -> QWidget:
+        """버튼 한 번에 대량 추가된 항목들을 사진 대신 요약 카드 하나로 보여준다."""
+        px = _THUMB_PX
+        card = QFrame()
+        card.setFixedWidth(px + 20)
+        card.setObjectName("cell")
+        card.setStyleSheet(
+            f"QFrame#cell {{ background:{theme.BG_ELEV};"
+            f" border:1px solid {theme.NEON_SOFT}; border-radius:8px; }}"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(6, 6, 6, 8)
+        lay.setSpacing(4)
+
+        icon = QLabel("🗂")
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setFixedSize(px, int(px * 0.78))
+        icon.setStyleSheet(
+            f"background:{theme.BG}; border:1px solid {theme.NEON_SOFT};"
+            f" border-radius:6px; font-size:40px;"
+        )
+        btn_x = QPushButton("✕", icon)
+        btn_x.setFixedSize(24, 24)
+        btn_x.setCursor(Qt.PointingHandCursor)
+        btn_x.setToolTip("이 묶음 전체를 출력 목록에서 뺍니다.")
+        btn_x.setStyleSheet(
+            "QPushButton { color:#ffffff; background:rgba(17,21,28,0.72);"
+            " border:1px solid rgba(255,255,255,0.55); border-radius:12px;"
+            " font-size:13px; font-weight:700; padding:0; }"
+            "QPushButton:hover { background:#b00020; border:1px solid #ffffff; }"
+        )
+        btn_x.move(px - 28, 4)
+        btn_x.clicked.connect(lambda _=0, t=tag: self._remove_batch(t))
+        lay.addWidget(icon, alignment=Qt.AlignHCenter)
+
+        cap = QLabel(f"{tag}\n{len(items)}장")
+        cap.setObjectName("dim")
+        cap.setStyleSheet("font-size:10px; font-weight:700;")
+        cap.setWordWrap(True)
+        cap.setAlignment(Qt.AlignCenter)
+        cap.setFixedWidth(px)
+        lay.addWidget(cap, alignment=Qt.AlignHCenter)
+        return card
+
     def _remove(self, key: str) -> None:
-        self._kept = [m for m in self._kept if self._key(m) != key]
+        self._tagged = [(m, t) for m, t in self._tagged if self._key(m) != key]
         self._keys.discard(key)
         self._populate()
 
+    def _remove_batch(self, tag: str) -> None:
+        removed = {self._key(m) for m, t in self._tagged if t == tag}
+        self._tagged = [(m, t) for m, t in self._tagged if t != tag]
+        self._keys -= removed
+        self._populate()
+
     def _clear_all(self) -> None:
-        self._kept = []
+        self._tagged = []
         self._keys = set()
         self._populate()
 
     def _add_all_matched(self) -> None:
-        added = 0
         for m in self._all_matched:
-            if self._add(m):
-                added += 1
+            self._add(m, tag=self._all_matched_label)
         self._populate()
 
     def _add_all_layers(self) -> None:
-        """모든 layer 를 기준으로 한 매치를 공급자에서 받아 담는다(중복 제거).
+        """모든 layer 를 기준으로 한 매치를 공급자에게 백그라운드로 계산시켜 담는다(중복 제거).
 
-        계산이 무거우므로 로딩 오버레이 + layer 단위 진행도를 표시한다.
+        layer 수만큼 재매칭하는 무거운 작업이라 공급자(main_window)가 QThreadPool 워커로
+        돌리고 진행/완료를 콜백으로 알려준다 — 계산 중엔 두 추가 버튼을 비활성화한다.
         """
         if self._all_layers_provider is None:
             return
-        from PySide6.QtWidgets import QApplication
-
+        self.btn_add_all.setEnabled(False)
+        self.btn_add_all_layers.setEnabled(False)
         self._busy.start("모든 매치 계산 중", determinate=True)
-        QApplication.processEvents()
 
         def _progress(cur: int, total: int) -> None:
             self._busy.set_message(f"모든 매치 계산 중  ({cur}/{total} layer)")
             self._busy.set_progress(cur, total)
-            QApplication.processEvents()  # 동기 루프 중에도 진행바가 갱신되도록
 
-        try:
-            items = self._all_layers_provider(_progress) or []
-        finally:
+        def _done(items: list) -> None:
             self._busy.stop()
-        for m in items:
-            self._add(m)
-        self._populate()
+            self.btn_add_all.setEnabled(bool(self._all_matched))
+            self.btn_add_all_layers.setEnabled(True)
+            for m in items or []:
+                self._add(m, tag=_ALL_LAYERS_TAG)
+            self._populate()
+
+        self._all_layers_provider(_progress, _done)
 
     def selected(self) -> list[BaseDefectMatches]:
-        """최종 출력 대상 스냅샷 목록(담긴 순서 유지)."""
-        return list(self._kept)
+        """최종 출력 대상 스냅샷 목록(담긴 순서 유지, 태그 무시하고 평탄화)."""
+        return [m for m, _tag in self._tagged]

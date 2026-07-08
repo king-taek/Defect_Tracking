@@ -168,7 +168,10 @@ class BusyOverlay(QWidget):
         self.setGeometry(self._host.rect())
 
     def eventFilter(self, obj, event):  # noqa: N802
-        if obj is self._host and event.type() == QEvent.Resize and self.isVisible():
+        # 호스트가 파괴된 뒤에도 필터 등록이 남아 shiboken 이 __init__ 없이 재래핑한
+        # 인스턴스로 호출될 수 있다(_host 없음) — 그런 경우 조용히 무시한다.
+        host = getattr(self, "_host", None)
+        if host is not None and obj is host and event.type() == QEvent.Resize and self.isVisible():
             self._reposition()
         return False
 
