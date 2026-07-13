@@ -739,7 +739,9 @@ class HeatmapDialog(QDialog):
         # _add_targets 는 _build_all_detail 이 화면에 실제로 그린 교차매치 그룹에서 채운다
         # (예전엔 self._compare_layers 스냅샷으로 따로 판정해 화면 표시와 어긋났었다).
         self._build_all_detail(loc)
-        self.btn_add_all.setEnabled(bool(self._add_targets))
+        # 매치가 없어도 버튼은 살려 두고, 누르면 '담을 게 없다'고 안내한다
+        # (비활성만으로는 왜 안 되는지 알 수 없어 혼란스럽다는 피드백).
+        self.btn_add_all.setEnabled(True)
         # 썸네일은 백그라운드로 캐시를 구운 뒤 채워, 클릭 즉시 목록이 뜨고 멈추지 않게 한다.
         self._start_detail_thumbs()
 
@@ -888,3 +890,12 @@ class HeatmapDialog(QDialog):
     def _add_all_current(self) -> None:
         if self._add_targets:
             self._on_add(list(self._add_targets))
+            return
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.information(
+            self,
+            "출력할 항목 없음",
+            "선택한 위치에는 기준 layer 와 매칭된 defect 이 없어\n"
+            "출력에 담을 사진이 없습니다.",
+        )

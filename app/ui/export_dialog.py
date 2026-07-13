@@ -64,7 +64,8 @@ class ExportTrayDialog(QDialog):
         self._thumb_cache = thumb_cache
         self._wants_export = False  # True=Excel 출력, False=저장만(확인)
         self.setWindowTitle("결과 출력 — 담은 사진")
-        self.setMinimumSize(620, 540)
+        # 카드 3열(3×200) + 간격/여백/세로 스크롤바 ≈ 677px — 가로 스크롤 없이 3열이 들어가게.
+        self.setMinimumSize(700, 540)
         self._build()
         self._populate()
         # 무거운 '모든 매치(기준 없이)' 계산 동안 다이얼로그 위에 로딩+진행도 표시.

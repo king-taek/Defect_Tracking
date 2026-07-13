@@ -211,11 +211,11 @@ class MainWindow(QMainWindow):
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
-        # 자재 폴더 버튼: 우클릭 시 최근 폴더 메뉴
+        # LOT 폴더 버튼: 우클릭 시 최근 폴더 메뉴
         self.top.btn_open.setContextMenuPolicy(Qt.CustomContextMenu)
         self.top.btn_open.customContextMenuRequested.connect(self._show_recent_menu)
         self.top.btn_open.setToolTip(
-            "리뷰가 진행된 자재(LOT) 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
+            "리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
         )
         self.splitter.addWidget(self.top)
 
@@ -312,7 +312,7 @@ class MainWindow(QMainWindow):
         self.grid.image_clicked.connect(self._open_viewer)
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
         grid_host_layout.addWidget(self.grid)
-        self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
+        self._empty_label = QLabel("LOT 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setMinimumHeight(200)
@@ -403,7 +403,7 @@ class MainWindow(QMainWindow):
             self.load_lot(lot)  # 잘못 고른 경우 → LOT 자동 회귀
 
     def _open_folder(self, folder: str) -> None:
-        """선택 폴더의 구조 레벨을 판별해 자재 폴더로 보정하거나 재선택을 안내한다.
+        """선택 폴더의 구조 레벨을 판별해 LOT 폴더로 보정하거나 재선택을 안내한다.
 
         모든 안내는 비차단 배너로(팝업 없음). 원본 read-only.
         """
@@ -413,15 +413,23 @@ class MainWindow(QMainWindow):
         elif kind in ("layer", "wafer") and material is not None:
             label = "layer" if kind == "layer" else "wafer"
             self.banner.show_message(
-                f"{label} 폴더가 선택되었으니 자재 폴더로 자동 이동하여 탐색합니다.",
+                f"{label} 폴더가 선택되었으니 LOT 폴더로 자동 이동하여 탐색합니다.",
                 "info",
             )
             self.load_lot(str(material))
+        elif kind == "material_parent":
+            self.banner.show_message(
+                "자재 폴더가 선택되었습니다. 안의 LOT 폴더를 선택해 주세요.",
+                "warn",
+                action_text="LOT 폴더 선택",
+                action=self._choose_folder,
+                timeout_ms=0,
+            )
         elif kind == "too_high":
             self.banner.show_message(
-                "상위(device) 폴더가 선택되었습니다. 자재 폴더를 선택해 주세요.",
+                "상위 폴더가 선택되었습니다. LOT 폴더를 선택해 주세요.",
                 "warn",
-                action_text="자재 폴더 선택",
+                action_text="LOT 폴더 선택",
                 action=self._choose_folder,
                 timeout_ms=0,
             )
@@ -437,7 +445,7 @@ class MainWindow(QMainWindow):
     def _show_recent_menu(self) -> None:
         recents = [f for f in self.settings.recent_folders if Path(f).exists()]
         if not recents:
-            self.banner.show_message("최근 연 자재 폴더가 없습니다.", "info")
+            self.banner.show_message("최근 연 LOT 폴더가 없습니다.", "info")
             return
         menu = QMenu(self)
         for folder in recents:
@@ -585,7 +593,7 @@ class MainWindow(QMainWindow):
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(
-                "선택한 폴더에서 layer 를 찾지 못했습니다. 자재 폴더를 확인하세요.",
+                "선택한 폴더에서 layer 를 찾지 못했습니다. LOT 폴더를 확인하세요.",
                 "warn", timeout_ms=0,
             )
             self.nav.set_status("layer 없음")
@@ -852,7 +860,7 @@ class MainWindow(QMainWindow):
 
     def _open_heatmap(self) -> None:
         if not self.matches:
-            self.banner.show_message("먼저 자재 폴더와 기준 layer 를 선택하세요.", "info")
+            self.banner.show_message("먼저 LOT 폴더와 기준 layer 를 선택하세요.", "info")
             return
         current_wafer = None
         if 0 <= self.current < len(self.matches):
@@ -1458,7 +1466,7 @@ class MainWindow(QMainWindow):
 
     def _export(self) -> None:
         if not self.matches:
-            self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
+            self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
             return
         # 이번 LOT 에서 매칭 있는 기준 사진(스냅샷) — 다이얼로그의 '전체 추가' 버튼용.
         all_matched = [
@@ -1526,6 +1534,8 @@ class MainWindow(QMainWindow):
             selected=selected,
             thumb_cache=self.thumb_cache,
             source_roots=[self.lot_index.lot_path],
+            # 원래 layer 순서(폴더 스캔 순서) — 기준 layer 를 맨 왼쪽에 고정하지 않는다.
+            layer_order=self.lot_index.layer_canonicals(),
         )
         worker = ExportWorker(kwargs)
         worker.signals.progress.connect(self._on_export_progress)

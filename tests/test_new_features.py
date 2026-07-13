@@ -368,9 +368,49 @@ def test_excel_original_path_is_hyperlink(win, app, tmp_path):
         if ws.cell(row=r, column=1).value == "원본경로"
     )
     cell = ws.cell(row=row_idx, column=2)
-    assert cell.value == Path(base.image_path).name
+    # 표시 텍스트는 고정 문구(파일명은 '정보' 행에 이미 있다), 링크 대상은 원본 URI.
+    assert cell.value == "원본 사진 열기"
     assert cell.hyperlink is not None
     assert cell.hyperlink.target == Path(base.image_path).resolve().as_uri()
+
+
+def test_excel_layer_order_preserved(win, app, tmp_path):
+    """layer_order 를 주면 기준 layer 를 맨 왼쪽에 고정하지 않고 원래 순서를 유지한다."""
+    from pathlib import Path
+    from app.export.excel_report import export_excel
+    from app.models import BaseDefectMatches, DefectRecord, MatchResult
+    from openpyxl import load_workbook
+
+    b = DefectRecord(image_path=Path("/b.jpg"), wafer_id="W1", layer="L2",
+                     layer_folder="L2", col=0, row=0, x=0.0, y=0.0)
+    item = BaseDefectMatches(base=b, results=[
+        MatchResult(compare_layer="L1", base=b, matched=b),
+        MatchResult(compare_layer="L3", base=b, matched=b),
+    ])
+    out = tmp_path / "o.xlsx"
+    export_excel(out, lot_name="L", base_layer="L2", compare_layers=["L1", "L3"],
+                 tolerance=100.0, selected=[item], thumb_cache=win.thumb_cache,
+                 source_roots=[win.lot_index.lot_path],
+                 layer_order=["L1", "L2", "L3"])
+    ws = load_workbook(out).active
+    row_idx = next(
+        r for r in range(1, ws.max_row + 1)
+        if ws.cell(row=r, column=1).value == "Layer"
+    )
+    vals = [ws.cell(row=row_idx, column=c).value for c in (2, 3, 4)]
+    assert vals == ["L1", "★ L2 (기준)", "L3"]
+    # layer_order 없이(기존 동작) 기준이 첫 데이터 열에 온다.
+    out2 = tmp_path / "o2.xlsx"
+    export_excel(out2, lot_name="L", base_layer="L2", compare_layers=["L1", "L3"],
+                 tolerance=100.0, selected=[item], thumb_cache=win.thumb_cache,
+                 source_roots=[win.lot_index.lot_path])
+    ws2 = load_workbook(out2).active
+    row_idx2 = next(
+        r for r in range(1, ws2.max_row + 1)
+        if ws2.cell(row=r, column=1).value == "Layer"
+    )
+    vals2 = [ws2.cell(row=row_idx2, column=c).value for c in (2, 3, 4)]
+    assert vals2 == ["★ L2 (기준)", "L1", "L3"]
 
 
 def test_grid_rollback_base_top_left(win):
