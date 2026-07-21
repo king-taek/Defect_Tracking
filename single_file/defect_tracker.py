@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.80   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.81   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -67,7 +67,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.80"
+__version__ = "1.33.81"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -5288,8 +5288,11 @@ class ClickableThumb(QFrame):
 
 updater__ProgressCb = Optional[Callable[[str], None]]
 
-# ZIP 추출 시 덮어쓰지 않을 최상위 폴더
-_SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", "venv"}
+# ZIP 자동 업데이트로 설치 폴더에 쓰지 않을 폴더(경로 상 아무 위치에서나 이름이 일치하면 제외).
+#   - 로컬 전용/재생성 폴더(.git·캐시·가상환경)는 원격본으로 덮어쓰면 안 되고,
+#   - .claude(Claude Code 스킬 등 개발 전용 도구, 수 MB)는 앱 실행에 불필요하므로 배포본에 내려받지 않는다.
+# git 체크아웃(=개발자 클론)에는 그대로 두어 스킬을 쓸 수 있게 한다 — 이 목록은 ZIP 경로에만 적용된다.
+_SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", "venv", ".claude"}
 # 자동 업데이트로 받아오지 않을(로컬 유지) 파일 이름 — 개발 문서는 배포본에서 갱신하지 않는다.
 _SKIP_FILES = {"CLAUDE.md", "README.md"}
 

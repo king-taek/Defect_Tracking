@@ -53,6 +53,20 @@ def test_extract_over_skips_protected_dirs(tmp_path):
     assert (target / "app" / "keep.py").exists()
 
 
+def test_extract_over_skips_claude_dev_tooling(tmp_path):
+    """자동 업데이트(ZIP)로 .claude(Claude Code 스킬 등 개발 전용 도구)는 설치 폴더에 내려받지 않는다."""
+    target = tmp_path / "install"
+    target.mkdir()
+    zp = _make_zip(tmp_path, {
+        ".claude/skills/impeccable/SKILL.md": "skill",
+        ".claude/agents/x.md": "agent",
+        "app/keep.py": "keep",
+    })
+    updater.extract_over(zp, target)
+    assert not (target / ".claude").exists()  # 개발 도구는 배포본에 없어야 함
+    assert (target / "app" / "keep.py").read_text() == "keep"  # 런타임 파일은 정상 적용
+
+
 def test_extract_over_skips_dev_docs(tmp_path):
     """자동 업데이트(ZIP)로 CLAUDE.md·README.md 는 받아오지 않는다(로컬 유지)."""
     target = tmp_path / "install"
