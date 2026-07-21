@@ -29,13 +29,12 @@ ProgressCb = Optional[Callable[[str], None]]
 
 # ZIP(멀티파일 app/) 자동 업데이트로 설치 폴더에 쓰지 않을 폴더(경로 상 이름 일치 시 제외). 부류:
 #   (1) 로컬 전용/재생성 폴더(.git·캐시·가상환경) — 원격본으로 덮어쓰면 안 됨.
-#   (2) 개발/부가 리소스(.claude 스킬·tests·tools·.github CI·single_file 단일파일 배포본)
-#       — app/ 실행에 불필요. single_file 은 자체 self-update 채널이라 트리 ZIP 에서 받을 필요도 없다.
+#   (2) 개발 전용 리소스(.claude 스킬·tests·tools·.github CI) — app/ 실행에 불필요.
 # 배포본에는 실행 필수(app/·main.py·bootstrap.py·requirements.txt)만 남는다.
 # git 체크아웃(=개발자 클론)에는 (2)가 그대로 남는다 — 이 목록은 ZIP 경로에만 적용된다.
 _SKIP_DIRS = {
     ".git", "__pycache__", ".pytest_cache", ".venv", "venv",  # (1) 로컬 전용/재생성
-    ".claude", "tests", "tools", ".github", "single_file",    # (2) 개발/부가
+    ".claude", "tests", "tools", ".github",                    # (2) 개발 전용
 }
 # 자동 업데이트로 받아오지 않을(로컬 유지/미배포) 파일 이름 — 앱 실행에 불필요:
 #   개발 문서(CLAUDE.md·README.md), 개발용 빌드 스크립트(build_exe.py), git 설정(.gitignore).

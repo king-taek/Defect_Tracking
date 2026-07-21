@@ -57,7 +57,7 @@ def test_extract_over_ships_only_runtime_essentials(tmp_path):
     """자동 업데이트(ZIP)는 실행 필수 파일만 배포하고 개발/부가 리소스는 모두 제외한다.
 
     배포 대상: app/·main.py·bootstrap.py·requirements.txt
-    제외 대상: .claude·tests·tools·.github·single_file·build_exe.py·개발 문서·.gitignore
+    제외 대상: .claude·tests·tools·.github·build_exe.py·개발 문서·.gitignore
     """
     target = tmp_path / "install"
     target.mkdir()
@@ -67,7 +67,6 @@ def test_extract_over_ships_only_runtime_essentials(tmp_path):
         "tests/test_x.py": "dev-test",
         "tools/compute_version.py": "dev-tool",
         ".github/workflows/ci.yml": "ci",
-        "single_file/defect_tracker.py": "bundle",
         "build_exe.py": "dev-build",
         "CLAUDE.md": "dev-doc",
         ".gitignore": "gitcfg",
@@ -78,7 +77,7 @@ def test_extract_over_ships_only_runtime_essentials(tmp_path):
         "requirements.txt": "PySide6>=6.6",
     })
     updater.extract_over(zp, target)
-    for gone in (".claude", "tests", "tools", ".github", "single_file",
+    for gone in (".claude", "tests", "tools", ".github",
                  "build_exe.py", "CLAUDE.md", ".gitignore"):
         assert not (target / gone).exists(), f"{gone} 는 배포본에 없어야 함"
     for kept, content in (("app/keep.py", "keep"), ("main.py", "entry"),
