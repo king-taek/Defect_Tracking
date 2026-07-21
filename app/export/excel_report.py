@@ -71,20 +71,21 @@ def _place_image(ws, thumb_cache, rec, row, col) -> None:
 
 
 def _place_path_link(ws, row, col, image_path) -> None:
-    """(row,col) 셀에 원본 파일명을 표시하고 클릭하면 원본을 여는 링크를 건다.
+    """(row,col) 셀에 클릭하면 원본을 여는 링크를 건다(표시 텍스트는 고정 문구).
 
     원본을 통째로 심으면(고화질) 파일이 수백 MB~GB 로 불어나므로, 대신 항상
-    최신 원본을 가리키는 가벼운 링크로 연결한다.
+    최신 원본을 가리키는 가벼운 링크로 연결한다. 파일명은 '정보' 행에 이미 있어
+    링크 텍스트는 용도가 드러나는 고정 문구로 둔다.
     """
     p = Path(image_path)
-    cell = ws.cell(row=row, column=col, value=p.name)
+    cell = ws.cell(row=row, column=col, value="원본 사진 열기")
     cell.font = Font(color=_NEON, size=8, underline="single")
     cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     cell.border = _BORDER
     try:
         cell.hyperlink = p.resolve().as_uri()
     except (OSError, ValueError):
-        pass  # 링크 실패해도 파일명 텍스트는 남는다
+        pass  # 링크 실패해도 안내 텍스트는 남는다
 
 
 def export_excel(
@@ -98,8 +99,14 @@ def export_excel(
     thumb_cache: ThumbnailCache,
     source_roots: Iterable[str | Path],
     progress: Optional[Callable[[int, int], None]] = None,
+    layer_order: Optional[list[str]] = None,
 ) -> Path:
     """선택된 기준 defect 들의 비교 결과를 Excel 로 저장한다.
+
+    Args:
+        layer_order: LOT 의 원래 layer 순서(폴더 스캔 순서). 주어지면 기준 layer 를
+            맨 왼쪽에 고정하지 않고 이 순서대로 열을 배치한다. None 이면 기존처럼
+            기준이 첫 데이터 열에 온다.
 
     Returns:
         저장된 파일의 절대 경로.
@@ -163,6 +170,7 @@ def export_excel(
     # 상단 컬럼 헤더 행은 두지 않는다 — 블록마다 'Layer' 행으로 이미 표기하므로 중복이다(항목 1).
 
     # ---- 각 기준 defect 블록 (블록마다 '자기' 기준/비교 layer 로 표기) ----
+    _layer_pos = {name: i for i, name in enumerate(layer_order or [])}
     _total = len(selected)
     for idx, item in enumerate(selected, start=1):
         if progress is not None:
@@ -170,6 +178,16 @@ def export_excel(
         base = item.base
         base_layer_name = base.layer or base_layer
         results = list(item.results)
+
+        # 열 배치 — 기준을 맨 앞에 고정하지 않고 LOT 의 원래 layer 순서를 따른다.
+        # entries[ci] 가 데이터 열 2+ci 에 놓인다. mr 이 None 이면 기준 열.
+        entries: list = [None] + results
+        if layer_order:
+            def _col_key(mr) -> int:
+                name = base_layer_name if mr is None else mr.compare_layer
+                # 목록에 없는 layer 는 뒤로(안정 정렬이라 기존 상대 순서 유지)
+                return _layer_pos.get(name, len(layer_order))
+            entries.sort(key=_col_key)
 
         # 블록 제목 — 기준 layer 를 함께 표기(여러 layer 혼합 대비).
         _set_cell(
@@ -188,42 +206,48 @@ def export_excel(
 
         # Layer 이름 행 — 이 블록의 실제 기준/비교 layer(전역 기준에 종속되지 않음).
         _set_cell(ws, r, 1, "Layer", bold=True, align="center", fill=_LIGHT)
-        _set_cell(
-            ws, r, 2, "★ " + base_layer_name + " (기준)",
-            bold=True, color="FFFFFFFF", fill=_NEON, align="center",
-        )
-        for ci, mr in enumerate(results):
-            _set_cell(
-                ws, r, 3 + ci, mr.compare_layer,
-                bold=True, color="FFFFFFFF", fill=_NAVY, align="center",
-            )
-        for ci in range(len(results), max_cmp):
-            _set_cell(ws, r, 3 + ci, "", fill=_LIGHT, align="center")
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                _set_cell(
+                    ws, r, 2 + ci, "★ " + base_layer_name + " (기준)",
+                    bold=True, color="FFFFFFFF", fill=_NEON, align="center",
+                )
+            else:
+                _set_cell(
+                    ws, r, 2 + ci, mr.compare_layer,
+                    bold=True, color="FFFFFFFF", fill=_NAVY, align="center",
+                )
+        for ci in range(len(entries), n_data_cols):
+            _set_cell(ws, r, 2 + ci, "", fill=_LIGHT, align="center")
         ws.row_dimensions[r].height = 18
         r += 1
 
         # 이미지 행
         _set_cell(ws, r, 1, "이미지", bold=True, align="center", fill=_LIGHT)
         ws.row_dimensions[r].height = _IMG_ROW_HEIGHT
-        _place_image(ws, thumb_cache, base, r, 2)
-        for ci, mr in enumerate(results):
-            rec = mr.matched
-            if rec is not None:
-                _place_image(ws, thumb_cache, rec, r, 3 + ci)
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                _place_image(ws, thumb_cache, base, r, 2 + ci)
+            elif mr.matched is not None:
+                _place_image(ws, thumb_cache, mr.matched, r, 2 + ci)
             else:
-                _set_cell(ws, r, 3 + ci, "매칭 없음", color=_NOMATCH, align="center")
-        for ci in range(len(results), max_cmp):
-            ws.cell(row=r, column=3 + ci).border = _BORDER
+                _set_cell(ws, r, 2 + ci, "매칭 없음", color=_NOMATCH, align="center")
+        for ci in range(len(entries), n_data_cols):
+            ws.cell(row=r, column=2 + ci).border = _BORDER
         r += 1
 
         # 상세 정보 행
         _set_cell(ws, r, 1, "정보", bold=True, align="center", fill=_LIGHT)
-        base_lines = ["기준 ★", f"위치 {base.position_key}", Path(base.image_path).name]
-        extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
-        if extra:
-            base_lines.append(f"+{extra} 근접중복")
-        _set_cell(ws, r, 2, "\n".join(base_lines), color=_NEON, wrap=True, size=9)
-        for ci, mr in enumerate(results):
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                base_lines = [
+                    "기준 ★", f"위치 {base.position_key}", Path(base.image_path).name
+                ]
+                extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
+                if extra:
+                    base_lines.append(f"+{extra} 근접중복")
+                _set_cell(ws, r, 2 + ci, "\n".join(base_lines), color=_NEON, wrap=True, size=9)
+                continue
             rec = mr.matched
             if rec is not None:
                 dist = mr.distance
@@ -236,23 +260,23 @@ def export_excel(
             else:
                 lines = ["매칭 X"]
                 color = _NOMATCH
-            _set_cell(ws, r, 3 + ci, "\n".join(lines), color=color, wrap=True, size=9)
-        for ci in range(len(results), max_cmp):
-            ws.cell(row=r, column=3 + ci).border = _BORDER
-        ws.row_dimensions[r].height = 48
+            _set_cell(ws, r, 2 + ci, "\n".join(lines), color=color, wrap=True, size=9)
+        for ci in range(len(entries), n_data_cols):
+            ws.cell(row=r, column=2 + ci).border = _BORDER
+        ws.row_dimensions[r].height = 60
         r += 1
 
         # 원본 경로 행 — 클릭하면 원본을 바로 연다(기준 + 각 매칭된 비교 defect 별로).
         _set_cell(ws, r, 1, "원본경로", bold=True, align="center", fill=_LIGHT)
-        _place_path_link(ws, r, 2, base.image_path)
-        for ci, mr in enumerate(results):
-            rec = mr.matched
-            if rec is not None:
-                _place_path_link(ws, r, 3 + ci, rec.image_path)
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                _place_path_link(ws, r, 2 + ci, base.image_path)
+            elif mr.matched is not None:
+                _place_path_link(ws, r, 2 + ci, mr.matched.image_path)
             else:
-                ws.cell(row=r, column=3 + ci).border = _BORDER
-        for ci in range(len(results), max_cmp):
-            ws.cell(row=r, column=3 + ci).border = _BORDER
+                ws.cell(row=r, column=2 + ci).border = _BORDER
+        for ci in range(len(entries), n_data_cols):
+            ws.cell(row=r, column=2 + ci).border = _BORDER
         ws.row_dimensions[r].height = 24
         r += 1
         r += 1  # 블록 간 간격

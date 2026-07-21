@@ -86,7 +86,9 @@ def test_classify_selection_levels(tmp_path):
     assert scanner.classify_selection(mat) == ("material", mat)
     assert scanner.classify_selection(mat / "LAYER") == ("layer", mat)
     assert scanner.classify_selection(mat / "LAYER" / "WAFER") == ("wafer", mat)
-    kind, _ = scanner.classify_selection(tmp_path / "DEVICE")
+    # LOT 의 상위(자재 폴더, 이미지가 3단계 아래)는 LOT 과 구분해 판정한다.
+    assert scanner.classify_selection(tmp_path / "DEVICE") == ("material_parent", None)
+    kind, _ = scanner.classify_selection(tmp_path)
     assert kind == "too_high"
     (tmp_path / "EMPTY").mkdir()
     assert scanner.classify_selection(tmp_path / "EMPTY") == ("unknown", None)
@@ -110,6 +112,9 @@ def test_classify_selection_ignores_stray_shallow_images(tmp_path):
     assert scanner.classify_selection(root) == ("material", root)
     assert scanner.classify_selection(root / "LAYER") == ("layer", root)
     assert scanner.classify_selection(root / "LAYER" / "WAFER") == ("wafer", root)
+    # 회귀: layer 폴더의 잡이미지 때문에 자재 폴더(LOT 상위, DEVICE)가
+    # '손자에 이미지' 검사에 걸려 LOT(material)으로 오판되면 안 된다.
+    assert scanner.classify_selection(tmp_path / "DEVICE") == ("material_parent", None)
 
 
 def test_product_profiles_default_and_switch():

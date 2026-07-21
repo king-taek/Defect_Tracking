@@ -92,11 +92,11 @@ class SideBar(QFrame):
         outer.setContentsMargins(12, 12, 12, 10)
         outer.setSpacing(8)
 
-        # ── 헤더: 자재 폴더 선택 + 자재명
-        self.btn_open = QPushButton("📁  자재 폴더 선택")
-        self.btn_open.setToolTip("리뷰가 진행된 자재(LOT) 폴더를 선택 (Ctrl+O)")
+        # ── 헤더: LOT 폴더 선택 + LOT명
+        self.btn_open = QPushButton("📁  LOT 폴더 선택")
+        self.btn_open.setToolTip("리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O)")
         self.btn_open.clicked.connect(self.open_folder)
-        self.lbl_lot = QLabel("선택된 자재 없음")
+        self.lbl_lot = QLabel("선택된 LOT 없음")
         self.lbl_lot.setObjectName("lotName")
         self.lbl_lot.setWordWrap(True)
         outer.addWidget(self.btn_open)
@@ -115,7 +115,7 @@ class SideBar(QFrame):
         self.spn_tol.setObjectName("tol")
         self.spn_tol.setButtonSymbols(QAbstractSpinBox.NoButtons)  # ↑↓ 버튼 제거(깔끔한 입력)
         self.spn_tol.setRange(0.0, 100000.0)
-        self.spn_tol.setDecimals(1)
+        self.spn_tol.setDecimals(0)  # 자연수만 — "300.0" 대신 "300"
         self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
         self.spn_tol.setSingleStep(10.0)
         self.spn_tol.setSuffix(" µm")
@@ -131,7 +131,7 @@ class SideBar(QFrame):
         self.spn_cluster = NoScrollDoubleSpinBox()
         self.spn_cluster.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spn_cluster.setRange(0.0, 100000.0)
-        self.spn_cluster.setDecimals(1)
+        self.spn_cluster.setDecimals(0)  # 자연수만
         self.spn_cluster.setSingleStep(5.0)
         self.spn_cluster.setValue(config.DEFAULT_CLUSTER_RADIUS)
         self.spn_cluster.setToolTip(
@@ -222,7 +222,7 @@ class SideBar(QFrame):
 
     # ---- API ----------------------------------------------------------
     def set_lot_name(self, name: str) -> None:
-        self.lbl_lot.setText(f"자재: {name}")
+        self.lbl_lot.setText(f"LOT: {name}")
 
     def set_layers(
         self,

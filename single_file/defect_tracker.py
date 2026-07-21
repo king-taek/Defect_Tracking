@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.77   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.80   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -45,6 +45,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import warnings
 import zipfile
 from collections import Counter, OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -66,7 +67,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.77"
+__version__ = "1.33.80"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -3519,13 +3520,16 @@ class BusyOverlay(QWidget):
         self.setGeometry(self._host.rect())
 
     def eventFilter(self, obj, event):  # noqa: N802
-        if obj is self._host and event.type() == QEvent.Resize and self.isVisible():
+        # 호스트가 파괴된 뒤에도 필터 등록이 남아 shiboken 이 __init__ 없이 재래핑한
+        # 인스턴스로 호출될 수 있다(_host 없음) — 그런 경우 조용히 무시한다.
+        host = getattr(self, "_host", None)
+        if host is not None and obj is host and event.type() == QEvent.Resize and self.isVisible():
             self._reposition()
         return False
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(8, 11, 16, 185))  # 반투명 어두운 막
+        painter.fillRect(self.rect(), QColor(8, 11, 16, 120))  # 반투명 막(과하게 어둡지 않게)
         painter.end()
 
 
@@ -3608,11 +3612,11 @@ class SideBar(QFrame):
         outer.setContentsMargins(12, 12, 12, 10)
         outer.setSpacing(8)
 
-        # ── 헤더: 자재 폴더 선택 + 자재명
-        self.btn_open = QPushButton("📁  자재 폴더 선택")
-        self.btn_open.setToolTip("리뷰가 진행된 자재(LOT) 폴더를 선택 (Ctrl+O)")
+        # ── 헤더: LOT 폴더 선택 + LOT명
+        self.btn_open = QPushButton("📁  LOT 폴더 선택")
+        self.btn_open.setToolTip("리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O)")
         self.btn_open.clicked.connect(self.open_folder)
-        self.lbl_lot = QLabel("선택된 자재 없음")
+        self.lbl_lot = QLabel("선택된 LOT 없음")
         self.lbl_lot.setObjectName("lotName")
         self.lbl_lot.setWordWrap(True)
         outer.addWidget(self.btn_open)
@@ -3631,7 +3635,7 @@ class SideBar(QFrame):
         self.spn_tol.setObjectName("tol")
         self.spn_tol.setButtonSymbols(QAbstractSpinBox.NoButtons)  # ↑↓ 버튼 제거(깔끔한 입력)
         self.spn_tol.setRange(0.0, 100000.0)
-        self.spn_tol.setDecimals(1)
+        self.spn_tol.setDecimals(0)  # 자연수만 — "300.0" 대신 "300"
         self.spn_tol.setValue(DEFAULT_TOLERANCE)
         self.spn_tol.setSingleStep(10.0)
         self.spn_tol.setSuffix(" µm")
@@ -3647,7 +3651,7 @@ class SideBar(QFrame):
         self.spn_cluster = NoScrollDoubleSpinBox()
         self.spn_cluster.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spn_cluster.setRange(0.0, 100000.0)
-        self.spn_cluster.setDecimals(1)
+        self.spn_cluster.setDecimals(0)  # 자연수만
         self.spn_cluster.setSingleStep(5.0)
         self.spn_cluster.setValue(DEFAULT_CLUSTER_RADIUS)
         self.spn_cluster.setToolTip(
@@ -3738,7 +3742,7 @@ class SideBar(QFrame):
 
     # ---- API ----------------------------------------------------------
     def set_lot_name(self, name: str) -> None:
-        self.lbl_lot.setText(f"자재: {name}")
+        self.lbl_lot.setText(f"LOT: {name}")
 
     def set_layers(
         self,
@@ -3965,7 +3969,7 @@ _SHORTCUT_GROUPS = [
         ("← / → · PageUp / PageDown", "이전 / 다음 기준 사진"),
         ("Home / End", "처음 / 끝 기준 사진으로"),
         ("U", "다음 '미매칭 포함' 기준으로 점프"),
-        ("F5", "현재 자재 폴더 다시 스캔"),
+        ("F5", "현재 LOT 폴더 다시 스캔"),
     ]),
     ("선택", [
         ("Ctrl + A / Ctrl + D", "비교 Layer 전체 선택 / 모두 해제"),
@@ -3975,7 +3979,7 @@ _SHORTCUT_GROUPS = [
         ("Ctrl + E", "Excel 결과 출력"),
     ]),
     ("파일 · 도움말", [
-        ("Ctrl + O", "자재 폴더 열기 (우클릭: 최근 폴더)"),
+        ("Ctrl + O", "LOT 폴더 열기 (우클릭: 최근 폴더)"),
         ("F1", "이 도움말 열기"),
         ("이미지 클릭", "원본 전체 해상도 확대 보기"),
         ("이미지 우클릭", "경로 복사 / 파일·폴더 열기"),
@@ -3984,9 +3988,9 @@ _SHORTCUT_GROUPS = [
 
 # 기능 안내: (기능명, 설명)
 _FEATURES = [
-    ("자재 폴더 선택기",
-     "브레드크럼·폴더 트리·최근/즐겨찾기로 탐색하고, 고른 폴더가 자재(LOT)인지 실시간으로 "
-     "확인합니다. layer·wafer 폴더를 골라도 자재 폴더로 자동 보정됩니다."),
+    ("LOT 폴더 선택기",
+     "브레드크럼·폴더 트리·최근/즐겨찾기로 탐색하고, 고른 폴더가 LOT 인지 실시간으로 "
+     "확인합니다. layer·wafer 폴더를 골라도 LOT 폴더로 자동 보정됩니다."),
     ("Defect 히트맵",
      "웨이퍼맵에 defect 밀도를 색으로 표시합니다. 위치를 클릭하면 그 자리의 defect 이 "
      "오른쪽에 나열됩니다. 상단 캡션에서 현재 모드·wafer 를 확인할 수 있습니다."),
@@ -4002,7 +4006,7 @@ _FEATURES = [
      "좌하단 '+n' 을 누르면 묶인 나머지도 모두 볼 수 있습니다."),
     ("출력 트레이",
      "'담기'로 원하는 defect 을 모아 두었다가 'Excel 출력'으로 한 번에 리포트를 만듭니다. "
-     "layer·자재를 바꿔도 담은 사진은 유지됩니다."),
+     "layer·LOT 을 바꿔도 담은 사진은 유지됩니다."),
 ]
 
 _KEY_COL_WIDTH = 190
@@ -4540,10 +4544,15 @@ class NotificationBanner(QFrame):
         self._fade.setEndValue(0.0)
         self._collapse.setStartValue(self.maximumHeight())
         self._collapse.setEndValue(0)
-        try:
-            self._group.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        # _after_hide 가 이미 자기 자신을 disconnect 해두므로 대개 연결이 없다 —
+        # PySide 는 그 경우 예외가 아니라 RuntimeWarning 을 내므로 여기서 억제한다.
+        # (연속 dismiss() 로 아직 연결이 남아있는 드문 경우엔 정상적으로 끊어진다.)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                self._group.finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
         self._group.finished.connect(self._after_hide)
         self._group.start()
 
@@ -5335,6 +5344,24 @@ def write_version(root: Path, sha: str) -> None:
     )
 
 
+_VERSION_STR_RE = re.compile(r'__version__\s*=\s*["\']([^"\']+)["\']')
+
+
+def read_installed_version(root: Optional[Path] = None) -> Optional[str]:
+    """설치 루트의 app/__init__.py 에서 __version__ 문자열을 읽는다.
+
+    실행 중 프로세스의 app.__version__ 은 시작 시점에 고정되므로, 업데이트 직후
+    "방금 받은" 버전을 사람이 읽을 문구로 보여주려면 디스크에서 새로 읽어야 한다.
+    """
+    root = root or app_root()
+    try:
+        text = (root / "app" / "__init__.py").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = _VERSION_STR_RE.search(text)
+    return m.group(1) if m else None
+
+
 def current_sha(root: Optional[Path] = None) -> Optional[str]:
     """현재 설치본의 커밋 sha (git 우선, 없으면 version.json)."""
     root = root or app_root()
@@ -5587,7 +5614,7 @@ except ImportError:  # PySide6 미설치 환경(부트스트랩 전)
 
 선택된 기준 사진들에 대해 기준 layer 사진과 비교 layer 매칭 결과를 깔끔한 Excel 로 출력한다.
 포함 정보: LOT명, wafer ID, 기준/비교 layer, col_row_x_y 위치, 허용 오차, 매칭 여부,
-이미지 썸네일, 원본 경로(추적용, 무수정).
+이미지 썸네일, 원본 경로(클릭하면 원본을 여는 링크, 무수정).
 
 저장 경로는 반드시 assert_output_safe 게이트를 통과해야 하며, 원본 폴더 내부면 차단된다.
 원본 이미지는 read-only 로만 읽는다(썸네일 캐시를 통해).
@@ -5644,6 +5671,24 @@ def _place_image(ws, thumb_cache, rec, row, col) -> None:
     cell.value = "(이미지 없음)"
 
 
+def _place_path_link(ws, row, col, image_path) -> None:
+    """(row,col) 셀에 클릭하면 원본을 여는 링크를 건다(표시 텍스트는 고정 문구).
+
+    원본을 통째로 심으면(고화질) 파일이 수백 MB~GB 로 불어나므로, 대신 항상
+    최신 원본을 가리키는 가벼운 링크로 연결한다. 파일명은 '정보' 행에 이미 있어
+    링크 텍스트는 용도가 드러나는 고정 문구로 둔다.
+    """
+    p = Path(image_path)
+    cell = ws.cell(row=row, column=col, value="원본 사진 열기")
+    cell.font = Font(color=_NEON, size=8, underline="single")
+    cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    cell.border = _BORDER
+    try:
+        cell.hyperlink = p.resolve().as_uri()
+    except (OSError, ValueError):
+        pass  # 링크 실패해도 안내 텍스트는 남는다
+
+
 def export_excel(
     output_path: str | Path,
     *,
@@ -5655,8 +5700,14 @@ def export_excel(
     thumb_cache: ThumbnailCache,
     source_roots: Iterable[str | Path],
     progress: Optional[Callable[[int, int], None]] = None,
+    layer_order: Optional[list[str]] = None,
 ) -> Path:
     """선택된 기준 defect 들의 비교 결과를 Excel 로 저장한다.
+
+    Args:
+        layer_order: LOT 의 원래 layer 순서(폴더 스캔 순서). 주어지면 기준 layer 를
+            맨 왼쪽에 고정하지 않고 이 순서대로 열을 배치한다. None 이면 기존처럼
+            기준이 첫 데이터 열에 온다.
 
     Returns:
         저장된 파일의 절대 경로.
@@ -5720,6 +5771,7 @@ def export_excel(
     # 상단 컬럼 헤더 행은 두지 않는다 — 블록마다 'Layer' 행으로 이미 표기하므로 중복이다(항목 1).
 
     # ---- 각 기준 defect 블록 (블록마다 '자기' 기준/비교 layer 로 표기) ----
+    _layer_pos = {name: i for i, name in enumerate(layer_order or [])}
     _total = len(selected)
     for idx, item in enumerate(selected, start=1):
         if progress is not None:
@@ -5727,6 +5779,16 @@ def export_excel(
         base = item.base
         base_layer_name = base.layer or base_layer
         results = list(item.results)
+
+        # 열 배치 — 기준을 맨 앞에 고정하지 않고 LOT 의 원래 layer 순서를 따른다.
+        # entries[ci] 가 데이터 열 2+ci 에 놓인다. mr 이 None 이면 기준 열.
+        entries: list = [None] + results
+        if layer_order:
+            def _col_key(mr) -> int:
+                name = base_layer_name if mr is None else mr.compare_layer
+                # 목록에 없는 layer 는 뒤로(안정 정렬이라 기존 상대 순서 유지)
+                return _layer_pos.get(name, len(layer_order))
+            entries.sort(key=_col_key)
 
         # 블록 제목 — 기준 layer 를 함께 표기(여러 layer 혼합 대비).
         _set_cell(
@@ -5745,42 +5807,48 @@ def export_excel(
 
         # Layer 이름 행 — 이 블록의 실제 기준/비교 layer(전역 기준에 종속되지 않음).
         _set_cell(ws, r, 1, "Layer", bold=True, align="center", fill=_LIGHT)
-        _set_cell(
-            ws, r, 2, "★ " + base_layer_name + " (기준)",
-            bold=True, color="FFFFFFFF", fill=_NEON, align="center",
-        )
-        for ci, mr in enumerate(results):
-            _set_cell(
-                ws, r, 3 + ci, mr.compare_layer,
-                bold=True, color="FFFFFFFF", fill=_NAVY, align="center",
-            )
-        for ci in range(len(results), max_cmp):
-            _set_cell(ws, r, 3 + ci, "", fill=_LIGHT, align="center")
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                _set_cell(
+                    ws, r, 2 + ci, "★ " + base_layer_name + " (기준)",
+                    bold=True, color="FFFFFFFF", fill=_NEON, align="center",
+                )
+            else:
+                _set_cell(
+                    ws, r, 2 + ci, mr.compare_layer,
+                    bold=True, color="FFFFFFFF", fill=_NAVY, align="center",
+                )
+        for ci in range(len(entries), n_data_cols):
+            _set_cell(ws, r, 2 + ci, "", fill=_LIGHT, align="center")
         ws.row_dimensions[r].height = 18
         r += 1
 
         # 이미지 행
         _set_cell(ws, r, 1, "이미지", bold=True, align="center", fill=_LIGHT)
         ws.row_dimensions[r].height = _IMG_ROW_HEIGHT
-        _place_image(ws, thumb_cache, base, r, 2)
-        for ci, mr in enumerate(results):
-            rec = mr.matched
-            if rec is not None:
-                _place_image(ws, thumb_cache, rec, r, 3 + ci)
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                _place_image(ws, thumb_cache, base, r, 2 + ci)
+            elif mr.matched is not None:
+                _place_image(ws, thumb_cache, mr.matched, r, 2 + ci)
             else:
-                _set_cell(ws, r, 3 + ci, "매칭 없음", color=_NOMATCH, align="center")
-        for ci in range(len(results), max_cmp):
-            ws.cell(row=r, column=3 + ci).border = _BORDER
+                _set_cell(ws, r, 2 + ci, "매칭 없음", color=_NOMATCH, align="center")
+        for ci in range(len(entries), n_data_cols):
+            ws.cell(row=r, column=2 + ci).border = _BORDER
         r += 1
 
         # 상세 정보 행
         _set_cell(ws, r, 1, "정보", bold=True, align="center", fill=_LIGHT)
-        base_lines = ["기준 ★", f"위치 {base.position_key}", Path(base.image_path).name]
-        extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
-        if extra:
-            base_lines.append(f"+{extra} 근접중복")
-        _set_cell(ws, r, 2, "\n".join(base_lines), color=_NEON, wrap=True, size=9)
-        for ci, mr in enumerate(results):
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                base_lines = [
+                    "기준 ★", f"위치 {base.position_key}", Path(base.image_path).name
+                ]
+                extra = getattr(getattr(item, "base_cluster", None), "extra_count", 0) or 0
+                if extra:
+                    base_lines.append(f"+{extra} 근접중복")
+                _set_cell(ws, r, 2 + ci, "\n".join(base_lines), color=_NEON, wrap=True, size=9)
+                continue
             rec = mr.matched
             if rec is not None:
                 dist = mr.distance
@@ -5793,16 +5861,23 @@ def export_excel(
             else:
                 lines = ["매칭 X"]
                 color = _NOMATCH
-            _set_cell(ws, r, 3 + ci, "\n".join(lines), color=color, wrap=True, size=9)
-        for ci in range(len(results), max_cmp):
-            ws.cell(row=r, column=3 + ci).border = _BORDER
-        ws.row_dimensions[r].height = 48
+            _set_cell(ws, r, 2 + ci, "\n".join(lines), color=color, wrap=True, size=9)
+        for ci in range(len(entries), n_data_cols):
+            ws.cell(row=r, column=2 + ci).border = _BORDER
+        ws.row_dimensions[r].height = 60
         r += 1
 
-        # 원본 경로 행 (추적용)
+        # 원본 경로 행 — 클릭하면 원본을 바로 연다(기준 + 각 매칭된 비교 defect 별로).
         _set_cell(ws, r, 1, "원본경로", bold=True, align="center", fill=_LIGHT)
-        _set_cell(ws, r, 2, str(base.image_path), color=_GREY, wrap=True, size=8)
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=n_cols)
+        for ci, mr in enumerate(entries):
+            if mr is None:
+                _place_path_link(ws, r, 2 + ci, base.image_path)
+            elif mr.matched is not None:
+                _place_path_link(ws, r, 2 + ci, mr.matched.image_path)
+            else:
+                ws.cell(row=r, column=2 + ci).border = _BORDER
+        for ci in range(len(entries), n_data_cols):
+            ws.cell(row=r, column=2 + ci).border = _BORDER
         ws.row_dimensions[r].height = 24
         r += 1
         r += 1  # 블록 간 간격
@@ -5961,28 +6036,42 @@ def _has_child_dir_with_images(root: Path, breadth: int = 24) -> bool:
 
 
 def _has_grandchild_dir_with_images(root: Path, breadth: int = 24) -> bool:
-    """root/자식(layer)/손자(wafer)/이미지 구조가 있는가(= root 가 자재(LOT)인가).
+    """root/자식(layer)/손자(wafer)/이미지 구조가 있는가(= root 가 LOT 인가).
 
     자식(layer) 폴더 중 하나라도 '이미지를 직접 담은 하위 폴더(wafer)'를 가지면 True.
     """
     return any(_has_child_dir_with_images(c, breadth) for c in _child_dirs(root, breadth))
 
 
+def _has_greatgrandchild_dir_with_images(root: Path, breadth: int = 24) -> bool:
+    """root/자식(LOT)/손자(layer)/증손자(wafer)/이미지 구조가 있는가(= root 가 자재인가).
+
+    자식(LOT) 폴더 중 하나라도 'LOT/layer/wafer/이미지' 구조를 가지면 True.
+    """
+    return any(_has_grandchild_dir_with_images(c, breadth) for c in _child_dirs(root, breadth))
+
+
 def classify_selection(path: str | Path) -> tuple[str, Optional[Path]]:
-    """선택한 폴더가 자재 구조(LOT/layer/wafer/사진)에서 어느 레벨인지 **구조로** 판별.
+    """선택한 폴더가 자재/LOT/layer/wafer/사진 구조에서 어느 레벨인지 **구조로** 판별.
 
     LOT 폴더의 정의: `LOT/layer/wafer/사진` — 사진이 정확히 2단계 아래(wafer 폴더)에
-    있어야 자재(LOT)로 인정한다. 얕은 위치(LOT·layer 폴더)에 흔히 섞여 있는 요약/맵
-    이미지 같은 잡파일에 흔들리지 않도록 **가장 깊은 구조가 우선**하도록 판정한다.
+    있어야 LOT 으로 인정한다. 자재 폴더는 LOT 의 상위(사진이 3단계 아래)로, LOT 과
+    구분해 판정한다. 얕은 위치(LOT·layer 폴더)에 흔히 섞여 있는 요약/맵 이미지 같은
+    잡파일에 흔들리지 않도록 **가장 깊은 구조가 우선**하도록 판정한다.
 
     Returns:
         (kind, material_path) — kind 는
-          'material'(LOT 정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 자재로 보정) /
-          'too_high'(device 등 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
-        material_path 는 layer/wafer/material 일 때 추정 자재(LOT) 폴더, 그 외 None.
+          'material'(LOT 정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 LOT 으로 보정) /
+          'material_parent'(자재 폴더 = LOT 상위, 안으로 들어가 LOT 재선택 필요) /
+          'too_high'(그보다 더 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
+        material_path 는 layer/wafer/material 일 때 추정 LOT 폴더, 그 외 None.
     """
     p = Path(path)
-    # 깊은 구조 우선: LOT/layer/wafer/사진(손자에 이미지) → 자재(LOT).
+    # 가장 깊은 구조 우선: 자재/LOT/layer/wafer/사진(증손자에 이미지) → 자재 폴더.
+    # layer 폴더의 요약/맵 잡이미지 때문에 자재가 LOT 으로 오판되지 않게 먼저 판정.
+    if _has_greatgrandchild_dir_with_images(p):
+        return ("material_parent", None)
+    # LOT/layer/wafer/사진(손자에 이미지) → LOT.
     if _has_grandchild_dir_with_images(p):
         return ("material", p)
     # p/wafer/사진(자식이 이미지 직접 보유) → p 는 layer, 상위가 LOT.
@@ -6807,6 +6896,7 @@ class CompareGrid(QWidget):
 
 export_dialog__COLUMNS = 3
 export_dialog__THUMB_PX = 180  # 카드 썸네일 크기(크게)
+_ALL_LAYERS_TAG = "이번 LOT의 모든 매치된 defect"
 
 
 class ExportTrayDialog(QDialog):
@@ -6814,26 +6904,35 @@ class ExportTrayDialog(QDialog):
 
     def __init__(
         self,
-        entries: list[BaseDefectMatches],
+        entries: list[BaseDefectMatches | tuple[BaseDefectMatches, Optional[str]]],
         thumb_cache: Optional[ThumbnailCache] = None,
         all_matched: Optional[list[BaseDefectMatches]] = None,
-        all_layers_provider: Optional[Callable[[], list[BaseDefectMatches]]] = None,
+        all_matched_label: str = "기준 layer 매치 전체",
+        all_layers_provider: Optional[
+            Callable[[Callable[[int, int], None], Callable[[list], None]], None]
+        ] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        # 담긴 항목(스냅샷). base image_path 로 중복 제거하며 유지한다.
-        self._kept: list[BaseDefectMatches] = []
+        # 담긴 항목(스냅샷) + 담긴 경로(버튼 하나로 한 번에 담긴 묶음은 사진 카드 대신
+        # 요약 카드 하나로 보여준다 — None 이면 개별 카드).
+        self._tagged: list[tuple[BaseDefectMatches, Optional[str]]] = []
         self._keys: set[str] = set()
-        for m in entries:
-            self._add(m)
+        # entries 는 평범한 BaseDefectMatches 또는 (item, tag) 튜플 둘 다 받는다 —
+        # main_window 가 트레이를 태그 포함으로 저장해 다시 열어도 묶음이 유지되게 한다.
+        for entry in entries:
+            m, tag = entry if isinstance(entry, tuple) else (entry, None)
+            self._add(m, tag)
         # 이번 LOT 의 매칭 있는 기준 사진(전체 추가 버튼용).
         self._all_matched = list(all_matched or [])
-        # 모든 layer 를 기준으로 매치를 합쳐 담는 공급자(느릴 수 있어 클릭 시 계산).
+        self._all_matched_label = all_matched_label
+        # 모든 layer 를 기준으로 매치를 합쳐 담는 공급자(무거워 백그라운드로 계산 — 콜백형).
         self._all_layers_provider = all_layers_provider
         self._thumb_cache = thumb_cache
         self._wants_export = False  # True=Excel 출력, False=저장만(확인)
         self.setWindowTitle("결과 출력 — 담은 사진")
-        self.setMinimumSize(620, 540)
+        # 카드 3열(3×200) + 간격/여백/세로 스크롤바 ≈ 677px — 가로 스크롤 없이 3열이 들어가게.
+        self.setMinimumSize(700, 540)
         self._build()
         self._populate()
         # 무거운 '모든 매치(기준 없이)' 계산 동안 다이얼로그 위에 로딩+진행도 표시.
@@ -6843,12 +6942,12 @@ class ExportTrayDialog(QDialog):
     def _key(item: BaseDefectMatches) -> str:
         return str(item.base.image_path)
 
-    def _add(self, item: BaseDefectMatches) -> bool:
+    def _add(self, item: BaseDefectMatches, tag: Optional[str] = None) -> bool:
         k = self._key(item)
         if k in self._keys:
             return False
         self._keys.add(k)
-        self._kept.append(item)
+        self._tagged.append((item, tag))
         return True
 
     def _build(self) -> None:
@@ -6957,9 +7056,25 @@ class ExportTrayDialog(QDialog):
 
     def _populate(self) -> None:
         self._clear_grid()
-        for i, item in enumerate(self._kept):
-            self._grid.addWidget(self._make_card(item), i // export_dialog__COLUMNS, i % export_dialog__COLUMNS)
-        shown = len(self._kept)
+        # 태그 없는 항목은 개별 사진 카드로, 같은 태그(버튼 한 번에 대량 추가)는
+        # 사진 수백 장 대신 하나의 요약 카드로 묶어 보여준다.
+        tag_order: list[Optional[str]] = []
+        tag_items: dict[Optional[str], list[BaseDefectMatches]] = {}
+        for item, tag in self._tagged:
+            if tag not in tag_items:
+                tag_items[tag] = []
+                tag_order.append(tag)
+            tag_items[tag].append(item)
+        cells: list[QWidget] = []
+        for tag in tag_order:
+            items = tag_items[tag]
+            if tag is None:
+                cells.extend(self._make_card(m) for m in items)
+            else:
+                cells.append(self._make_batch_card(tag, items))
+        for i, w in enumerate(cells):
+            self._grid.addWidget(w, i // export_dialog__COLUMNS, i % export_dialog__COLUMNS)
+        shown = len(self._tagged)
         self.title.setText(f"담은 사진 — 총 {shown}장")
         self._empty.setVisible(shown == 0)
         self.btn_export.setEnabled(shown > 0)
@@ -7027,51 +7142,104 @@ class ExportTrayDialog(QDialog):
         lay.addWidget(cap, alignment=Qt.AlignHCenter)
         return card
 
+    def _make_batch_card(self, tag: str, items: list[BaseDefectMatches]) -> QWidget:
+        """버튼 한 번에 대량 추가된 항목들을 사진 대신 요약 카드 하나로 보여준다."""
+        px = export_dialog__THUMB_PX
+        card = QFrame()
+        card.setFixedWidth(px + 20)
+        card.setObjectName("cell")
+        card.setStyleSheet(
+            f"QFrame#cell {{ background:{BG_ELEV};"
+            f" border:1px solid {NEON_SOFT}; border-radius:8px; }}"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(6, 6, 6, 8)
+        lay.setSpacing(4)
+
+        icon = QLabel("🗂")
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setFixedSize(px, int(px * 0.78))
+        icon.setStyleSheet(
+            f"background:{BG}; border:1px solid {NEON_SOFT};"
+            f" border-radius:6px; font-size:40px;"
+        )
+        btn_x = QPushButton("✕", icon)
+        btn_x.setFixedSize(24, 24)
+        btn_x.setCursor(Qt.PointingHandCursor)
+        btn_x.setToolTip("이 묶음 전체를 출력 목록에서 뺍니다.")
+        btn_x.setStyleSheet(
+            "QPushButton { color:#ffffff; background:rgba(17,21,28,0.72);"
+            " border:1px solid rgba(255,255,255,0.55); border-radius:12px;"
+            " font-size:13px; font-weight:700; padding:0; }"
+            "QPushButton:hover { background:#b00020; border:1px solid #ffffff; }"
+        )
+        btn_x.move(px - 28, 4)
+        btn_x.clicked.connect(lambda _=0, t=tag: self._remove_batch(t))
+        lay.addWidget(icon, alignment=Qt.AlignHCenter)
+
+        cap = QLabel(f"{tag}\n{len(items)}장")
+        cap.setObjectName("dim")
+        cap.setStyleSheet("font-size:10px; font-weight:700;")
+        cap.setWordWrap(True)
+        cap.setAlignment(Qt.AlignCenter)
+        cap.setFixedWidth(px)
+        lay.addWidget(cap, alignment=Qt.AlignHCenter)
+        return card
+
     def _remove(self, key: str) -> None:
-        self._kept = [m for m in self._kept if self._key(m) != key]
+        self._tagged = [(m, t) for m, t in self._tagged if self._key(m) != key]
         self._keys.discard(key)
         self._populate()
 
+    def _remove_batch(self, tag: str) -> None:
+        removed = {self._key(m) for m, t in self._tagged if t == tag}
+        self._tagged = [(m, t) for m, t in self._tagged if t != tag]
+        self._keys -= removed
+        self._populate()
+
     def _clear_all(self) -> None:
-        self._kept = []
+        self._tagged = []
         self._keys = set()
         self._populate()
 
     def _add_all_matched(self) -> None:
-        added = 0
         for m in self._all_matched:
-            if self._add(m):
-                added += 1
+            self._add(m, tag=self._all_matched_label)
         self._populate()
 
     def _add_all_layers(self) -> None:
-        """모든 layer 를 기준으로 한 매치를 공급자에서 받아 담는다(중복 제거).
+        """모든 layer 를 기준으로 한 매치를 공급자에게 백그라운드로 계산시켜 담는다(중복 제거).
 
-        계산이 무거우므로 로딩 오버레이 + layer 단위 진행도를 표시한다.
+        layer 수만큼 재매칭하는 무거운 작업이라 공급자(main_window)가 QThreadPool 워커로
+        돌리고 진행/완료를 콜백으로 알려준다 — 계산 중엔 두 추가 버튼을 비활성화한다.
         """
         if self._all_layers_provider is None:
             return
-        from PySide6.QtWidgets import QApplication
-
+        self.btn_add_all.setEnabled(False)
+        self.btn_add_all_layers.setEnabled(False)
         self._busy.start("모든 매치 계산 중", determinate=True)
-        QApplication.processEvents()
 
         def _progress(cur: int, total: int) -> None:
             self._busy.set_message(f"모든 매치 계산 중  ({cur}/{total} layer)")
             self._busy.set_progress(cur, total)
-            QApplication.processEvents()  # 동기 루프 중에도 진행바가 갱신되도록
 
-        try:
-            items = self._all_layers_provider(_progress) or []
-        finally:
+        def _done(items: list) -> None:
             self._busy.stop()
-        for m in items:
-            self._add(m)
-        self._populate()
+            self.btn_add_all.setEnabled(bool(self._all_matched))
+            self.btn_add_all_layers.setEnabled(True)
+            for m in items or []:
+                self._add(m, tag=_ALL_LAYERS_TAG)
+            self._populate()
+
+        self._all_layers_provider(_progress, _done)
 
     def selected(self) -> list[BaseDefectMatches]:
-        """최종 출력 대상 스냅샷 목록(담긴 순서 유지)."""
-        return list(self._kept)
+        """최종 출력 대상 스냅샷 목록(담긴 순서 유지, 태그 무시하고 평탄화)."""
+        return [m for m, _tag in self._tagged]
+
+    def tagged_selected(self) -> list[tuple[BaseDefectMatches, Optional[str]]]:
+        """태그 포함 최종 목록 — 트레이에 그대로 저장해 두면 다음에 열어도 묶음이 유지된다."""
+        return list(self._tagged)
 
 
 # =============================================================================
@@ -7427,6 +7595,7 @@ def natural_key(name: str) -> list:
 _BANNER_COLORS = {
     "material": (MATCH, "#10241b"),
     "layerwafer": (NEON, "#101a24"),
+    "material_parent": (WARN, "#241f10"),
     "too_high": (WARN, "#241f10"),
     "unknown": (TEXT_DIM, BG_ELEV),
     "busy": (TEXT_DIM, BG_ELEV),
@@ -7491,12 +7660,12 @@ class _ValidateWorker(QRunnable):
 
 
 class FolderPickerDialog(QDialog):
-    """자재 폴더 선택기. `settings` 로 최근·즐겨찾기를 읽고 고정 토글 시 저장한다."""
+    """LOT 폴더 선택기. `settings` 로 최근·즐겨찾기를 읽고 고정 토글 시 저장한다."""
 
     def __init__(self, settings, start_path: str, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("자재(LOT) 폴더 선택")
+        self.setWindowTitle("LOT 폴더 선택")
         self.setMinimumSize(860, 560)
         self.resize(980, 640)
 
@@ -7647,12 +7816,12 @@ class FolderPickerDialog(QDialog):
         root.addLayout(body, 1)
 
         # 하단: 검증 배너 + ★ 고정 + 취소/선택
-        self.banner = QLabel("폴더를 고르면 자재 여부를 여기서 확인합니다.")
+        self.banner = QLabel("폴더를 고르면 LOT 여부를 여기서 확인합니다.")
         self.banner.setWordWrap(True)
         self.banner.setMinimumHeight(40)
         self.banner.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.banner.setContentsMargins(10, 6, 10, 6)
-        self._set_banner("none", "폴더를 고르면 자재 여부를 여기서 확인합니다.")
+        self._set_banner("none", "폴더를 고르면 LOT 여부를 여기서 확인합니다.")
         root.addWidget(self.banner)
 
         bottom = QHBoxLayout()
@@ -7989,7 +8158,7 @@ class FolderPickerDialog(QDialog):
             it.setData(Qt.UserRole, name)
             self.listw.addItem(it)
         if self.listw.count() == 0:
-            it = QListWidgetItem("(하위 폴더 없음 — 이 폴더가 자재일 수 있습니다)")
+            it = QListWidgetItem("(하위 폴더 없음 — 이 폴더가 wafer 등 최하위일 수 있습니다)")
             it.setFlags(Qt.NoItemFlags)
             it.setForeground(Qt.gray)
             self.listw.addItem(it)
@@ -8018,6 +8187,13 @@ class FolderPickerDialog(QDialog):
     # ----------------------------------------------------------- validation
     def _set_candidate(self, path: Path) -> None:
         self._candidate = path
+        # 후보가 바뀌는 즉시 이전 후보의 검증을 무효화한다 — 토큰은 디바운스 후에만
+        # 증가하므로, 그 사이 도착한 이전 후보의 판정이 새 후보의 이름으로 배너에
+        # 표시되고 캐시(_valid_*)까지 오염되는 레이스가 있었다(빠른 연속 클릭 시
+        # 엉뚱한 폴더가 LOT 으로 표시됨).
+        self._token += 1
+        self._valid_for = None
+        self._valid_kind = ""
         self._update_pin_button()
         self._set_banner("busy", f"‘{path.name or path}’ 확인 중…")
         self._debounce.start()
@@ -8043,21 +8219,27 @@ class FolderPickerDialog(QDialog):
         if kind == "material":
             self._set_banner(
                 "material",
-                f"✓ 자재(LOT) 폴더 · layer {layers}개 · wafer {wafers}개",
+                f"✓ LOT 폴더 · layer {layers}개 · wafer {wafers}개",
             )
             self.btn_ok.setEnabled(True)
         elif kind in ("layer", "wafer"):
             mat_name = Path(material).name if material else "?"
             self._set_banner(
                 "layerwafer",
-                f"{kind} 폴더 · 선택 시 자재 ‘{mat_name}’ 로 이동합니다"
+                f"{kind} 폴더 · 선택 시 LOT ‘{mat_name}’ 으로 이동합니다"
                 f" (layer {layers}개 · wafer {wafers}개)",
             )
             self.btn_ok.setEnabled(True)
+        elif kind == "material_parent":
+            self._set_banner(
+                "material_parent",
+                f"‘{name}’ 는 자재 폴더입니다 · 안으로 들어가 LOT 폴더를 선택하세요",
+            )
+            self.btn_ok.setEnabled(False)
         elif kind == "too_high":
             self._set_banner(
                 "too_high",
-                f"‘{name}’ 는 상위(device) 폴더입니다 · 자재 폴더로 들어가세요",
+                f"‘{name}’ 는 상위 폴더입니다 · LOT 폴더로 들어가세요",
             )
             self.btn_ok.setEnabled(False)
         else:  # unknown
@@ -8114,7 +8296,7 @@ class FolderPickerDialog(QDialog):
 
     # ----------------------------------------------------------- result
     def selected_path(self) -> str:
-        """선택 확정 시 반환할 자재 경로(보정 포함). 취소/부적합이면 빈 문자열."""
+        """선택 확정 시 반환할 LOT 경로(보정 포함). 취소/부적합이면 빈 문자열."""
         target = self._candidate or self._cur
         # 마지막 검증이 현재 후보에 대한 것이면 캐시 사용, 아니면 동기 재판정.
         if self._valid_for == target and self._valid_kind:
@@ -8128,10 +8310,10 @@ class FolderPickerDialog(QDialog):
             return material
         if kind == "unknown":
             return str(target)
-        return ""  # too_high / none
+        return ""  # material_parent / too_high / none
 
     def _resolved_kind(self) -> str:
-        """마지막 후보의 구조 판정(material/layer/wafer/too_high/unknown)."""
+        """마지막 후보의 구조 판정(material/layer/wafer/material_parent/too_high/unknown)."""
         target = self._candidate or self._cur
         if self._valid_for == target and self._valid_kind:
             return self._valid_kind
@@ -8435,7 +8617,6 @@ class HeatmapDialog(QDialog):
         super().__init__(parent)
         self.matches = matches
         self._base_layer = base_layer
-        self._compare_layers = list(compare_layers)
         self._thumb_cache = thumb_cache
         self._on_add = on_add_to_export
         self._settings = settings
@@ -8528,11 +8709,6 @@ class HeatmapDialog(QDialog):
                 continue
             out.append((i, b))
         return out
-
-    def _is_matched(self, bi: int) -> bool:
-        """메인 비교 layer 중 하나 이상에서 매치되면 True('출력에 넣기' 대상 판정)."""
-        m = self.matches[bi]
-        return any((r := m.for_layer(lyr)) and r.is_match for lyr in self._compare_layers)
 
     def _all_defect_entries(self) -> list[tuple[int, object]]:
         """체크된 layer 의 좌표 OK defect(맵 density 용). 기준 특별취급 없음.
@@ -8860,16 +9036,19 @@ class HeatmapDialog(QDialog):
     def _rebuild_detail(self) -> None:
         self._clear_detail()
         self._pending_thumbs = []  # 이번 상세의 지연 썸네일 모음(비동기 로딩)
-        # 상시 조사 모드: 체크된 layer 를 교차 매칭해 표시. '출력에 넣기' 대상은 선택 위치의
-        # 매칭된 메인 기준 defect(출력은 기준 layer 기반).
-        self._add_targets = [bi for bi in self._union_indices() if self._is_matched(bi)]
-        self.btn_add_all.setEnabled(bool(self._add_targets))
+        self._add_targets = []
         if not self._selected_keys:
+            self.btn_add_all.setEnabled(False)
             self.lbl_detail.setText("위치를 클릭하면 그 자리의 defect 이 여기에 나열됩니다.")
             return
         n_loc = len(self._selected_keys)
         loc = (self._key_label(self._selected_keys[0]) if n_loc == 1 else f"{n_loc}개 위치")
+        # _add_targets 는 _build_all_detail 이 화면에 실제로 그린 교차매치 그룹에서 채운다
+        # (예전엔 self._compare_layers 스냅샷으로 따로 판정해 화면 표시와 어긋났었다).
         self._build_all_detail(loc)
+        # 매치가 없어도 버튼은 살려 두고, 누르면 '담을 게 없다'고 안내한다
+        # (비활성만으로는 왜 안 되는지 알 수 없어 혼란스럽다는 피드백).
+        self.btn_add_all.setEnabled(True)
         # 썸네일은 백그라운드로 캐시를 구운 뒤 채워, 클릭 즉시 목록이 뜨고 멈추지 않게 한다.
         self._start_detail_thumbs()
 
@@ -8900,6 +9079,16 @@ class HeatmapDialog(QDialog):
         self.lbl_detail.setText(
             f"{loc} — 교차매치 {len(matched)}그룹 · 개별(미매칭) {len(individual)}개"
         )
+        # '출력에 넣기' 대상 = 화면에 표시된 교차매치 그룹 중 기준 layer 를 포함한 것
+        # (출력은 기준 layer 기반이므로 기준 layer 가 없는 그룹은 대상이 될 수 없다).
+        base_by_path = {str(m.base.image_path): i for i, m in enumerate(self.matches)}
+        for g in matched:
+            cl = g.get(self._base_layer)
+            if cl is None:
+                continue
+            bi = base_by_path.get(str(cl.representative.image_path))
+            if bi is not None:
+                self._add_targets.append(bi)
 
     def _make_individual_section(self, groups: list[dict]) -> QWidget:
         """개별(미매칭) 단일-layer 그룹들을 layer 배지+대표(+n) 컴팩트 카드로 가로 나열."""
@@ -9006,6 +9195,15 @@ class HeatmapDialog(QDialog):
     def _add_all_current(self) -> None:
         if self._add_targets:
             self._on_add(list(self._add_targets))
+            return
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.information(
+            self,
+            "출력할 항목 없음",
+            "선택한 위치에는 기준 layer 와 매칭된 defect 이 없어\n"
+            "출력에 담을 사진이 없습니다.",
+        )
 
 
 # =============================================================================
@@ -9150,6 +9348,58 @@ class MatchWorker(QRunnable):
             self.signals.error.emit(str(exc))
 
 
+class AllLayersMatchSignals(QObject):
+    progress = Signal(int, int)  # cur, total (layer 단위)
+    finished = Signal(list)      # list[BaseDefectMatches]
+    error = Signal(str)
+
+
+class AllLayersMatchWorker(QRunnable):
+    """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 백그라운드에서 합친다.
+
+    '기준 layer 없이 전체 매치'는 layer 수만큼 전체 매칭을 다시 도는 무거운 작업이라
+    UI 스레드에서 돌리면 완료될 때까지 앱이 멈춘다 — MatchWorker 와 같은 이유로 백그라운드로 뺀다.
+    """
+
+    def __init__(self, layers, records_by_layer, records_for_layer, tolerance, wafer_filter=None):
+        super().__init__()
+        self.layers = layers
+        self.records_by_layer = records_by_layer
+        self.records_for_layer = records_for_layer
+        self.tolerance = tolerance
+        self.wafer_filter = wafer_filter
+        self.signals = AllLayersMatchSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+
+            total = len(self.layers)
+            seen: set[str] = set()
+            out = []
+            for i, base_layer in enumerate(self.layers):
+                self.signals.progress.emit(i, total)
+                base_records = [r for r in self.records_for_layer(base_layer) if r.ok]
+                if self.wafer_filter:
+                    base_records = [r for r in base_records if r.wafer_id == self.wafer_filter]
+                if base_records:
+                    compare_layers = [lyr for lyr in self.layers if lyr != base_layer]
+                    matches, _ = match_all_with_offsets(
+                        base_records, compare_layers, self.records_by_layer, self.tolerance,
+                    )
+                    for m in collapse_matches(matches):
+                        if any(r.is_match for r in m.results):
+                            k = str(m.base.image_path)
+                            if k not in seen:
+                                seen.add(k)
+                                out.append(m)
+            self.signals.progress.emit(total, total)
+            self.signals.finished.emit(out)
+        except Exception as exc:  # noqa: BLE001 - 워커 예외는 UI 로 전달
+            workers__log.exception("전체 layer 매치 워커 실패")
+            self.signals.error.emit(str(exc))
+
+
 class ExportSignals(QObject):
     progress = Signal(int, int)  # cur, total
     finished = Signal(str)       # output path
@@ -9271,8 +9521,10 @@ class MainWindow(QMainWindow):
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
         # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
-        # 출력 담기 트레이: 담은 BaseDefectMatches 스냅샷 목록(base image_path 로 중복 제거).
-        # 스냅샷이라 기준 layer·자재(LOT)를 바꿔도 담은 것이 그대로 유지된다.
+        # 출력 담기 트레이: (BaseDefectMatches, 태그) 튜플 목록(base image_path 로 중복 제거).
+        # 태그는 ExportTrayDialog 의 '전체 추가' 묶음 표시용(None=개별) — 그대로 저장해야
+        # 다이얼로그를 다시 열어도 묶음이 유지된다. 스냅샷이라 기준 layer·자재(LOT)를
+        # 바꿔도 담은 것이 그대로 유지된다.
         self._export_tray: list = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
         self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
@@ -9295,7 +9547,9 @@ class MainWindow(QMainWindow):
         self._cluster_timer = QTimer(self)
         self._cluster_timer.setSingleShot(True)
         self._cluster_timer.setInterval(250)
-        self._cluster_timer.timeout.connect(lambda: self._rematch(rebuild_grid=True))
+        self._cluster_timer.timeout.connect(
+            lambda: self._rematch(rebuild_grid=True, refresh_strip=True)
+        )
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._maybe_check_update()
@@ -9394,11 +9648,11 @@ class MainWindow(QMainWindow):
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
         # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
-        # 자재 폴더 버튼: 우클릭 시 최근 폴더 메뉴
+        # LOT 폴더 버튼: 우클릭 시 최근 폴더 메뉴
         self.top.btn_open.setContextMenuPolicy(Qt.CustomContextMenu)
         self.top.btn_open.customContextMenuRequested.connect(self._show_recent_menu)
         self.top.btn_open.setToolTip(
-            "리뷰가 진행된 자재(LOT) 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
+            "리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
         )
         self.splitter.addWidget(self.top)
 
@@ -9495,7 +9749,7 @@ class MainWindow(QMainWindow):
         self.grid.image_clicked.connect(self._open_viewer)
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
         grid_host_layout.addWidget(self.grid)
-        self._empty_label = QLabel("자재 폴더를 선택하면 비교 화면이 표시됩니다.")
+        self._empty_label = QLabel("LOT 폴더를 선택하면 비교 화면이 표시됩니다.")
         self._empty_label.setObjectName("dim")
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setMinimumHeight(200)
@@ -9585,7 +9839,7 @@ class MainWindow(QMainWindow):
             self.load_lot(lot)  # 잘못 고른 경우 → LOT 자동 회귀
 
     def _open_folder(self, folder: str) -> None:
-        """선택 폴더의 구조 레벨을 판별해 자재 폴더로 보정하거나 재선택을 안내한다.
+        """선택 폴더의 구조 레벨을 판별해 LOT 폴더로 보정하거나 재선택을 안내한다.
 
         모든 안내는 비차단 배너로(팝업 없음). 원본 read-only.
         """
@@ -9595,15 +9849,23 @@ class MainWindow(QMainWindow):
         elif kind in ("layer", "wafer") and material is not None:
             label = "layer" if kind == "layer" else "wafer"
             self.banner.show_message(
-                f"{label} 폴더가 선택되었으니 자재 폴더로 자동 이동하여 탐색합니다.",
+                f"{label} 폴더가 선택되었으니 LOT 폴더로 자동 이동하여 탐색합니다.",
                 "info",
             )
             self.load_lot(str(material))
+        elif kind == "material_parent":
+            self.banner.show_message(
+                "자재 폴더가 선택되었습니다. 안의 LOT 폴더를 선택해 주세요.",
+                "warn",
+                action_text="LOT 폴더 선택",
+                action=self._choose_folder,
+                timeout_ms=0,
+            )
         elif kind == "too_high":
             self.banner.show_message(
-                "상위(device) 폴더가 선택되었습니다. 자재 폴더를 선택해 주세요.",
+                "상위 폴더가 선택되었습니다. LOT 폴더를 선택해 주세요.",
                 "warn",
-                action_text="자재 폴더 선택",
+                action_text="LOT 폴더 선택",
                 action=self._choose_folder,
                 timeout_ms=0,
             )
@@ -9619,7 +9881,7 @@ class MainWindow(QMainWindow):
     def _show_recent_menu(self) -> None:
         recents = [f for f in self.settings.recent_folders if Path(f).exists()]
         if not recents:
-            self.banner.show_message("최근 연 자재 폴더가 없습니다.", "info")
+            self.banner.show_message("최근 연 LOT 폴더가 없습니다.", "info")
             return
         menu = QMenu(self)
         for folder in recents:
@@ -9767,7 +10029,7 @@ class MainWindow(QMainWindow):
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(
-                "선택한 폴더에서 layer 를 찾지 못했습니다. 자재 폴더를 확인하세요.",
+                "선택한 폴더에서 layer 를 찾지 못했습니다. LOT 폴더를 확인하세요.",
                 "warn", timeout_ms=0,
             )
             self.nav.set_status("layer 없음")
@@ -9922,8 +10184,8 @@ class MainWindow(QMainWindow):
         # 무거운 매칭은 백그라운드에서(로딩 오버레이), 완료되면 화면을 재구성한다.
         self._start_match(self._after_rebuild)
 
-    def _after_rebuild(self) -> None:
-        """매칭 완료 후: 스트립/썸네일/그리드/탐색 재구성(기준 layer·새 LOT)."""
+    def _strip_captions_and_tooltips(self) -> tuple[list[str], list[str]]:
+        """현재 self.matches 로 상단 썸네일 스트립의 캡션·툴팁을 만든다."""
         captions, tooltips = [], []
         for m in self.matches:
             r = m.base
@@ -9938,6 +10200,11 @@ class MainWindow(QMainWindow):
             if extra:
                 tt += f" · 근접중복 +{extra}"
             tooltips.append(tt)
+        return captions, tooltips
+
+    def _after_rebuild(self) -> None:
+        """매칭 완료 후: 스트립/썸네일/그리드/탐색 재구성(기준 layer·새 LOT)."""
+        captions, tooltips = self._strip_captions_and_tooltips()
         self.strip.set_items(captions, tooltips, on_progress=self.busy.pump)
         self._start_thumbnails()
         self.busy.pump()
@@ -9956,14 +10223,23 @@ class MainWindow(QMainWindow):
         self._refresh_strip_marks()
         self._update_add_export_button()
 
-    def _rematch(self, rebuild_grid: bool) -> None:
-        """비교 토글/허용오차 변경: 재매칭(비동기). 현재 인덱스는 유지(범위 clamp)."""
+    def _rematch(self, rebuild_grid: bool, refresh_strip: bool = False) -> None:
+        """비교 토글/허용오차/클러스터 길이 변경: 재매칭(비동기). 현재 인덱스는 유지(범위 clamp).
+
+        refresh_strip: 클러스터 길이 변경처럼 base 클러스터링 자체(그룹 개수·대표·+n)가
+        바뀔 수 있는 경우 True — 상단 썸네일 스트립의 아이템(캡션·이미지)도 다시 만든다.
+        허용오차/비교 layer 토글은 클러스터링을 바꾸지 않으므로 기본값(False)이면 충분하다.
+        """
         if self.lot_index is None or not self._base_records_raw:
             return
         self._save_prefs()
-        self._start_match(lambda: self._after_rematch(rebuild_grid))
+        self._start_match(lambda: self._after_rematch(rebuild_grid, refresh_strip))
 
-    def _after_rematch(self, rebuild_grid: bool) -> None:
+    def _after_rematch(self, rebuild_grid: bool, refresh_strip: bool = False) -> None:
+        if refresh_strip:
+            captions, tooltips = self._strip_captions_and_tooltips()
+            self.strip.set_items(captions, tooltips, on_progress=self.busy.pump)
+            self._start_thumbnails()
         if rebuild_grid:
             self._rebuild_grid()
         if self.matches:
@@ -10018,7 +10294,7 @@ class MainWindow(QMainWindow):
 
     def _open_heatmap(self) -> None:
         if not self.matches:
-            self.banner.show_message("먼저 자재 폴더와 기준 layer 를 선택하세요.", "info")
+            self.banner.show_message("먼저 LOT 폴더와 기준 layer 를 선택하세요.", "info")
             return
         current_wafer = None
         if 0 <= self.current < len(self.matches):
@@ -10119,10 +10395,14 @@ class MainWindow(QMainWindow):
         self._add_indices_to_export([self.current])
 
     def _tray_keys(self) -> set:
-        return {str(m.base.image_path) for m in self._export_tray}
+        return {str(m.base.image_path) for m, _tag in self._export_tray}
 
     def _add_indices_to_export(self, indices: list[int]) -> None:
-        """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시)."""
+        """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시).
+
+        개별로 담는 항목은 태그 없음(개별 카드) — 묶음(태그)은 ExportTrayDialog 의
+        '전체 추가' 버튼에서만 생기고, tagged_selected() 로 트레이에 그대로 저장된다.
+        """
         keys = self._tray_keys()
         added = 0
         for i in indices:
@@ -10130,7 +10410,7 @@ class MainWindow(QMainWindow):
                 m = self.matches[i]
                 k = str(m.base.image_path)
                 if k not in keys:
-                    self._export_tray.append(m)
+                    self._export_tray.append((m, None))
                     keys.add(k)
                     added += 1
         self._update_add_export_button()
@@ -10518,18 +10798,23 @@ class MainWindow(QMainWindow):
             )
             if answer == QMessageBox.Yes:
                 self._do_update(status)
-            elif not manual:
-                self.banner.show_message(
-                    "상단 '업데이트' 버튼으로 언제든 업데이트할 수 있습니다.", "info"
-                )
+            else:
+                if manual:
+                    self.nav.set_status("")
+                else:
+                    self.banner.show_message(
+                        "상단 '업데이트' 버튼으로 언제든 업데이트할 수 있습니다.", "info"
+                    )
         else:
             self.top.set_update_available(False)
             if manual:
                 if status.error:
+                    self.nav.set_status("업데이트 확인 실패")
                     self.banner.show_message(
                         f"업데이트 확인 실패: {status.error}", "warn", timeout_ms=6000
                     )
                 else:
+                    self.nav.set_status("최신 버전입니다")
                     self.banner.show_message("이미 최신 버전입니다.", "success")
 
     def _do_update(self, status) -> None:
@@ -10550,10 +10835,17 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.top.set_update_busy(False)
         if ok:
+            # __version__ 은 프로세스 시작 시 고정값이라 방금 받은 버전을 보려면
+            # 디스크에 갱신된 app/__init__.py 를 새로 읽어야 한다.
+            new_version = read_installed_version()
+            done_msg = (
+                f"최신 버전({new_version})으로 업데이트 되었습니다."
+                if new_version else "최신 버전으로 업데이트 되었습니다."
+            )
             QMessageBox.information(
                 self,
                 "업데이트 완료",
-                f"{message}\n\n프로그램을 종료합니다. 다시 시작해 주세요.",
+                f"{done_msg}\n\n프로그램을 종료합니다. 다시 시작해 주세요.",
             )
             self.close()
         else:
@@ -10569,52 +10861,39 @@ class MainWindow(QMainWindow):
         return name or "compare"
 
     # ------------------------------------------------------------ 출력
-    def _compute_all_layers_matched(self, progress=None) -> list[BaseDefectMatches]:
-        """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 합친다.
+    def _provide_all_layers_matched(self, on_progress, on_done) -> None:
+        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자.
 
-        기준 layer 종속 없이 '전체 매치'를 담기 위한 것. base image_path 로 중복 제거하고,
-        현재 wafer 필터가 걸려 있으면 그 wafer 로 한정한다. (layer 수만큼 매칭을 다시 돌림)
-        진행도는 progress(cur, total) 콜백으로 알린다(layer 단위).
+        모든 layer 를 각각 기준으로 매칭해 어느 layer 에서든 매치된 defect 을 합치는
+        무거운(layer 수만큼 재매칭) 작업이라 백그라운드 워커(AllLayersMatchWorker)로
+        돌리고, 진행은 on_progress(cur, total), 완료 결과는 on_done(list) 로 전달한다
+        (UI 스레드를 막지 않아야 로딩 오버레이가 실제로 애니메이션된다).
         """
-
         if self.lot_index is None:
-            return []
-        layers = self.lot_index.layer_canonicals()
-        rbl = self.lot_index.records_by_layer()
-        tolerance = self.top.tolerance()
-        total = len(layers)
-        seen: set[str] = set()
-        out: list[BaseDefectMatches] = []
-        for i, base_layer in enumerate(layers):
-            if progress is not None:
-                progress(i, total)  # layer i 처리 시작(진행 표시)
-            base_records = [
-                r for r in self.lot_index.records_for_layer(base_layer) if r.ok
-            ]
-            if self._wafer_filter:
-                base_records = [r for r in base_records if r.wafer_id == self._wafer_filter]
-            if base_records:
-                compare_layers = [lyr for lyr in layers if lyr != base_layer]
-                matches, _ = match_all_with_offsets(
-                    base_records, compare_layers, rbl, tolerance
-                )
-                for m in collapse_matches(matches):
-                    if self._match_status(m) != "none":
-                        k = str(m.base.image_path)
-                        if k not in seen:
-                            seen.add(k)
-                            out.append(m)
-        if progress is not None:
-            progress(total, total)
-        return out
+            on_done([])
+            return
 
-    def _provide_all_layers_matched(self, progress=None) -> list[BaseDefectMatches]:
-        """다이얼로그의 '모든 매치(기준 없이)' 버튼 공급자(진행 콜백 지원)."""
-        return self._compute_all_layers_matched(progress)
+        worker = AllLayersMatchWorker(
+            self.lot_index.layer_canonicals(),
+            self.lot_index.records_by_layer(),
+            self.lot_index.records_for_layer,
+            self.top.tolerance(),
+            wafer_filter=self._wafer_filter,
+        )
+        worker.signals.progress.connect(on_progress)
+        worker.signals.finished.connect(on_done)
+
+        def _on_error(msg: str) -> None:
+            self.banner.show_message(f"전체 매치 계산 실패: {msg}", "error", timeout_ms=6000)
+            on_done([])
+
+        worker.signals.error.connect(_on_error)
+        self._track_worker(worker, worker.signals.finished, worker.signals.error)
+        self.pool.start(worker)
 
     def _export(self) -> None:
         if not self.matches:
-            self.banner.show_message("먼저 자재 폴더를 불러오세요.", "info")
+            self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
             return
         # 이번 LOT 에서 매칭 있는 기준 사진(스냅샷) — 다이얼로그의 '전체 추가' 버튼용.
         all_matched = [
@@ -10624,14 +10903,21 @@ class MainWindow(QMainWindow):
         dlg = ExportTrayDialog(
             list(self._export_tray), self.thumb_cache,
             all_matched=all_matched,
+            all_matched_label=f"기준 '{self.top.base_layer()}' 매치 전체",
             all_layers_provider=self._provide_all_layers_matched,
             parent=self,
         )
-        if not dlg.exec():
+        accepted = dlg.exec()
+        # 이벤트 루프로 돌아가는 즉시 실제로 파괴되게 한다(BusyOverlay 등 자식이 orphan
+        # 으로 남아 이벤트 필터가 죽은 wrapper 를 호출하는 것을 방지). deleteLater() 는
+        # 지연 삭제라 아래에서 dlg 를 계속 읽는 것은 안전하다.
+        dlg.deleteLater()
+        if not accepted:
             return
         selected = dlg.selected()  # list[BaseDefectMatches]
-        # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지).
-        self._export_tray = list(selected)
+        # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지) — 태그 포함으로
+        # 저장해야 다음에 다시 열어도 '전체 추가'로 묶은 요약 카드가 풀리지 않는다.
+        self._export_tray = dlg.tagged_selected()
         self._update_add_export_button()
         # '확인'(저장만) → 트레이 상태만 저장하고 닫는다. Excel 출력은 나중에.
         if not dlg.wants_export():
@@ -10675,6 +10961,8 @@ class MainWindow(QMainWindow):
             selected=selected,
             thumb_cache=self.thumb_cache,
             source_roots=[self.lot_index.lot_path],
+            # 원래 layer 순서(폴더 스캔 순서) — 기준 layer 를 맨 왼쪽에 고정하지 않는다.
+            layer_order=self.lot_index.layer_canonicals(),
         )
         worker = ExportWorker(kwargs)
         worker.signals.progress.connect(self._on_export_progress)

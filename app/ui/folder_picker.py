@@ -60,6 +60,7 @@ from app.ui import theme
 _BANNER_COLORS = {
     "material": (theme.MATCH, "#10241b"),
     "layerwafer": (theme.NEON, "#101a24"),
+    "material_parent": (theme.WARN, "#241f10"),
     "too_high": (theme.WARN, "#241f10"),
     "unknown": (theme.TEXT_DIM, theme.BG_ELEV),
     "busy": (theme.TEXT_DIM, theme.BG_ELEV),
@@ -124,12 +125,12 @@ class _ValidateWorker(QRunnable):
 
 
 class FolderPickerDialog(QDialog):
-    """자재 폴더 선택기. `settings` 로 최근·즐겨찾기를 읽고 고정 토글 시 저장한다."""
+    """LOT 폴더 선택기. `settings` 로 최근·즐겨찾기를 읽고 고정 토글 시 저장한다."""
 
     def __init__(self, settings, start_path: str, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("자재(LOT) 폴더 선택")
+        self.setWindowTitle("LOT 폴더 선택")
         self.setMinimumSize(860, 560)
         self.resize(980, 640)
 
@@ -280,12 +281,12 @@ class FolderPickerDialog(QDialog):
         root.addLayout(body, 1)
 
         # 하단: 검증 배너 + ★ 고정 + 취소/선택
-        self.banner = QLabel("폴더를 고르면 자재 여부를 여기서 확인합니다.")
+        self.banner = QLabel("폴더를 고르면 LOT 여부를 여기서 확인합니다.")
         self.banner.setWordWrap(True)
         self.banner.setMinimumHeight(40)
         self.banner.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.banner.setContentsMargins(10, 6, 10, 6)
-        self._set_banner("none", "폴더를 고르면 자재 여부를 여기서 확인합니다.")
+        self._set_banner("none", "폴더를 고르면 LOT 여부를 여기서 확인합니다.")
         root.addWidget(self.banner)
 
         bottom = QHBoxLayout()
@@ -622,7 +623,7 @@ class FolderPickerDialog(QDialog):
             it.setData(Qt.UserRole, name)
             self.listw.addItem(it)
         if self.listw.count() == 0:
-            it = QListWidgetItem("(하위 폴더 없음 — 이 폴더가 자재일 수 있습니다)")
+            it = QListWidgetItem("(하위 폴더 없음 — 이 폴더가 wafer 등 최하위일 수 있습니다)")
             it.setFlags(Qt.NoItemFlags)
             it.setForeground(Qt.gray)
             self.listw.addItem(it)
@@ -651,6 +652,13 @@ class FolderPickerDialog(QDialog):
     # ----------------------------------------------------------- validation
     def _set_candidate(self, path: Path) -> None:
         self._candidate = path
+        # 후보가 바뀌는 즉시 이전 후보의 검증을 무효화한다 — 토큰은 디바운스 후에만
+        # 증가하므로, 그 사이 도착한 이전 후보의 판정이 새 후보의 이름으로 배너에
+        # 표시되고 캐시(_valid_*)까지 오염되는 레이스가 있었다(빠른 연속 클릭 시
+        # 엉뚱한 폴더가 LOT 으로 표시됨).
+        self._token += 1
+        self._valid_for = None
+        self._valid_kind = ""
         self._update_pin_button()
         self._set_banner("busy", f"‘{path.name or path}’ 확인 중…")
         self._debounce.start()
@@ -676,21 +684,27 @@ class FolderPickerDialog(QDialog):
         if kind == "material":
             self._set_banner(
                 "material",
-                f"✓ 자재(LOT) 폴더 · layer {layers}개 · wafer {wafers}개",
+                f"✓ LOT 폴더 · layer {layers}개 · wafer {wafers}개",
             )
             self.btn_ok.setEnabled(True)
         elif kind in ("layer", "wafer"):
             mat_name = Path(material).name if material else "?"
             self._set_banner(
                 "layerwafer",
-                f"{kind} 폴더 · 선택 시 자재 ‘{mat_name}’ 로 이동합니다"
+                f"{kind} 폴더 · 선택 시 LOT ‘{mat_name}’ 으로 이동합니다"
                 f" (layer {layers}개 · wafer {wafers}개)",
             )
             self.btn_ok.setEnabled(True)
+        elif kind == "material_parent":
+            self._set_banner(
+                "material_parent",
+                f"‘{name}’ 는 자재 폴더입니다 · 안으로 들어가 LOT 폴더를 선택하세요",
+            )
+            self.btn_ok.setEnabled(False)
         elif kind == "too_high":
             self._set_banner(
                 "too_high",
-                f"‘{name}’ 는 상위(device) 폴더입니다 · 자재 폴더로 들어가세요",
+                f"‘{name}’ 는 상위 폴더입니다 · LOT 폴더로 들어가세요",
             )
             self.btn_ok.setEnabled(False)
         else:  # unknown
@@ -747,7 +761,7 @@ class FolderPickerDialog(QDialog):
 
     # ----------------------------------------------------------- result
     def selected_path(self) -> str:
-        """선택 확정 시 반환할 자재 경로(보정 포함). 취소/부적합이면 빈 문자열."""
+        """선택 확정 시 반환할 LOT 경로(보정 포함). 취소/부적합이면 빈 문자열."""
         target = self._candidate or self._cur
         # 마지막 검증이 현재 후보에 대한 것이면 캐시 사용, 아니면 동기 재판정.
         if self._valid_for == target and self._valid_kind:
@@ -761,10 +775,10 @@ class FolderPickerDialog(QDialog):
             return material
         if kind == "unknown":
             return str(target)
-        return ""  # too_high / none
+        return ""  # material_parent / too_high / none
 
     def _resolved_kind(self) -> str:
-        """마지막 후보의 구조 판정(material/layer/wafer/too_high/unknown)."""
+        """마지막 후보의 구조 판정(material/layer/wafer/material_parent/too_high/unknown)."""
         target = self._candidate or self._cur
         if self._valid_for == target and self._valid_kind:
             return self._valid_kind

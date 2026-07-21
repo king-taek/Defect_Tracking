@@ -177,5 +177,5 @@ class BusyOverlay(QWidget):
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(8, 11, 16, 185))  # 반투명 어두운 막
+        painter.fillRect(self.rect(), QColor(8, 11, 16, 120))  # 반투명 막(과하게 어둡지 않게)
         painter.end()

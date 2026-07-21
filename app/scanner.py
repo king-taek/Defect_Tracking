@@ -156,28 +156,42 @@ def _has_child_dir_with_images(root: Path, breadth: int = 24) -> bool:
 
 
 def _has_grandchild_dir_with_images(root: Path, breadth: int = 24) -> bool:
-    """root/자식(layer)/손자(wafer)/이미지 구조가 있는가(= root 가 자재(LOT)인가).
+    """root/자식(layer)/손자(wafer)/이미지 구조가 있는가(= root 가 LOT 인가).
 
     자식(layer) 폴더 중 하나라도 '이미지를 직접 담은 하위 폴더(wafer)'를 가지면 True.
     """
     return any(_has_child_dir_with_images(c, breadth) for c in _child_dirs(root, breadth))
 
 
+def _has_greatgrandchild_dir_with_images(root: Path, breadth: int = 24) -> bool:
+    """root/자식(LOT)/손자(layer)/증손자(wafer)/이미지 구조가 있는가(= root 가 자재인가).
+
+    자식(LOT) 폴더 중 하나라도 'LOT/layer/wafer/이미지' 구조를 가지면 True.
+    """
+    return any(_has_grandchild_dir_with_images(c, breadth) for c in _child_dirs(root, breadth))
+
+
 def classify_selection(path: str | Path) -> tuple[str, Optional[Path]]:
-    """선택한 폴더가 자재 구조(LOT/layer/wafer/사진)에서 어느 레벨인지 **구조로** 판별.
+    """선택한 폴더가 자재/LOT/layer/wafer/사진 구조에서 어느 레벨인지 **구조로** 판별.
 
     LOT 폴더의 정의: `LOT/layer/wafer/사진` — 사진이 정확히 2단계 아래(wafer 폴더)에
-    있어야 자재(LOT)로 인정한다. 얕은 위치(LOT·layer 폴더)에 흔히 섞여 있는 요약/맵
-    이미지 같은 잡파일에 흔들리지 않도록 **가장 깊은 구조가 우선**하도록 판정한다.
+    있어야 LOT 으로 인정한다. 자재 폴더는 LOT 의 상위(사진이 3단계 아래)로, LOT 과
+    구분해 판정한다. 얕은 위치(LOT·layer 폴더)에 흔히 섞여 있는 요약/맵 이미지 같은
+    잡파일에 흔들리지 않도록 **가장 깊은 구조가 우선**하도록 판정한다.
 
     Returns:
         (kind, material_path) — kind 는
-          'material'(LOT 정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 자재로 보정) /
-          'too_high'(device 등 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
-        material_path 는 layer/wafer/material 일 때 추정 자재(LOT) 폴더, 그 외 None.
+          'material'(LOT 정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 LOT 으로 보정) /
+          'material_parent'(자재 폴더 = LOT 상위, 안으로 들어가 LOT 재선택 필요) /
+          'too_high'(그보다 더 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
+        material_path 는 layer/wafer/material 일 때 추정 LOT 폴더, 그 외 None.
     """
     p = Path(path)
-    # 깊은 구조 우선: LOT/layer/wafer/사진(손자에 이미지) → 자재(LOT).
+    # 가장 깊은 구조 우선: 자재/LOT/layer/wafer/사진(증손자에 이미지) → 자재 폴더.
+    # layer 폴더의 요약/맵 잡이미지 때문에 자재가 LOT 으로 오판되지 않게 먼저 판정.
+    if _has_greatgrandchild_dir_with_images(p):
+        return ("material_parent", None)
+    # LOT/layer/wafer/사진(손자에 이미지) → LOT.
     if _has_grandchild_dir_with_images(p):
         return ("material", p)
     # p/wafer/사진(자식이 이미지 직접 보유) → p 는 layer, 상위가 LOT.
