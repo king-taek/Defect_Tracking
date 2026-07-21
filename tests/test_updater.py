@@ -53,18 +53,30 @@ def test_extract_over_skips_protected_dirs(tmp_path):
     assert (target / "app" / "keep.py").exists()
 
 
-def test_extract_over_skips_claude_dev_tooling(tmp_path):
-    """자동 업데이트(ZIP)로 .claude(Claude Code 스킬 등 개발 전용 도구)는 설치 폴더에 내려받지 않는다."""
+def test_extract_over_skips_dev_only_resources(tmp_path):
+    """자동 업데이트(ZIP)는 개발 전용 리소스(.claude·tests·tools·.github·build_exe.py)를 배포본에 내려받지 않는다.
+
+    단, 런타임 파일(app/…)과 bootstrap 이 쓰는 requirements.txt 는 정상 배포되어야 한다.
+    """
     target = tmp_path / "install"
     target.mkdir()
     zp = _make_zip(tmp_path, {
         ".claude/skills/impeccable/SKILL.md": "skill",
         ".claude/agents/x.md": "agent",
+        "tests/test_x.py": "dev-test",
+        "tools/compute_version.py": "dev-tool",
+        ".github/workflows/ci.yml": "ci",
+        "build_exe.py": "dev-build",
         "app/keep.py": "keep",
+        "requirements.txt": "PySide6>=6.6",
     })
     updater.extract_over(zp, target)
-    assert not (target / ".claude").exists()  # 개발 도구는 배포본에 없어야 함
-    assert (target / "app" / "keep.py").read_text() == "keep"  # 런타임 파일은 정상 적용
+    # 개발 전용 → 배포본에 없어야 함
+    for gone in (".claude", "tests", "tools", ".github", "build_exe.py"):
+        assert not (target / gone).exists(), f"{gone} 는 배포본에 없어야 함"
+    # 런타임 필수 → 정상 적용
+    assert (target / "app" / "keep.py").read_text() == "keep"
+    assert (target / "requirements.txt").read_text() == "PySide6>=6.6"
 
 
 def test_extract_over_skips_dev_docs(tmp_path):
