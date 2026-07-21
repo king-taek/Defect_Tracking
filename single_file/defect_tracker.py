@@ -4,7 +4,7 @@
 # 이 파일은 `app/` + `main.py` 에서 자동 생성된 산출물입니다. 소스의 진실은 모듈식
 # 소스이며, 이 파일을 직접 고치지 마세요. 재생성:
 #     python tools/build_single_file.py
-# 버전: 1.33.82   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
+# 버전: 1.33.83   (실행: python defect_tracker.py / 의존성 설치: python bootstrap.py)
 # =============================================================================
 
 
@@ -67,7 +67,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-__version__ = "1.33.82"
+__version__ = "1.33.83"
 
 
 # 모듈 맵 (위상순서, leaf → top):
@@ -5288,19 +5288,20 @@ class ClickableThumb(QFrame):
 
 updater__ProgressCb = Optional[Callable[[str], None]]
 
-# ZIP 자동 업데이트로 설치 폴더에 쓰지 않을 폴더(경로 상 아무 위치에서나 이름이 일치하면 제외). 두 부류:
+# ZIP(멀티파일 app/) 자동 업데이트로 설치 폴더에 쓰지 않을 폴더(경로 상 이름 일치 시 제외). 부류:
 #   (1) 로컬 전용/재생성 폴더(.git·캐시·가상환경) — 원격본으로 덮어쓰면 안 됨.
-#   (2) 개발 전용 리소스(.claude 스킬·tests·tools·.github CI) — 앱 실행에 불필요, 배포본에 내려받지 않음.
+#   (2) 개발/부가 리소스(.claude 스킬·tests·tools·.github CI·single_file 단일파일 배포본)
+#       — app/ 실행에 불필요. single_file 은 자체 self-update 채널이라 트리 ZIP 에서 받을 필요도 없다.
+# 배포본에는 실행 필수(app/·main.py·bootstrap.py·requirements.txt)만 남는다.
 # git 체크아웃(=개발자 클론)에는 (2)가 그대로 남는다 — 이 목록은 ZIP 경로에만 적용된다.
 _SKIP_DIRS = {
     ".git", "__pycache__", ".pytest_cache", ".venv", "venv",  # (1) 로컬 전용/재생성
-    ".claude", "tests", "tools", ".github",                    # (2) 개발 전용
+    ".claude", "tests", "tools", ".github", "single_file",    # (2) 개발/부가
 }
-# 자동 업데이트로 받아오지 않을(로컬 유지/미배포) 파일 이름.
-#   - 개발 문서(CLAUDE.md·README.md)는 배포본에서 갱신하지 않고,
-#   - build_exe.py 는 개발용 빌드 스크립트라 앱 실행에 불필요하다.
-# (requirements.txt 는 bootstrap.py 가 의존성 설치에 쓰므로 반드시 배포본에 포함한다 — 여기 넣지 않는다.)
-_SKIP_FILES = {"CLAUDE.md", "README.md", "build_exe.py"}
+# 자동 업데이트로 받아오지 않을(로컬 유지/미배포) 파일 이름 — 앱 실행에 불필요:
+#   개발 문서(CLAUDE.md·README.md), 개발용 빌드 스크립트(build_exe.py), git 설정(.gitignore).
+# (requirements.txt 는 bootstrap.py 가 의존성 설치에 쓰므로 반드시 배포본에 포함 — 여기 넣지 않는다.)
+_SKIP_FILES = {"CLAUDE.md", "README.md", "build_exe.py", ".gitignore"}
 
 _API = "https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
 _ZIP = "https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}"
