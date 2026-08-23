@@ -36,7 +36,6 @@ from app.ui import theme
 from app.ui.compare_grid import CompareGrid
 from app.ui.controls import NavBar, SideBar
 from app.ui.thumbnail_strip import ThumbnailStrip
-from app.ui.wafer_map import WaferMapWidget
 
 _EMPTY_TITLE = "LOT 폴더를 선택하세요"
 _EMPTY_BODY = (
@@ -138,15 +137,8 @@ class ReviewPage(QWidget):
 
         # 별칭: 컨트롤 행이 소유하지만 창은 짧은 이름으로 쓴다.
         self.btn_add_export = self.sidebar.btn_add_export
+        # SLOT·die 는 탐색 바의 링크다. 웨이퍼 맵 위젯은 히트맵 페이지가 흡수했다(A12).
         self.lbl_wafer = self.nav.lbl_die
-
-        # 히트맵/웨이퍼맵은 단계 6에서 전용 페이지로 옮긴다. 그때까지 nav 라우트가 실제
-        # 경로이고, 이 둘은 배선을 끊지 않기 위한 보이지 않는 자리다.
-        self.wafer_map = WaferMapWidget(self.content)
-        self.wafer_map.hide()
-        self.btn_heatmap = PushButton("히트맵 보기", self.content)
-        self.btn_heatmap.setEnabled(False)
-        self.btn_heatmap.hide()
         # 창 크기 저장 계약(splitter.sizes)을 위해 남기지만 화면에는 없다.
         self.splitter = None
 

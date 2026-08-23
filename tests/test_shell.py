@@ -19,7 +19,6 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from app.config import AppSettings  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
-from app.ui.pages.launcher import LauncherPage  # noqa: E402
 from app.ui.pages.review import ReviewPage  # noqa: E402
 
 _ROUTES = [
@@ -78,7 +77,6 @@ def test_review_widget_aliases_survive_the_shell_move(win):
     assert win.grid is page.grid
     assert win.strip is page.strip
     assert win.nav is page.nav
-    assert win.wafer_map is page.wafer_map
     assert win.progress is page.progress
     assert win.btn_stop is page.btn_stop
     assert win.splitter is page.splitter
@@ -97,17 +95,19 @@ def test_nav_badge_appears_and_clears(win):
     assert "exportInterface" not in win._nav_badges
 
 
-def test_every_route_is_reachable(win):
-    """라우트는 진짜 페이지이거나, 아직 안 옮겼다면 기존 화면을 여는 임시 페이지다.
-
-    단계 4~8 이 하나씩 진짜 페이지로 갈아끼우는 중이라 두 가지가 섞여 있다. 어느 쪽이든
-    라우트 키(objectName)가 있고 사용자가 그 화면에 도달할 수 있어야 한다.
-    """
-    for page in (win.nomatch_page, win.heatmap_page, win.export_page,
-                 win.help_page, win.settings_page):
-        assert page.objectName()
-        if isinstance(page, LauncherPage):
-            assert page.button.text()
+def test_every_route_is_a_real_page(win):
+    """여섯 라우트가 모두 실제 페이지다. 임시 다리는 남지 않았다."""
+    routes = {
+        win.review_page: "reviewInterface",
+        win.nomatch_page: "nomatchInterface",
+        win.heatmap_page: "heatmapInterface",
+        win.export_page: "exportInterface",
+        win.help_page: "helpInterface",
+        win.settings_page: "settingsInterface",
+    }
+    for page, key in routes.items():
+        assert page.objectName() == key
+        assert win.stackedWidget.indexOf(page) >= 0
 
 
 def test_review_page_can_be_built_standalone(app):

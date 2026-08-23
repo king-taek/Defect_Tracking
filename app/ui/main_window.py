@@ -31,17 +31,16 @@ from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import conflicting_source
 from app.scanner import LotIndex
 from app.thumbnails import ThumbnailCache
-from app.ui.heatmap_dialog import HeatmapDialog
-from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui import theme
 from app.ui.notifications import NotificationBanner
 from app.ui.pages.export import ExportPage
+from app.ui.pages.heatmap import HeatmapPage
+from app.ui.pages.help import HelpPage
 from app.ui.pages.nomatch import NoMatchPage, fully_unmatched_indices, next_unmatched_index
-from app.ui.pages.launcher import LauncherPage
+from app.ui.pages.settings import SettingsPage, ask_update, show_update_notice
 from app.ui.pages.review import ReviewPage
-from app.ui.settings_dialog import SettingsDialog
 from app.ui.busy_overlay import BusyOverlay
 from app.workers import ExportWorker, MatchWorker, ScanWorker, ThumbnailWorker
 
@@ -82,7 +81,6 @@ class MainWindow(FluentWindow):
         # 바꿔도 담은 것이 그대로 유지된다.
         self._export_tray: list = []
         self._view_cache: Optional[list[int]] = None  # _view_indices 캐시
-        self._align_cache: dict = {}  # (lot_id, wafer, product) -> Alignment (웨이퍼 맵 정합)
         # 실행 중 워커는 풀 스레드에서 도는 동안 GC 되지 않도록 참조를 유지한다.
         self._active_workers: set = set()
 
@@ -108,6 +106,8 @@ class MainWindow(FluentWindow):
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._maybe_check_update()
+        # 창이 그려진 뒤에 안내한다. 생성 도중 띄우면 창 뒤에 숨는다.
+        QTimer.singleShot(0, self._maybe_show_theme_notice)
 
     # ----------------------------------------------------- 화면/DPI 보조
     @staticmethod
@@ -196,13 +196,8 @@ class MainWindow(FluentWindow):
         self.nomatch_page = NoMatchPage(self)
         self.nomatch_page.record_activated.connect(self._goto_from_nomatch)
 
-        self.heatmap_page = LauncherPage(
-            "heatmapInterface",
-            "히트맵",
-            "defect 밀도 지도에서 위치를 고르면 그 자리의 layer 교차 판독을 봅니다.",
-            "히트맵 열기",
-        )
-        self.heatmap_page.triggered.connect(self._open_heatmap)
+        self.heatmap_page = HeatmapPage(self)
+        self.heatmap_page.die_activated.connect(self._goto_die_from_heatmap)
         self.heatmap_page.set_enabled(False)
 
         self.export_page = ExportPage(
@@ -214,21 +209,15 @@ class MainWindow(FluentWindow):
         self.export_page.tray_changed.connect(self._on_export_tray_changed)
         self.export_page.export_requested.connect(self._run_export)
 
-        self.help_page = LauncherPage(
-            "helpInterface",
-            "도움말",
-            "단축키와 기능 안내입니다.",
-            "도움말 열기",
+        self.help_page = HelpPage(
+            self, size_key=getattr(self.settings, "ui_font_size", "normal")
         )
-        self.help_page.triggered.connect(self._open_help)
 
-        self.settings_page = LauncherPage(
-            "settingsInterface",
-            "설정",
-            "경로 · 표시 · 동작 설정을 바꿉니다.",
-            "설정 열기",
-        )
-        self.settings_page.triggered.connect(self._open_settings)
+        self.settings_page = SettingsPage(self.settings, None, self)
+        self.settings_page.settings_changed.connect(self._apply_settings)
+        self.settings_page.update_requested.connect(self._manual_update)
+        self.settings_page.help_requested.connect(lambda: self.switchTo(self.help_page))
+        self.settings_page.font_size_changed.connect(self.help_page.set_font_size)
 
         self.addSubInterface(self.review_page, FluentIcon.VIEW, "판독")
         # FluentIcon.CANCEL 은 이 버전에서 되돌리기 화살표로 그려진다. D 표의 대체안 CLOSE 를 쓴다.
@@ -259,10 +248,8 @@ class MainWindow(FluentWindow):
         self.strip = page.strip
         self.nav = page.nav
         self.grid = page.grid
-        self.wafer_map = page.wafer_map
         self.progress = page.progress
         self.btn_stop = page.btn_stop
-        self.btn_heatmap = page.btn_heatmap
         self.btn_add_export = page.btn_add_export
         self.lbl_view = page.lbl_view
         # SLOT·die 는 탐색 바의 링크로 옮겼다(A12). 이름은 그대로 둔다.
@@ -293,11 +280,9 @@ class MainWindow(FluentWindow):
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
         # 탐색 바의 SLOT·die 를 누르면 히트맵으로 간다. 판독↔히트맵 왕복 경로(A12).
-        self.nav.die_clicked.connect(self._open_heatmap)
-        self.btn_heatmap.clicked.connect(self._open_heatmap)
+        self.nav.die_clicked.connect(self._open_heatmap_at_current)
         self.btn_add_export.clicked.connect(self._add_current_to_export)
         self.btn_stop.clicked.connect(self._stop_scan)
-        self.wafer_map.die_clicked.connect(self._jump_to_die)
         self.grid.image_clicked.connect(self._open_viewer)
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
 
@@ -577,7 +562,6 @@ class MainWindow(FluentWindow):
         self._scan_worker = None
         self.lot_index = index
         # 새 LOT: 웨이퍼 맵 정합 캐시를 비운다(id(lot_index) 재사용으로 인한 stale 방지).
-        self._align_cache.clear()
         # LOT 이 들어왔으니 빈 상태를 걷는다.
         self.review_page.show_empty_state(False)
         layers = index.layer_canonicals()
@@ -690,7 +674,6 @@ class MainWindow(FluentWindow):
         self._view_cache = None
         self.current = -1
         self.strip.set_items([], [])
-        self.wafer_map.clear()
         self.nav.set_die("")
         self.nav.set_enabled(False)
         self.nav.set_index(0, 0)
@@ -775,7 +758,7 @@ class MainWindow(FluentWindow):
         else:
             self.nav.set_index(0, 0)
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
-            self.wafer_map.clear()
+            self.nav.set_die("")
         self._refresh_strip_marks()
         self._update_add_export_button()
 
@@ -848,28 +831,29 @@ class MainWindow(FluentWindow):
         self.busy.stop()
         self.banner.show_message(f"매칭 실패: {msg}", "error")
 
-    def _open_heatmap(self) -> None:
+    def _open_heatmap(self, select_die=None) -> None:
+        """히트맵 라우트로 간다. select_die 가 있으면 그 die 를 고른 채로 연다(A12)."""
         if not self.matches:
             self.banner.show_message("먼저 LOT 폴더와 기준 layer 를 선택하세요.", "info")
             return
-        current_wafer = None
-        if 0 <= self.current < len(self.matches):
-            current_wafer = self.matches[self.current].base.wafer_id
-        records_by_layer = (
-            self.lot_index.records_by_layer() if self.lot_index else {}
-        )
-        dlg = HeatmapDialog(
+        self.heatmap_page.set_data(
             self.matches,
             self.top.base_layer(),
             self.top.compare_layers(),
             self.thumb_cache,
             self._add_indices_to_export,
             self.settings,
-            current_wafer=current_wafer,
-            records_by_layer=records_by_layer,
-            parent=self,
+            current_wafer=self.matches[self.current].base.wafer_id
+            if 0 <= self.current < len(self.matches) else None,
+            records_by_layer=self.lot_index.records_by_layer() if self.lot_index else {},
+            select_die=select_die,
         )
-        dlg.exec()
+        self.switchTo(self.heatmap_page)
+
+    def _goto_die_from_heatmap(self, col: int, row: int) -> None:
+        """지도에서 die 를 더블클릭하면 판독 화면의 그 사진으로 돌아간다."""
+        self.switchTo(self.review_page)
+        self._jump_to_die(col, row)
 
     def _get_match_indices(self, compare_layers, rbl):
         """(lot, 비교 layer 집합) 기준으로 die/실패 인덱스를 캐시·재사용한다."""
@@ -993,7 +977,6 @@ class MainWindow(FluentWindow):
         n = len(self._export_tray)
         self.btn_add_export.setText(f"＋ 출력에 담기 ({n})" if n else "＋ 출력에 담기")
         self.btn_add_export.setEnabled(bool(self.matches))
-        self.btn_heatmap.setEnabled(bool(self.matches))
         self._set_nav_badge("exportInterface", n)
 
     # ------------------------------------------------------------ 탐색
@@ -1011,7 +994,7 @@ class MainWindow(FluentWindow):
         else:
             self.nav.set_index(index + 1, len(self.matches))
         self._prefetch_neighbors(index)
-        self._update_wafer_map(item)
+        self._update_die_label(item)
 
     def _prefetch_neighbors(self, index: int) -> None:
         """인접 기준의 이미지(기준+매칭 비교)를 미리 로드해 탐색 체감을 높인다."""
@@ -1167,92 +1150,26 @@ class MainWindow(FluentWindow):
         ])
 
     def _open_help(self) -> None:
-        ShortcutsDialog(self).exec()
+        self.switchTo(self.help_page)
 
-    # ---- 웨이퍼 맵 ----
-    _ALIGN_MIN_OVERLAP = 0.6  # 이 비율 이상 겹쳐야 디바이스 모양을 신뢰
+    def _update_die_label(self, item) -> None:
+        """탐색 바의 SLOT·die 링크를 현재 사진에 맞춘다(A12).
 
-    def _update_wafer_map(self, item) -> None:
-        """현재 wafer 의 die 격자를 매칭 상태로 갱신한다.
-
-        디바이스 DB die_map 이 있으면 관측 die 와 **정합(평행이동)** 시켜 실제 모양으로
-        그린다. 정합 신뢰도가 낮으면 사각 전체로 폴백하고 캡션·로그로 알린다.
+        웨이퍼 맵 위젯은 히트맵 페이지가 흡수했다. 판독 화면에 남는 것은 지금 어느 die 를
+        보고 있는지와, 그 자리를 지도에서 볼 수 있는 입구 하나다.
         """
-        from app import wafermap_align
+        base = item.base
+        die = f"die ({base.col}, {base.row})" if base.col is not None else "die 좌표 없음"
+        self.nav.set_die(f"SLOT {base.wafer_id} · {die}")
 
-        wafer = item.base.wafer_id
-        states: dict[tuple[int, int], str] = {}
-        observed: set[tuple[int, int]] = set()
-        for m in self.matches:
-            b = m.base
-            if b.wafer_id != wafer or b.col is None or b.row is None:
-                continue
-            if b.col < 0 or b.row < 0:
-                continue
-            observed.add((b.col, b.row))
-            status = self._match_status(m)
-            # 미매칭은 무시하고 매칭만 히트맵으로 표시한다(모양 정합용 observed 는 전체 유지).
-            if status == "matched":
-                states[(b.col, b.row)] = status
-
-        prod = config.active_product()
-        valid: Optional[set] = None
-        # 캡션은 제품명만 표기(‘모양 정합 %’ 등은 노출하지 않음).
-        caption = prod.name if prod.source == "db" else ""
-        if prod.die_map and observed:
-            align = self._get_alignment(wafer, prod, observed)
-            if align.overlap >= self._ALIGN_MIN_OVERLAP:
-                valid = wafermap_align.shifted_die_map(prod.die_map, align)
-
-        current = (item.base.col, item.base.row)
-        # 실제 관측(매칭)된 die 는 DB 고정 모양(valid) 밖이어도 항상 그린다 — 그렇지 않으면
-        # 정합 후 모양 밖으로 나온 새 die 가 격자만 커지고 색칠 없이 사라져 보인다.
-        paint_valid = (valid | observed) if valid is not None else None
-
-        if paint_valid is not None:
-            # 디바이스 모양: 실제로 그려지는 셀(paint_valid = valid∪observed)의 bounding box
-            # 로 격자를 정규화한다. 좌표계 원점이 wafer 마다 달라도 맵이 여백에 떠 보이거나
-            # 좌·상단이 잘리지 않는다. (current 는 여기서 제외 — 음수 좌표로 걸러진 die 가
-            # 헛여백을 만들지 않도록. 유효한 current 는 이미 paint_valid 안에 있다.)
-            content = set(paint_valid)
-            min_col = min(c for c, _ in content)
-            min_row = min(r for _, r in content)
-            max_col = max(c for c, _ in content)
-            max_row = max(r for _, r in content)
-            cols = max_col - min_col + 1
-            rows = max_row - min_row + 1
-            origin = (min_col, min_row)
-        else:
-            # 사각 폴백: 원점 (0,0) + 패키지 크기(관측 max 로 확장).
-            max_col = max((c for c, _ in observed), default=0)
-            max_row = max((r for _, r in observed), default=0)
-            cols = max(prod.kla_package_x_count, max_col + 1)
-            rows = max(prod.kla_package_y_count, max_row + 1)
-            origin = (0, 0)
-
-        self.wafer_map.set_data(cols, rows, states, current, valid=paint_valid, origin=origin)
-        self.nav.set_die(caption)
-        self.wafer_map.setToolTip(
-            "웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동"
-            + (f"\n{caption}" if caption else "")
-        )
-
-    def _get_alignment(self, wafer: str, prod, observed: set):
-        """(lot, wafer, product) 단위로 정합 결과를 캐시·재사용한다."""
-        from app import wafermap_align
-
-        key = (id(self.lot_index), wafer, prod.key)
-        cached = self._align_cache.get(key)
-        if cached is None:
-            cached = wafermap_align.align_observed_to_diemap(observed, prod.die_map)
-            self._align_cache[key] = cached
-            if cached.overlap < self._ALIGN_MIN_OVERLAP:
-                import logging
-                logging.getLogger("defect_tracker.wafermap").info(
-                    "die 정합 신뢰도 낮음 — wafer=%s product=%s overlap=%.2f",
-                    wafer, prod.key, cached.overlap,
-                )
-        return cached
+    def _open_heatmap_at_current(self) -> None:
+        """탐색 바의 SLOT·die 를 누르면 지도에서 그 die 를 고른 채로 연다."""
+        if not self.matches or not (0 <= self.current < len(self.matches)):
+            self._open_heatmap()
+            return
+        base = self.matches[self.current].base
+        self._open_heatmap(select_die=(base.col, base.row)
+                           if base.col is not None and base.row is not None else None)
 
     def _jump_to_die(self, col: int, row: int) -> None:
         if not self.matches:
@@ -1266,28 +1183,63 @@ class MainWindow(FluentWindow):
 
     # ------------------------------------------------------------ 설정
     def _open_settings(self) -> None:
-        current_lot = str(self.lot_index.lot_path) if self.lot_index else None
-        old_workspace = self.settings.workspace
-        old_output = self.settings.output_folder
-        old_font = getattr(self.settings, "ui_font_size", "normal")
-        update_available = bool(self._update_status and self._update_status.available)
-        dlg = SettingsDialog(
-            self.settings, current_lot, self, update_available=update_available
+        """설정 라우트로 간다. 저장은 카드가 바뀔 때마다 `_apply_settings` 가 한다."""
+        self.settings_page.set_current_lot(
+            str(self.lot_index.lot_path) if self.lot_index else None
         )
-        accepted = dlg.exec()
-        # "지금 업데이트/업데이트 확인" 클릭 시: 설정 저장 후 기존 비동기 흐름 재사용
-        if dlg.wants_update():
-            try:
-                dlg.updated_settings().save()
-            except OSError:
-                pass
-            self._manual_update()
+        self.settings_page.set_update_available(
+            bool(self._update_status and self._update_status.available)
+        )
+        self.switchTo(self.settings_page)
+
+    def _settings_snapshot(self, s) -> dict:
+        """무거운 재적용이 필요한 필드만 뽑아 둔다."""
+        return {
+            "workspace": s.workspace,
+            "output_folder": s.output_folder,
+            "device_db_path": s.device_db_path,
+            "product": s.product,
+            "ui_font_size": getattr(s, "ui_font_size", "normal"),
+        }
+
+    def _apply_settings(self, s) -> None:
+        """설정 페이지가 값을 바꿀 때마다 창에 반영하고 저장한다.
+
+        카드 하나를 만질 때마다 신호가 오므로 **실제로 바뀐 것만** 다시 적용한다. 디바이스 DB
+        재적재와 LOT 재스캔은 무거워서, 스위치 하나 켤 때마다 돌리면 화면이 멈춘다.
+        """
+        problem = self.settings_page.validate()
+        if problem:
+            # 원본 폴더 안을 작업공간으로 잡는 것 같은 경우. 페이지가 이미 문구를 보여 준다.
             return
-        if not accepted:
-            return
-        s = dlg.updated_settings()
-        # 디바이스 DB 를 다시 읽어 제품 목록을 갱신한 뒤 활성 제품 적용.
-        # 경로가 지정되면 그 경로를, 비면 번들 DB 를 자동으로 읽는다(하드코딩 금지).
+        before = getattr(self, "_settings_applied", None) or self._settings_snapshot(s)
+        now = self._settings_snapshot(s)
+
+        if now["device_db_path"] != before["device_db_path"] or not hasattr(self, "_settings_applied"):
+            self._reload_device_db(s)
+        if now["product"] != before["product"]:
+            self._apply_product(s)
+        if now["workspace"] != before["workspace"] or now["output_folder"] != before["output_folder"]:
+            s.ensure_workspace()
+            self.thumb_cache = ThumbnailCache(s.cache_path)
+        if now["ui_font_size"] != before["ui_font_size"]:
+            self._apply_font_size(s)
+
+        self._settings_applied = now
+        if config.dev_mode(s):
+            # 재시작 없이 파일 로그를 시작한다. setup_logging 은 중복 핸들러를 막는다.
+            from app import logging_config
+            logging_config.setup_logging(s.log_dir_path)
+        try:
+            s.save()
+        except OSError as exc:
+            self.banner.show_message(f"설정 저장 실패: {exc}", "error", timeout_ms=0)
+
+    def _reload_device_db(self, s) -> None:
+        """디바이스 DB 를 다시 읽어 제품 목록을 갱신한다.
+
+        경로가 지정되면 그 경로를, 비면 번들 DB 를 읽는다(경로 하드코딩 금지).
+        """
         try:
             from pathlib import Path as _P
 
@@ -1297,12 +1249,11 @@ class MainWindow(FluentWindow):
                 db_path = config.bundled_device_db_path()
             if db_path is not None:
                 config.register_devices(load_device_db(db_path))
+                self.settings_page.reload_products(s.product)
         except Exception:  # noqa: BLE001
             self.banner.show_message("디바이스 DB 로드 실패(설정 확인).", "warn")
-        # 디바이스 DB 를 새로 반영한 뒤, 아직 빌트인 기본 제품(DEFAULT_PRODUCT)에 머물러
-        # 있으면 현재 LOT 경로에서 제품(디바이스)을 DB 시트명 기준으로 자동 인식해 프로파일을
-        # 맞춘다("DB 저장하면 알아서 읽도록"). 사용자가 특정 디바이스를 직접 고른 경우엔
-        # 그 값(≠기본)이 유지되므로 자동 인식이 덮어쓰지 않는다.
+        # DB 를 새로 반영한 뒤에도 빌트인 기본 제품에 머물러 있으면 LOT 경로에서 디바이스를
+        # 자동 인식한다. 사용자가 직접 고른 제품(!= 기본)은 덮어쓰지 않는다.
         if s.product == config.DEFAULT_PRODUCT and self.lot_index is not None:
             try:
                 detected, _ = config.match_product_for_path(str(self.lot_index.lot_path))
@@ -1315,14 +1266,16 @@ class MainWindow(FluentWindow):
                     self.banner.show_message(
                         f"디바이스 자동 인식: {prod.name}", "info", timeout_ms=2500
                     )
+
+    def _apply_product(self, s) -> None:
+        """제품(디바이스)이 바뀌면 좌표를 다시 계산한다.
+
+        좌표(col/row/x/y)는 파싱 시점에 pitch·offset 으로 계산되므로 다시 그리는 것만으로는
+        갱신되지 않는다. 현재 LOT 을 다시 스캔해야 한다.
+        """
         old_active = config._active_product
         config.set_active_product(s.product)
         config.ensure_die_map_product()
-        # 제품/DB 가 바뀌면 die_map 이 달라지므로 웨이퍼 맵 정합 캐시를 무효화한다.
-        self._align_cache.clear()
-        # 디바이스(제품)가 바뀌면 좌표 변환(col/row/x/y)이 '파싱 시점'에 계산되므로
-        # 단순 재그리기로는 좌표가 갱신되지 않는다. 현재 LOT 을 다시 스캔해 새 pitch/offset
-        # 으로 좌표를 재계산한다(사용자가 직접 고른 제품이므로 자동 인식은 건너뜀).
         if (
             config._active_product != old_active
             and self.settings.last_lot_folder
@@ -1331,38 +1284,29 @@ class MainWindow(FluentWindow):
             self.load_lot(
                 self.settings.last_lot_folder,
                 wafer_filter=self._wafer_filter,
-                auto_detect=False,
+                auto_detect=False,  # 사용자가 직접 고른 제품이다
             )
         elif self.matches:
             # 다음 네비게이션까지 기다리지 않고 지금 바로 새 제품 기준으로 다시 그린다.
             self._goto(self.current)
-        # 작업공간/출력 폴더가 바뀌면 캐시를 재생성한다(원본 밖 보장은 다이얼로그에서 검증).
-        if s.workspace != old_workspace or s.output_folder != old_output:
-            s.ensure_workspace()
-            self.thumb_cache = ThumbnailCache(s.cache_path)
-        # 기본 허용오차를 스핀박스에도 반영(현재 매칭은 사용자가 바꾼 값 유지).
-        try:
-            s.save()
-        except OSError as exc:
-            self.banner.show_message(f"설정 저장 실패: {exc}", "error", timeout_ms=0)
-            return
-        # 개발자 모드를 방금 켰다면 재시작 없이 파일 로그를 바로 시작한다(setup_logging 은
-        # 중복 핸들러를 막으므로 반복 호출해도 안전). 끄는 것은 다음 실행부터 반영된다.
-        if config.dev_mode(s):
-            from app import logging_config
-            logging_config.setup_logging(s.log_dir_path)
-        # 글자 크기(보통/크게)가 바뀌면 기본 글자 크기와 브리지 QSS 를 다시 적용한다.
-        # 옛 apply_theme 은 다크 네온 스타일시트를 통째로 덮어써 Fluent 셸을 지워 버린다.
-        if getattr(s, "ui_font_size", "normal") != old_font:
-            from PySide6.QtWidgets import QApplication
-            from qfluentwidgets import isDarkTheme
 
-            application = QApplication.instance()
-            theme.apply_font_scale(application, theme.scale_for(s.ui_font_size))
-            application.setStyleSheet(theme.build_bridge_qss(isDarkTheme()))
-        self.banner.show_message("설정을 저장했습니다.", "success")
+    def _apply_font_size(self, s) -> None:
+        """글자 크기(보통/크게)를 기본 글자 크기와 브리지 QSS 에 반영한다.
+
+        옛 apply_theme 은 다크 네온 스타일시트를 통째로 덮어써 Fluent 셸을 지워 버린다.
+        """
+        from PySide6.QtWidgets import QApplication
+        from qfluentwidgets import isDarkTheme
+
+        application = QApplication.instance()
+        theme.apply_font_scale(application, theme.scale_for(s.ui_font_size))
+        application.setStyleSheet(theme.build_bridge_qss(isDarkTheme()))
 
     # ------------------------------------------------------------ 업데이트
+    def _maybe_show_theme_notice(self) -> None:
+        """첫 실행 때 테마를 고를 수 있다는 것을 한 번만 알린다(A10)."""
+        self.settings_page.maybe_show_theme_notice()
+
     def _maybe_check_update(self) -> None:
         if not self.settings.auto_update_check:
             return
@@ -1384,15 +1328,7 @@ class MainWindow(FluentWindow):
         self._update_status = status
         if status.available:
             self._set_update_marker(True)
-            answer = QMessageBox.question(
-                self,
-                "업데이트",
-                "새 버전이 있습니다. 지금 업데이트할까요?\n"
-                "업데이트 후 프로그램이 종료되며, 다시 시작하면 적용됩니다.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if answer == QMessageBox.Yes:
+            if ask_update(self, status):
                 self._do_update(status)
             else:
                 if manual:
@@ -1416,6 +1352,7 @@ class MainWindow(FluentWindow):
     def _set_update_marker(self, available: bool) -> None:
         """업데이트 가용 표식. nav 설정 항목의 배지 하나로 알린다(A10)."""
         self.top.set_update_available(available)
+        self.settings_page.set_update_available(available)
         self._set_nav_badge("settingsInterface", 1 if available else 0)
 
     def _do_update(self, status) -> None:
@@ -1443,9 +1380,8 @@ class MainWindow(FluentWindow):
                 f"최신 버전({new_version})으로 업데이트 되었습니다."
                 if new_version else "최신 버전으로 업데이트 되었습니다."
             )
-            QMessageBox.information(
-                self,
-                "업데이트 완료",
+            show_update_notice(
+                self, "업데이트 완료",
                 f"{done_msg}\n\n프로그램을 종료합니다. 다시 시작해 주세요.",
             )
             self.close()

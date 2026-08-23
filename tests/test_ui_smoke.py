@@ -357,16 +357,23 @@ def test_recent_folders_push(win, tmp_path):
     assert len(win.settings.recent_folders) <= 5
 
 
-def test_wafer_map_updates(win):
+def test_nav_die_label_follows_the_current_photo(win):
+    """웨이퍼 맵 위젯은 히트맵 페이지가 흡수했다(A12). 판독 화면에 남는 것은 SLOT·die 링크다."""
     item = win.matches[0]
-    win._update_wafer_map(item)
-    assert win.wafer_map._cols >= 1 and win.wafer_map._rows >= 1
-    # 미매칭은 무시하고 매칭만 히트맵 색으로 표시한다.
-    key = (item.base.col, item.base.row)
-    if win._match_status(item) == "matched":
-        assert key in win.wafer_map._states
-    else:
-        assert key not in win.wafer_map._states
+    win._goto(0)
+    text = win.nav.lbl_die.text()
+    assert item.base.wafer_id in text
+    assert f"die ({item.base.col}, {item.base.row})" in text
+    assert win.nav.lbl_die.isVisible() or text
+
+
+def test_heatmap_page_draws_the_current_lot(win):
+    """지도는 layer 별 record 에서 밀도를 만든다."""
+    win._open_heatmap()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    wm = win.heatmap_page.map
+    assert wm._cols >= 1 and wm._rows >= 1
 
 
 def test_wafer_map_paints_observed_die_outside_device_shape(win):
@@ -399,25 +406,19 @@ def test_wafer_map_paints_observed_die_outside_device_shape(win):
     )
     try:
         config.set_active_product("TESTDEV_PARTIAL")
-        win._align_cache.clear()
-        win._update_wafer_map(item)
+        win.heatmap_page._align_cache.clear()
+        win._open_heatmap()
+        for _ in range(5):
+            QCoreApplication.processEvents()
+        wm = win.heatmap_page.map
         # 정합이 성공해 die_map 클리핑이 실제로 적용되는 시나리오인지 확인.
-        assert win.wafer_map._valid is not None
-        # 수정 전에는 missing die 가 valid 밖이라 그려지지 않았을 것 — 이제는 포함돼야 한다.
-        assert missing in win.wafer_map._valid
-        # 색칠(states)은 매칭된 die 만 — missing 이 매칭이면 색칠도, 아니면 빈칸이어야 한다.
-        missing_match = next(
-            m for m in win.matches
-            if m.base.wafer_id == wafer and (m.base.col, m.base.row) == missing
-        )
-        if win._match_status(missing_match) == "matched":
-            assert missing in win.wafer_map._states
-        else:
-            assert missing not in win.wafer_map._states
+        assert wm._valid is not None
+        # 수정 전에는 missing die 가 valid 밖이라 그려지지 않았을 것. 이제는 포함돼야 한다.
+        assert missing in wm._valid
     finally:
         config.set_active_product(prod.key)
         config.PRODUCTS.pop("TESTDEV_PARTIAL", None)
-        win._align_cache.clear()
+        win.heatmap_page._align_cache.clear()
 
 
 def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
@@ -435,7 +436,10 @@ def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
         kla_package_y_count=prod.kla_package_y_count + 3,
     )
     try:
-        before_cols = win.wafer_map._cols
+        win._open_heatmap()
+        for _ in range(5):
+            QCoreApplication.processEvents()
+        before_cols = win.heatmap_page.map._cols
         # 다이얼로그가 새 제품으로 초기화되도록 미리 설정한 뒤, 모달을 띄우지 않고
         # 바로 accept 된 것처럼 흉내 낸다(exec() monkeypatch — 실제 _open_settings() 호출).
         win.settings.product = other_key
@@ -443,11 +447,14 @@ def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
         win._open_settings()
         assert config.active_product().key == other_key
         # 더 큰 package 크기를 쓰는 제품으로 바꿨으니 격자가 즉시(다음 네비게이션 전에) 커져야 한다.
-        assert win.wafer_map._cols >= before_cols + 3
+        win._open_heatmap()
+        for _ in range(5):
+            QCoreApplication.processEvents()
+        assert win.heatmap_page.map._cols >= before_cols + 3
     finally:
         config.set_active_product(prod.key)
         config.PRODUCTS.pop(other_key, None)
-        win._align_cache.clear()
+        win.heatmap_page._align_cache.clear()
         win._goto(win.current)
 
 

@@ -220,86 +220,75 @@ def test_thumbnail_zoom_fixed_5x_no_button(win):
 
 # ---- 항목 4·5: 히트맵 다이얼로그 ----
 
-def test_heatmap_dialog_constructs_and_selects(win, app):
-    from app.ui.heatmap_dialog import HeatmapDialog
+def _open_heatmap(win):
+    """창 배선을 그대로 타서 히트맵 페이지를 채운다."""
+    win._open_heatmap()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    return win.heatmap_page
+
+
+def test_heatmap_page_selects_and_adds(win, app):
+    """위치를 고르면 상세가 서고, 담기가 트레이 콜백까지 간다."""
+    page = _open_heatmap(win)
+    assert page.map._cols >= 1 and page.map._rows >= 1
+    assert page._groups, "defect 밀도 그룹이 있어야 한다"
 
     added = []
-    dlg = HeatmapDialog(
-        win.matches, win.top.base_layer(), win.top.compare_layers(),
-        win.thumb_cache, lambda idxs: added.extend(idxs), win.settings,
-        current_wafer=win.matches[0].base.wafer_id,
-        records_by_layer=win.lot_index.records_by_layer(),
-    )
-    # 밀도 그룹이 채워지고 웨이퍼맵 격자가 잡힌다.
-    assert dlg._map._cols >= 1 and dlg._map._rows >= 1
-    assert dlg._groups, "defect 밀도 그룹이 있어야 한다"
-    # 첫 셀 선택 → 상세 목록 구성(행 stretch 외 1개 이상) + 담기 동작
-    key = next(iter(dlg._groups))
-    dlg._on_selection_changed([key])
-    assert dlg._detail_box.count() >= 2  # 행 위젯 + stretch
-    dlg._add_all_current()
+    page._on_add = lambda idxs: added.extend(idxs)
+    key = next(iter(page._groups))
+    page._on_selection_changed([key])
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert page._union_indices(), "고른 위치에 기준 defect 이 있어야 한다"
+    page._add_current()
     assert added, "이 위치 전체 담기가 트레이 콜백을 호출해야 한다"
 
 
-def test_heatmap_multi_select_union(win, app):
-    from app.ui.heatmap_dialog import HeatmapDialog
-
-    added = []
-    dlg = HeatmapDialog(
-        win.matches, win.top.base_layer(), win.top.compare_layers(),
-        win.thumb_cache, lambda idxs: added.extend(idxs), win.settings,
-        current_wafer=win.matches[0].base.wafer_id,
-    )
-    keys = list(dlg._groups.keys())
+def test_heatmap_page_multi_select_union(win, app):
+    page = _open_heatmap(win)
+    keys = list(page._groups.keys())
     if len(keys) >= 2:
-        dlg._on_selection_changed(keys[:2])
-        expected = set(dlg._groups[keys[0]]) | set(dlg._groups[keys[1]])
-        assert set(dlg._union_indices()) == expected
-    # 다중 선택 토글 → 맵이 multi 모드
-    dlg.btn_multi.setChecked(True)
-    assert dlg._map._multi is True
+        page._on_selection_changed(keys[:2])
+        expected = set(page._groups[keys[0]]) | set(page._groups[keys[1]])
+        assert set(page._union_indices()) == expected
+    # 여러 다이 선택 토글 -> 지도가 multi 모드(클릭 누적)
+    page.chk_multi.setChecked(True)
+    assert page.map._multi is True
 
 
-def test_heatmap_investigation_collects_all_layers(win, app):
-    """상시 조사 모드: 선택 위치에서 체크된 layer 의 record 를 records_by_layer 에서 수집."""
-    from app.ui.heatmap_dialog import HeatmapDialog
-
-    rbl = win.lot_index.records_by_layer()
-    dlg = HeatmapDialog(
-        win.matches, win.top.base_layer(), win.top.compare_layers(),
-        win.thumb_cache, lambda idxs: None, win.settings,
-        current_wafer=win.matches[0].base.wafer_id, records_by_layer=rbl,
-    )
-    key = next(iter(dlg._groups))
-    dlg._on_selection_changed([key])
-    recs = dlg._records_at_selection()
-    # 기준 defect 이 하나는 있고, 수집 layer 는 체크된 layer 집합에 속한다.
-    assert any(lyr == dlg._base_layer for lyr, _ in recs)
-    assert all(lyr in dlg._selected_layers() for lyr, _ in recs)
+def test_heatmap_page_collects_all_selected_layers(win, app):
+    """조사 모드: 고른 위치에서 켜진 layer 의 record 를 records_by_layer 에서 모은다."""
+    page = _open_heatmap(win)
+    key = next(iter(page._groups))
+    page._on_selection_changed([key])
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    recs = page.records_at_selection()
+    assert any(lyr == page._base_layer for lyr, _ in recs)
+    assert all(lyr in page.selected_layers() for lyr, _ in recs)
 
 
-def test_heatmap_all_wafers_aggregates(win, app):
-    from app.ui.heatmap_dialog import HeatmapDialog, _ALL_WAFERS
+def test_heatmap_page_opens_on_all_slots(win, app):
+    """지도는 늘 전체 슬롯으로 연다. 슬롯을 좁히는 것은 레일이 한다."""
+    from app.ui.pages.heatmap import _ALL_SLOTS
 
-    dlg = HeatmapDialog(
-        win.matches, win.top.base_layer(), win.top.compare_layers(),
-        win.thumb_cache, lambda idxs: None, win.settings,
-    )
-    # '전체' wafer 항목이 콤보 맨 앞에 있고, 선택 시 모든 wafer 를 집계한다.
-    assert dlg.cmb_wafer.itemText(0) == _ALL_WAFERS
-    dlg._on_wafer_changed(_ALL_WAFERS)
-    all_entries = dlg._base_entries()
+    page = _open_heatmap(win)
+    assert page._current_slot == _ALL_SLOTS
+    all_entries = page._base_entries()
     total = sum(1 for m in win.matches
                 if m.base.col is not None and m.base.row is not None
                 and m.base.col >= 0 and m.base.row >= 0)
     assert len(all_entries) == total
 
 
-def test_wafer_map_bbox_normalized_no_margin_or_clip(win, app):
-    """웨이퍼맵이 좌표 원점과 무관하게 bounding box (0,0) 기준으로 그려진다.
+def test_heatmap_bbox_normalized_no_margin_or_clip(win, app):
+    """지도가 좌표 원점과 무관하게 bounding box 기준으로 그려진다.
 
     회귀: 정합 shift 로 내용 min 이 양수면 왼쪽/위 여백(떠 보임), 음수면 좌·상단 잘림이
-    생겼다. 이제 origin 정규화로 그려지는 셀이 항상 (0,0)부터 시작하고 잘리지 않아야 한다.
+    생겼다. origin 정규화로 그려지는 셀이 항상 (0,0)부터 시작하고 잘리지 않아야 한다.
+
+    웨이퍼 맵 위젯이 히트맵 페이지로 흡수되면서(A12) 이 계약도 그 페이지로 옮겼다.
     """
     from app import config
     from app.config import ProductConfig
@@ -324,11 +313,15 @@ def test_wafer_map_bbox_normalized_no_margin_or_clip(win, app):
             obs = [(c + off[0], r + off[1]) for c, r in list(dm)[:8]]
             win.matches = [mk(c, r) for c, r in obs]
             win.current = 0
-            win._align_cache.clear()
-            win._update_wafer_map(win.matches[0])
-            wm = win.wafer_map
-            oc, orr = wm._origin_col, wm._origin_row
-            content = set(wm._valid) if wm._valid else set(wm._states)
+            win.heatmap_page._align_cache.clear()
+            # 지도 밀도는 layer 별 record 에서 나온다(판독 매칭 결과가 아니라).
+            rbl = {"LYA4": [m.base for m in win.matches]}
+            win.heatmap_page.set_data(
+                win.matches, "LYA4", ["LYB4"], settings=win.settings, records_by_layer=rbl,
+            )
+            wm = win.heatmap_page.map
+            oc, orr = wm._origin
+            content = set(wm._valid) if wm._valid else set(wm._die_counts)
             assert content, f"offset {off}: 그릴 내용이 있어야 한다"
             # 그려지는 최소 셀이 (0,0)에 오고(여백 0), 모두 격자 안(잘림 0)이어야 한다.
             assert min(c - oc for c, _ in content) == 0
@@ -337,7 +330,7 @@ def test_wafer_map_bbox_normalized_no_margin_or_clip(win, app):
     finally:
         config.set_active_product(prod0)
         config.PRODUCTS.pop("TESTDISC_NORM", None)
-        win._align_cache.clear()
+        win.heatmap_page._align_cache.clear()
 
 
 def test_excel_no_top_item_header(win, app, tmp_path):
@@ -518,7 +511,7 @@ def test_theme_styles_item_views():
 
 def test_heatmap_subdivide_small_die_count(app):
     """die 개수가 적으면 웨이퍼맵이 하위셀 분할 모드가 된다."""
-    from app.ui.heatmap_dialog import HeatmapDialog
+    from app.ui.pages.heatmap import HeatmapPage
     from app.models import BaseDefectMatches, DefectRecord
     from pathlib import Path
 
@@ -530,14 +523,14 @@ def test_heatmap_subdivide_small_die_count(app):
     # 4개 die(<50) → subdivide. 맵 density 는 records_by_layer(체크 layer) 기반이므로 전달.
     matches = [mk(0, 0, 0, 0), mk(0, 0, 90, 90), mk(1, 1, 0, 0), mk(2, 2, 0, 0)]
     rbl = {"LYA4": [m.base for m in matches]}
-    dlg = HeatmapDialog(matches, "LYA4", [], None, lambda idxs: None, AppSettings(),
-                        records_by_layer=rbl)
-    assert dlg._map._subdivide is True
+    page = HeatmapPage()
+    page.set_data(matches, "LYA4", [], settings=AppSettings(), records_by_layer=rbl)
+    assert page._subdivide is True
 
 
 def test_heatmap_density_counts_clusters_as_one(app):
     """근접 중복(클러스터) defect 은 밀도에서 대표 1개로만 계산된다."""
-    from app.ui.heatmap_dialog import HeatmapDialog
+    from app.ui.pages.heatmap import HeatmapPage
     from app.models import BaseDefectMatches, DefectRecord
     from pathlib import Path
 
@@ -554,10 +547,10 @@ def test_heatmap_density_counts_clusters_as_one(app):
     rbl = {"LYA4": [m.base for m in matches]}
     s = AppSettings()
     s.cluster_radius = 50.0
-    dlg = HeatmapDialog(matches, "LYA4", [], None, lambda idxs: None, s,
-                        records_by_layer=rbl)
+    page = HeatmapPage()
+    page.set_data(matches, "LYA4", [], settings=s, records_by_layer=rbl)
     # raw defect 4개지만 밀도 합은 클러스터 2개여야 한다(근접 3개는 1로 계산).
-    assert sum(dlg._map._density.values()) == 2
+    assert sum(page.map._density.values()) == 2
 
 
 def test_heatmap_subcell_uses_die_pitch_not_observed_range(app):
@@ -566,7 +559,7 @@ def test_heatmap_subcell_uses_die_pitch_not_observed_range(app):
     회귀: 예전엔 표시 중 record 의 관측 min/max 상대라, 같은 defect 이 다른 레이어를
     추가하면 다른 칸으로 이동했다(사용자 보고: (0,4)→(4,4)→(3,4)).
     """
-    from app.ui.heatmap_dialog import HeatmapDialog
+    from app.ui.pages.heatmap import HeatmapPage
     from app.models import BaseDefectMatches, DefectRecord
     from app import config
     from pathlib import Path
@@ -584,68 +577,33 @@ def test_heatmap_subcell_uses_die_pitch_not_observed_range(app):
 
     # (a) 대상 defect 만
     rbl = {"LYA4": [target.base]}
-    dlg = HeatmapDialog([target], "LYA4", [], None, lambda i: None, AppSettings(),
-                        records_by_layer=rbl)
-    k_only = dlg._key_for_record(target.base)
+    page = HeatmapPage()
+    page.set_data([target], "LYA4", [], settings=AppSettings(), records_by_layer=rbl)
+    k_only = page._key_for_record(target.base)
     # (b) 다른 die 의 defect 들을 함께 추가(관측 범위가 크게 달라짐)
     others = [mk("/o1.jpg", 1, 4, 7497.0, 31062.0), mk("/o2.jpg", 3, 3, 100.0, 200.0)]
     rbl2 = {"LYA4": [target.base] + [o.base for o in others]}
-    dlg2 = HeatmapDialog([target] + others, "LYA4", [], None, lambda i: None, AppSettings(),
-                         records_by_layer=rbl2)
-    k_with = dlg2._key_for_record(target.base)
+    page2 = HeatmapPage()
+    page2.set_data([target] + others, "LYA4", [], settings=AppSettings(), records_by_layer=rbl2)
+    k_with = page2._key_for_record(target.base)
 
     assert (k_only.sub_col, k_only.sub_row) == (exp_sc, exp_sr)
     assert (k_with.sub_col, k_with.sub_row) == (exp_sc, exp_sr), "record 조합이 달라도 하위셀 불변"
     assert (k_only.col, k_only.row) == (0, 2)  # die 라벨은 physical 관측 좌표
 
 
-def test_heatmap_wafermap_row0_at_bottom_roundtrip(app):
-    """웨이퍼맵이 row 0 을 화면 맨 아래에 그리고(왼쪽아래 0,0), 클릭 히트테스트가 대칭."""
-    from app.ui.heatmap_dialog import HeatmapWaferMap
-    from app.heatmap import HeatKey
-    from PySide6.QtCore import QPoint
-
-    wm = HeatmapWaferMap()
-    density = {HeatKey(0, 0): 3, HeatKey(0, 3): 5}
-    wm.set_data(1, 4, None, False, density, origin=(0, 0))
-    # row 0 은 row 3 보다 화면상 아래(픽셀 y 가 큼)에 온다.
-    _, y0 = wm._die_origin(0, 0)
-    _, y3 = wm._die_origin(0, 3)
-    assert y0 > y3, "row 0 이 화면 맨 아래여야 한다"
-    # 왕복: 각 die 중심 픽셀을 클릭하면 원래 (col,row) 로 복원된다.
-    for col, row in [(0, 0), (0, 3)]:
-        ox, oy = wm._die_origin(col, row)
-        pt = QPoint(ox + wm._DIE_PX // 2, oy + wm._DIE_PX // 2)
-        key = wm._key_at(pt)
-        assert key is not None and (key.col, key.row) == (col, row)
-
-
 # ---- 8차: 히트맵 모드/드래그/클러스터 · 폴더트리 · 출력 · 도움말 ----
 
 def _make_heatmap(win):
-    from app.ui.heatmap_dialog import HeatmapDialog
-    return HeatmapDialog(
-        win.matches, win.top.base_layer(), win.top.compare_layers(),
-        win.thumb_cache, lambda idxs: None, win.settings,
-        records_by_layer=win.lot_index.records_by_layer(),
-    )
+    return _open_heatmap(win)
 
 
-def test_heatmap_default_wafer_is_all(win, app):
-    from app.ui.heatmap_dialog import _ALL_WAFERS
-    dlg = _make_heatmap(win)
-    assert dlg._current_wafer == _ALL_WAFERS
-    assert dlg.cmb_wafer.currentText() == _ALL_WAFERS
-
-
-def test_heatmap_no_base_all_layer_checkboxes(win, app):
-    # 기준 별표 없음 · '전체 defect' 토글 없음 · 모든 layer 가 체크박스(기준 포함).
-    dlg = _make_heatmap(win)
-    assert not hasattr(dlg, "btn_show_all")
-    assert dlg._base_layer in dlg._col_checks  # 기준도 체크박스로
-    assert all(cb.isChecked() for cb in dlg._col_checks.values())  # 기본 전체 체크
-    dlg.btn_multi.setChecked(True)
-    assert "ON" in dlg.btn_multi.text()
+def test_heatmap_investigates_every_selected_layer(win, app):
+    """기준 별표 없음 · '전체 defect' 토글 없음 · 모든 layer 가 칩(기준 포함)."""
+    page = _make_heatmap(win)
+    assert not hasattr(page, "btn_show_all")
+    assert page._base_layer in page._layer_on  # 기준도 칩으로
+    assert all(page._layer_on.values())        # 기본 전체 켜짐
 
 
 def _ancestor_ids(w):
@@ -656,13 +614,10 @@ def _ancestor_ids(w):
     return set(out)
 
 
-def test_heatmap_multi_button_below_map(win, app):
-    """여러 다이 선택 버튼이 (리스트 패널이 아니라) 웨이퍼 맵과 같은 패널 아래에 있다."""
-    dlg = _make_heatmap(win)
-    # btn_multi 와 맵 위젯이 같은 패널(맵 패널)을 공통 조상으로 가진다.
-    assert _ancestor_ids(dlg.btn_multi) & _ancestor_ids(dlg._map)
-    # 상세(리스트) 라벨과는 패널을 공유하지 않는다.
-    assert not (_ancestor_ids(dlg.btn_multi) & {id(dlg.lbl_detail)})
+def test_heatmap_multi_toggle_sits_with_the_map(win, app):
+    """여러 다이 선택은 (판독 카드가 아니라) 지도와 같은 카드 안에 있어야 한다."""
+    page = _make_heatmap(win)
+    assert _ancestor_ids(page.chk_multi) & _ancestor_ids(page.map)
 
 
 def test_heatmap_subdivide_is_5x5(app):
@@ -670,54 +625,66 @@ def test_heatmap_subdivide_is_5x5(app):
     assert (heatmap.SUB_COLS, heatmap.SUB_ROWS) == (5, 5)  # 25 분할
 
 
-def test_heatmap_uncheck_layer_reduces_map_entries(win, app):
-    # 조사 모드: 맵 density 는 체크된 layer 전체 defect. layer 를 끄면 entries 가 준다.
-    dlg = _make_heatmap(win)
-    full = len(dlg._map_entries())
-    # 비-기준 layer 하나 해제
-    others = [l for l in dlg._col_checks if l != dlg._base_layer]
+def test_heatmap_turning_a_layer_off_reduces_map_entries(win, app):
+    """조사 모드: 지도 밀도는 켜진 layer 의 defect 전체. layer 를 끄면 entries 가 준다."""
+    page = _make_heatmap(win)
+    full = len(page._map_entries())
+    others = [lyr for lyr in page._layer_on if lyr != page._base_layer]
     if others:
-        dlg._col_checks[others[0]].setChecked(False)
-        assert len(dlg._map_entries()) < full
+        page._on_layer_toggled(others[0], False)
+        assert len(page._map_entries()) < full
 
 
 def test_heatmap_add_targets_match_displayed_cross_layer_groups(win, app):
     """'출력에 넣기' 대상 개수가 화면에 표시된 교차매치 그룹(기준 layer 포함) 개수와 같아야 한다.
 
-    회귀: 예전엔 다이얼로그 생성 시점에 고정된 self._compare_layers 로 판정해(_is_matched),
-    화면에 실제 표시되는 교차매치 판정(_col_checks 기준, cross_layer_groups)과 어긋나
-    버튼 활성화가 들쭉날쭉하고 '넣기'를 눌러도 일부만 담겼다.
+    회귀: 예전엔 화면을 만들 때 고정된 compare_layers 로 판정해, 실제로 표시되는 교차매치
+    판정(켜진 layer 기준, cross_layer_groups)과 어긋나 버튼 활성화가 들쭉날쭉하고
+    '담기' 를 눌러도 일부만 담겼다.
     """
     from collections import defaultdict
     from app.clustering import cluster_records, cross_layer_groups
 
-    dlg = _make_heatmap(win)
-    dlg._selected_keys = list(dlg._groups.keys())
-    dlg._rebuild_detail()
+    page = _make_heatmap(win)
+    page._selected_keys = list(page._groups.keys())
+    page._rebuild_detail()
 
     by_layer = defaultdict(list)
-    for lyr, rec in dlg._records_at_selection():
+    for lyr, rec in page.records_at_selection():
         by_layer[lyr].append(rec)
     layer_to_clusters = {
-        lyr: cluster_records(recs, dlg._cluster_radius) for lyr, recs in by_layer.items()
+        lyr: cluster_records(recs, page._cluster_radius) for lyr, recs in by_layer.items()
     }
-    groups = cross_layer_groups(layer_to_clusters, dlg._tolerance)
-    matched_with_base = [g for g in groups if len(g) >= 2 and dlg._base_layer in g]
-    assert len(dlg._add_targets) == len(matched_with_base)
-    assert dlg.btn_add_all.isEnabled() == bool(matched_with_base)
+    groups = cross_layer_groups(layer_to_clusters, page._tolerance)
+    matched_with_base = [g for g in groups if len(g) >= 2 and page._base_layer in g]
+    assert len(page._add_targets) == len(matched_with_base)
+    assert page.btn_add.isEnabled() == bool(matched_with_base)
 
 
-def test_heatmap_add_targets_enable_consistent_across_selections(win, app):
-    """서로 다른 위치를 연속 선택해도 버튼 활성화가 매번 add_targets 유무와 일치해야 한다."""
-    dlg = _make_heatmap(win)
-    for k in dlg._groups.keys():
-        dlg._on_selection_changed([k])
-        assert dlg.btn_add_all.isEnabled() == bool(dlg._add_targets)
+def test_heatmap_add_button_explains_itself_when_nothing_to_add(win, app):
+    """담을 것이 없어도 버튼을 비활성으로 두지 않는다.
+
+    회귀 이력: 예전엔 활성화 판정이 화면에 그린 교차 그룹과 어긋나 버튼이 들쭉날쭉했다.
+    지금은 위치를 고르면 늘 누를 수 있고, 담을 것이 없으면 눌렀을 때 사유를 알려 준다.
+    비활성 버튼은 왜 안 되는지를 말해 주지 못한다.
+    """
+    page = _make_heatmap(win)
+    added = []
+    page._on_add = lambda idxs: added.extend(idxs)
+    for k in page._groups.keys():
+        page._on_selection_changed([k])
+        assert page.btn_add.isEnabled()
+        before = len(added)
+        page._add_current()
+        if page._add_targets:
+            assert len(added) > before
+        else:
+            assert len(added) == before
 
 
 def test_heatmap_map_caption_has_counts(win, app):
-    dlg = _make_heatmap(win)
-    txt = dlg.lbl_map.text()
+    page = _make_heatmap(win)
+    txt = page.lbl_total.text()
     assert "die" in txt and "defect" in txt
     assert "매치만" not in txt and "전체 defect" not in txt  # 모드 문구 제거됨
 
@@ -725,8 +692,8 @@ def test_heatmap_map_caption_has_counts(win, app):
 def test_heatmap_drag_box_selects_without_multi(win, app):
     import types
     from PySide6.QtCore import QPoint, Qt as _Qt
-    dlg = _make_heatmap(win)
-    m = dlg._map
+    page = _make_heatmap(win)
+    m = page.map
     assert m._multi is False
     dense = [k for k, c in m._density.items() if c > 0]
     if not dense:
@@ -736,18 +703,24 @@ def test_heatmap_drag_box_selects_without_multi(win, app):
     m._rubber_cur = QPoint(m.width(), m.height())
     m._dragging = True
     m.mouseReleaseEvent(types.SimpleNamespace(button=lambda: _Qt.LeftButton))
-    assert len(m._selected_keys) >= 1
+    assert len(m._selected) >= 1
 
 
 def test_heatmap_builds_cross_layer_detail(win, app):
-    dlg = _make_heatmap(win)
-    keys = list(dlg._groups.keys())
+    """고른 위치의 layer 교차 판독이 행으로 선다.
+
+    원본은 그룹마다 '교차매치' 초록 태그를 달았다. 재설계는 태그를 짝 없는 defect 하나로
+    줄였으므로(03-screens 3절) 여기서는 행이 서는 것과 위치 표기를 본다.
+    """
+    page = _make_heatmap(win)
+    keys = list(page._groups.keys())
     if not keys:
         return
-    dlg._selected_keys = keys[:2]
-    dlg._rebuild_detail()
-    txt = dlg.lbl_detail.text()
-    assert ("교차매치" in txt) or ("개별" in txt)
+    page._selected_keys = keys[:2]
+    page._rebuild_detail()
+    assert page._rows.count() >= 2, "교차 판독 행이 있어야 한다(행 + stretch)"
+    assert "선택 위치 판독" in page.lbl_read_title.text()
+    assert "교차매치" not in page.lbl_read_title.text()
 
 
 def test_folder_picker_tree_lazy_expand_and_click(app, tmp_path):
@@ -843,27 +816,27 @@ def test_compare_grid_shows_cluster_badge(app, tmp_path):
 
 def test_heatmap_selection_paint_smoke(win, app):
     from PySide6.QtGui import QPixmap, QPainter
-    dlg = _make_heatmap(win)
-    dlg._selected_keys = list(dlg._groups.keys())[:1]
-    dlg._map._selected_keys = set(dlg._selected_keys)
-    pm = QPixmap(dlg._map.width() or 200, dlg._map.height() or 200)
+
+    from app.ui import theme
+    page = _make_heatmap(win)
+    page._selected_keys = list(page._groups.keys())[:1]
+    page.map.set_selection(page._selected_keys)
+    pm = QPixmap(page.map.width() or 200, page.map.height() or 200)
     p = QPainter(pm)
-    dlg._map._paint_selection(p)  # 채움+이중외곽선 경로가 예외 없이 실행
+    # 채움 + 이중외곽선 경로가 예외 없이 실행돼야 한다(최고 밀도에서 링이 묻히는 회귀).
+    page.map._paint_selection(p, theme.fluent_tokens(False))
     p.end()
 
 
-def test_heatmap_individual_flow_section(win, app):
-    # 전체 defect 모드에서 개별(미매칭) 그룹이 FlowLayout 섹션으로 묶인다.
-    from app.ui.flow_layout import FlowLayout
-    dlg = _make_heatmap(win)
-    groups = [{"LYA4": _one_cluster("/x.jpg")}]  # 단일 layer → 개별
-    sec = dlg._make_individual_section(groups)
-    flows = [c for c in sec.findChildren(QWidget) if c.layout().__class__.__name__ == "FlowLayout"] \
-        if False else None
-    # 섹션 캡션에 '개별(미매칭)' 포함
+def test_heatmap_unmatched_group_is_the_only_tag(win, app):
+    """짝 없는 defect 만 태그를 단다. 교차매치에는 태그를 붙이지 않는다(03-screens 3절)."""
     from PySide6.QtWidgets import QLabel
-    labels = [l.text() for l in sec.findChildren(QLabel)]
-    assert any("개별(미매칭)" in t for t in labels)
+
+    page = _make_heatmap(win)
+    groups = [{"LYA4": _one_cluster("/x.jpg")}]  # 단일 layer -> 짝 없음
+    row = page._make_alone_row(groups)
+    labels = [lb.text() for lb in row.findChildren(QLabel)]
+    assert any("매치 없음" in t for t in labels)
 
 
 def _one_cluster(path):
@@ -1016,48 +989,44 @@ def test_main_matching_is_async(win, app):
     assert hasattr(win, "busy") and hasattr(win, "_match_token")
 
 
-def test_heatmap_fullscreen_uses_native_window_button(win, app):
-    """커스텀 버튼이 아니라 OS 제목표시줄의 진짜 최대화 버튼을 쓴다."""
-    from PySide6.QtCore import Qt as _Qt
-
-    dlg = _make_heatmap(win)
-    for _ in range(5):
-        QCoreApplication.processEvents()
-    assert not hasattr(dlg, "btn_fullscreen")
-    assert not hasattr(dlg, "_toggle_fullscreen")
-    assert dlg.windowFlags() & _Qt.WindowMaximizeButtonHint
-    assert dlg.isMaximized()
+def test_heatmap_is_a_route_not_a_window(win, app):
+    """히트맵은 창이 아니라 nav 라우트다. 최대화 버튼을 흉내 낼 것이 없다."""
+    page = _make_heatmap(win)
+    assert not hasattr(page, "btn_fullscreen")
+    assert not hasattr(page, "_toggle_fullscreen")
+    assert page.objectName() == "heatmapInterface"
+    assert win.stackedWidget.currentWidget() is page
 
 
 def test_heatmap_thumb_size_slider_default_30_percent(win, app):
     """사진 크기 슬라이더 기본값이 30%(기존 고정 크기 150px)와 같다."""
-    dlg = _make_heatmap(win)
-    assert dlg.sld_thumb.value() == 30
-    assert dlg._thumb_px == 150
-    dlg.sld_thumb.setValue(60)
-    assert dlg._thumb_px == 300
-    assert dlg.lbl_thumb_pct.text() == "60%"
+    page = _make_heatmap(win)
+    assert page.sld_thumb.value() == 30
+    assert page._thumb_px == 150
+    page.sld_thumb.setValue(60)
+    assert page._thumb_px == 300
+    assert page.lbl_thumb_pct.text() == "60%"
 
 
 def test_heatmap_thumb_size_slider_debounces_when_many_photos(win, app):
     """사진이 20장 넘으면 슬라이더가 멈춘 뒤(디바운스)에만 다시 그린다."""
-    dlg = _make_heatmap(win)
-    dlg._pending_thumbs = list(range(25))  # 20장 초과 흉내
-    dlg.sld_thumb.setValue(50)
-    assert dlg._thumb_px == 250  # 값 자체는 즉시 갱신
-    assert dlg._thumb_resize_timer.isActive()
-    assert dlg._pending_thumbs == list(range(25)), "타이머 만료 전엔 다시 그리면 안 된다"
-    dlg._thumb_resize_timer.timeout.emit()  # 슬라이더가 멈춘 뒤(디바운스 만료) 시뮬레이션
-    assert dlg._pending_thumbs == [], "만료되면 _rebuild_detail 이 호출돼야 한다"
+    page = _make_heatmap(win)
+    page._pending_thumbs = list(range(25))  # 20장 초과 흉내
+    page.sld_thumb.setValue(50)
+    assert page._thumb_px == 250  # 값 자체는 즉시 갱신
+    assert page._thumb_timer.isActive()
+    assert page._pending_thumbs == list(range(25)), "타이머 만료 전엔 다시 그리면 안 된다"
+    page._thumb_timer.timeout.emit()  # 슬라이더가 멈춘 뒤(디바운스 만료) 시뮬레이션
+    assert page._pending_thumbs == [], "만료되면 _rebuild_detail 이 호출돼야 한다"
 
 
 def test_heatmap_thumb_size_slider_immediate_when_few_photos(win, app):
     """사진이 20장 이하면 슬라이더를 움직일 때마다 바로 반영한다."""
-    dlg = _make_heatmap(win)
-    dlg._pending_thumbs = list(range(5))
-    dlg.sld_thumb.setValue(70)
-    assert not dlg._thumb_resize_timer.isActive()
-    assert dlg._pending_thumbs == [], "20장 이하면 즉시 _rebuild_detail 이 호출돼야 한다"
+    page = _make_heatmap(win)
+    page._pending_thumbs = list(range(5))
+    page.sld_thumb.setValue(70)
+    assert not page._thumb_timer.isActive()
+    assert page._pending_thumbs == [], "20장 이하면 즉시 _rebuild_detail 이 호출돼야 한다"
 
 
 def test_heatmap_detail_thumbs_deferred(win, app):

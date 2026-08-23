@@ -1,39 +1,56 @@
-"""설정 다이얼로그 — 작업공간/출력 폴더/기본 허용오차/업데이트 확인 (사용성).
+"""설정 다이얼로그 - 설정 페이지를 창에 띄우는 얇은 껍데기.
 
-OK 시 AppSettings 를 갱신·저장한다. 작업공간이 현재 LOT 내부면 경고하고 차단한다.
+내용은 `app/ui/pages/settings.py` 가 갖는다. nav 라우트로 옮긴 뒤에도 기존 호출부
+(`MainWindow._open_settings`)가 그대로 동작해야 해서 이 껍데기를 남긴다. 라우팅이 붙으면
+호출부는 페이지로 옮겨 가고 이 파일은 단계 9에서 지운다.
+
+페이지는 카드마다 즉시 반영이라 취소가 의미를 잃는다. 그래서 버튼은 '닫기' 하나이고,
+닫기 전에 저장 가능한 값인지(작업공간이 비었는지 · LOT 내부인지) 한 번 더 판정한다.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QFileDialog,
-    QFormLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
+from qfluentwidgets import PrimaryPushButton
 
-from app import __version__, config
 from app.config import AppSettings
-from app.safety import conflicting_source
 from app.ui import theme
+from app.ui.pages.settings import SettingsPage, ask_update, show_update_notice
+
+__all__ = ["SettingsDialog", "SettingsPage", "ask_update", "show_update_notice"]
+
+
+class _SwitchAlias:
+    """개발자 모드 토글의 옛 이름(`btn_dev`) 어댑터.
+
+    원본은 켜짐/꺼짐을 글자로 쓰는 QPushButton 이었고 지금은 SwitchButton 이다. SwitchButton
+    에서 `text` 는 메서드가 아니라 Property 라 `btn_dev.text()` 가 그대로는 깨진다. 호출부를
+    한꺼번에 바꾸면 회귀 원인을 분리할 수 없어 읽는 방법만 맞춰 준다.
+    """
+
+    def __init__(self, switch) -> None:
+        self._switch = switch
+
+    def text(self) -> str:
+        return self._switch.text
+
+    def isChecked(self) -> bool:  # noqa: N802 - Qt 관례 이름
+        return self._switch.isChecked()
+
+    def setChecked(self, checked: bool) -> None:  # noqa: N802 - Qt 관례 이름
+        self._switch.setChecked(checked)
+
+    def isEnabled(self) -> bool:  # noqa: N802 - Qt 관례 이름
+        return self._switch.isEnabled()
 
 
 class SettingsDialog(QDialog):
-    """설정 편집 다이얼로그."""
+    """설정 페이지를 담은 창."""
 
-    update_requested = Signal()  # "지금 업데이트 확인" 클릭 시
+    update_requested = Signal()  # "지금 업데이트/업데이트 확인" 클릭 시
 
     def __init__(
         self,
@@ -44,316 +61,67 @@ class SettingsDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("설정")
-        self.setMinimumWidth(560)
+        self.setMinimumSize(760, 640)
         self._settings = settings
-        self._current_lot = current_lot
-        self._update_available = update_available
-        self._wants_update = False
-        self._build()
 
-    def _build(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 18, 18, 14)
-        outer.setSpacing(12)
-
-        title = QLabel("설정")
-        title.setObjectName("title")
-        outer.addWidget(title)
-
-        form = QFormLayout()
-        form.setSpacing(10)
-
-        self.ed_workspace = QLineEdit(self._settings.workspace)
-        form.addRow("작업공간 폴더", self._with_browse(self.ed_workspace, self._pick_workspace))
-
-        self.ed_output = QLineEdit(self._settings.output_folder)
-        self.ed_output.setPlaceholderText("(비우면 작업공간/exports 사용)")
-        form.addRow("출력 폴더", self._with_browse(self.ed_output, self._pick_output))
-
-        # 디바이스 DB 파일(AOIDeviceDB.xlsx) — 있으면 제품 목록을 확장한다.
-        self.ed_device_db = QLineEdit(self._settings.device_db_path)
-        self.ed_device_db.setPlaceholderText("(선택) AOIDeviceDB.xlsx 경로")
-        form.addRow(
-            "디바이스 DB", self._with_browse(self.ed_device_db, self._pick_device_db)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.page = SettingsPage(
+            settings, current_lot, self, update_available=update_available
         )
+        outer.addWidget(self.page, 1)
+        self.page.update_requested.connect(self._on_page_update_requested)
 
-        # 제품 프로파일(좌표 변환 상수). 변경은 다음 스캔부터 적용.
-        from app.ui.controls import NoScrollComboBox
-        self.cmb_product = NoScrollComboBox()
-        self._reload_products(select=self._settings.product)
-        self.cmb_product.setToolTip("제품별 좌표 변환 상수 — 변경 후 다시 스캔(F5)하세요")
-        form.addRow("제품 프로파일", self.cmb_product)
-
-        # 경로를 '직접 입력/붙여넣기' 해도(찾아보기 없이) 제품 목록이 채워지도록,
-        # 편집이 끝나면 그 경로의 DB 를 읽어 콤보를 갱신한다.
-        self.ed_device_db.editingFinished.connect(self._on_device_db_edited)
-
-        # 시작 시 DB 경로가 있으면 미리 로드해 제품 목록을 채운다.
-        if self._settings.device_db_path:
-            self._load_db(self._settings.device_db_path, select=self._settings.product)
-
-        # 전체 UI 글자 크기(보통/크게).
-        self.cmb_font = NoScrollComboBox()
-        self.cmb_font.addItem("보통", userData="normal")
-        self.cmb_font.addItem("크게", userData="large")
-        fi = self.cmb_font.findData(getattr(self._settings, "ui_font_size", "normal"))
-        self.cmb_font.setCurrentIndex(fi if fi >= 0 else 0)
-        self.cmb_font.setToolTip(
-            "전체 UI 글자 크기입니다. 변경하면 대부분 즉시 적용되고, 다시 시작하면 완전히 적용됩니다."
+        footer = QWidget(self)
+        footer_lay = QVBoxLayout(footer)
+        footer_lay.setContentsMargins(
+            theme.SPACING["pageH"], 0, theme.SPACING["pageH"], theme.SPACING["gapM"]
         )
-        form.addRow("글자 크기", self.cmb_font)
-
-        self.chk_update = QCheckBox("시작할 때 업데이트 확인")
-        self.chk_update.setChecked(self._settings.auto_update_check)
-        form.addRow("자동 업데이트", self.chk_update)
-
-        # 수동 업데이트(사이드바에서 이동): 확인/적용 버튼
-        upd_host = QWidget()
-        upd_lay = QHBoxLayout(upd_host)
-        upd_lay.setContentsMargins(0, 0, 0, 0)
-        upd_lay.setSpacing(8)
-        self.btn_update = QPushButton(
-            "지금 업데이트" if self._update_available else "업데이트 확인"
-        )
-        if self._update_available:
-            self.btn_update.setObjectName("primary")
-        self.btn_update.setToolTip("최신 버전(메인 브랜치)으로 업데이트")
-        self.btn_update.clicked.connect(self._on_update_clicked)
-        self.lbl_update = QLabel(
-            "새 버전이 있습니다." if self._update_available else ""
-        )
-        self.lbl_update.setObjectName("dim")
-        upd_lay.addWidget(self.btn_update)
-        upd_lay.addWidget(self.lbl_update, 1)
-        form.addRow("업데이트", upd_host)
-
-        # 개발자 모드 토글 — 작은 켜짐/꺼짐 버튼. 켜면 아래 dev 섹션(로그 경로·로그 폴더)
-        # 이 나타나고, 저장 시 settings.dev_mode 에 기록된다. 환경변수 DEFECT_TRACKER_DEV
-        # 로 강제 켜진 경우엔 항상 켜짐으로 두고 토글을 비활성화한다.
-        self._dev_env_forced = config.dev_mode()  # settings=None → 환경변수만 반영
-        dev_on = self._dev_env_forced or bool(getattr(self._settings, "dev_mode", False))
-        self.btn_dev = QPushButton("켜짐" if dev_on else "꺼짐")
-        self.btn_dev.setObjectName("mini")
-        self.btn_dev.setCheckable(True)
-        self.btn_dev.setChecked(dev_on)
-        self.btn_dev.setToolTip("파일 로그·진단 리포트·로그 경로 설정을 켭니다.")
-        if self._dev_env_forced:
-            self.btn_dev.setEnabled(False)
-            self.btn_dev.setToolTip("환경변수 DEFECT_TRACKER_DEV 로 강제로 켜져 있습니다.")
-        self.btn_dev.toggled.connect(self._on_dev_toggled)
-        dev_host = QWidget()
-        dev_hl = QHBoxLayout(dev_host)
-        dev_hl.setContentsMargins(0, 0, 0, 0)
-        dev_hl.addWidget(self.btn_dev)
-        dev_hl.addStretch(1)
-        form.addRow("개발자 모드", dev_host)
-
-        # 단축키·도움말 보기(상단 밴드에서 이동).
-        self.btn_help = QPushButton("단축키 · 도움말 보기")
-        self.btn_help.clicked.connect(self._open_help)
-        form.addRow("도움말", self.btn_help)
-
-        outer.addLayout(form)
-
-        # 개발자 섹션(로그 저장 경로 · 로그 폴더 열기) — 토글로 표시/숨김.
-        self._dev_box = QWidget()
-        dev_form = QFormLayout(self._dev_box)
-        dev_form.setContentsMargins(0, 0, 0, 0)
-        dev_form.setSpacing(10)
-        self.ed_log_dir = QLineEdit(self._settings.log_dir)
-        self.ed_log_dir.setPlaceholderText("(비우면 작업공간/logs 사용)")
-        dev_form.addRow(
-            "로그 저장 경로", self._with_browse(self.ed_log_dir, self._pick_log_dir)
-        )
-        self.btn_logs = QPushButton("로그 폴더 열기")
-        self.btn_logs.setToolTip("좌표 추출 진단(parse_failures.md)과 실행 로그가 있는 폴더")
-        self.btn_logs.clicked.connect(self._open_logs)
-        dev_form.addRow("진단/로그", self.btn_logs)
-        self._dev_box.setVisible(dev_on)
-        outer.addWidget(self._dev_box)
-
-        self.lbl_err = QLabel("")
-        self.lbl_err.setStyleSheet("color:#f87171;")
-        self.lbl_err.setWordWrap(True)
-        self.lbl_err.setVisible(False)
-        outer.addWidget(self.lbl_err)
-
-        footer = QLabel(f"{config.APP_NAME}  ·  버전 {__version__}")
-        footer.setObjectName("dim")
+        size_key = getattr(settings, "ui_font_size", "normal")
+        self.btn_close = PrimaryPushButton("닫기", footer)
+        self.btn_close.setMinimumHeight(theme.fluent_height("primary", size_key))
+        self.btn_close.setDefault(True)
+        self.btn_close.clicked.connect(self._on_accept)
+        footer_lay.addWidget(self.btn_close, 0, Qt.AlignRight)
         outer.addWidget(footer)
 
-        credit = QLabel(config.CREDITS)
-        credit.setObjectName("dim")
-        credit.setStyleSheet(f"font-size:{theme.fpx(12)}px;")  # 만든이 문구 +20%
-        outer.addWidget(credit)
+        # 옛 이름 유지(호출부·기존 테스트 호환). 실제 위젯은 페이지가 갖는다.
+        self.ed_workspace = self.page.card_workspace
+        self.ed_output = self.page.card_output
+        self.ed_device_db = self.page.card_device_db
+        self.cmb_product = self.page.card_product.comboBox
+        self.cmb_font = self.page.card_font.segment
+        self.chk_update = self.page.card_update
+        self.btn_update = self.page.btn_update
+        self.btn_dev = _SwitchAlias(self.page.sw_dev)
+        self._dev_box = self.page._dev_box
+        self.btn_help = self.page.btn_help
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("저장")
-        buttons.button(QDialogButtonBox.Cancel).setText("취소")
-        buttons.accepted.connect(self._on_accept)
-        buttons.rejected.connect(self.reject)
-        outer.addWidget(buttons)
+    # ------------------------------------------------------------ 계약
+    def updated_settings(self) -> AppSettings:
+        """화면 값을 반영한 설정(저장은 호출 측)."""
+        return self.page.updated_settings()
 
-    def _on_dev_toggled(self, on: bool) -> None:
-        """개발자 모드 토글 — 버튼 라벨과 dev 섹션 표시를 갱신한다."""
-        self.btn_dev.setText("켜짐" if on else "꺼짐")
-        self._dev_box.setVisible(on)
-        self.adjustSize()
+    def wants_update(self) -> bool:
+        return self.page.wants_update()
 
-    def _open_help(self) -> None:
-        from app.ui.help_dialog import ShortcutsDialog
-        ShortcutsDialog(self).exec()
-
-    def _open_logs(self) -> None:
-        """진단/로그 폴더(로그 저장 경로, 비어 있으면 workspace/logs)를 파일 탐색기로 연다."""
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
-        log_dir = self.ed_log_dir.text().strip()
-        if log_dir:
-            logs = Path(log_dir)
-        else:
-            base = self.ed_workspace.text().strip() or self._settings.workspace
-            logs = Path(base) / "logs"
-        try:
-            logs.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(logs)))
-
-    def _with_browse(self, line: QLineEdit, handler) -> QWidget:
-        host = QWidget()
-        lay = QHBoxLayout(host)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
-        btn = QPushButton("찾아보기")
-        btn.clicked.connect(handler)
-        lay.addWidget(line, 1)
-        lay.addWidget(btn)
-        return host
-
-    def _reload_products(self, select: str | None = None) -> None:
-        """config.PRODUCTS 로 제품 콤보를 다시 채운다.
-
-        익명 기본 프로파일(DEFAULT_PRODUCT, 표시명 'DEVA Live')은 실제 디바이스가 아니라
-        내부 폴백이므로 목록에 노출하지 않고, 대신 '(자동 인식)' 항목으로 대체한다. 이
-        항목을 고르면 기본 프로파일이 유지되며 저장 시 LOT 경로로 디바이스를 자동 인식한다.
-        """
-        self.cmb_product.blockSignals(True)
-        self.cmb_product.clear()
-        self.cmb_product.addItem("(자동 인식)", userData=config.DEFAULT_PRODUCT)
-        for key, prod in config.PRODUCTS.items():
-            if key == config.DEFAULT_PRODUCT:
-                continue
-            self.cmb_product.addItem(f"{prod.name} ({key})", userData=key)
-        if select:
-            idx = self.cmb_product.findData(select)
-            if idx >= 0:
-                self.cmb_product.setCurrentIndex(idx)
-        self.cmb_product.blockSignals(False)
-
-    def _load_db(self, path: str, select: str | None = None) -> None:
-        from pathlib import Path
-
-        if not path or not Path(path).exists():
-            return
-        try:
-            from app.device_db import load_device_db
-
-            profiles = load_device_db(path)
-            config.register_devices(profiles)
-            self._reload_products(select=select or self.cmb_product.currentData())
-            if hasattr(self, "lbl_err"):
-                self.lbl_err.setStyleSheet("color:#6ec59a;")
-                self.lbl_err.setText(f"디바이스 {len(profiles)}개 로드됨")
-                self.lbl_err.setVisible(True)
-        except Exception as exc:  # noqa: BLE001
-            self._error(f"디바이스 DB 로드 실패: {exc}")
-
-    def _on_device_db_edited(self) -> None:
-        """디바이스 DB 경로를 직접 입력/붙여넣기로 바꾼 뒤(찾아보기 없이) 제품 목록 갱신."""
-        path = self.ed_device_db.text().strip()
-        if path:
-            self._load_db(path)
-
-    def _pick_device_db(self) -> None:
-        from pathlib import Path
-
-        start = self.ed_device_db.text() or self.ed_workspace.text() or str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(
-            self, "디바이스 DB(AOIDeviceDB.xlsx) 선택", start, "Excel 파일 (*.xlsx)"
-        )
-        if path:
-            self.ed_device_db.setText(path)
-            self._load_db(path)
-
-    def _pick_workspace(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "작업공간 폴더 선택", self.ed_workspace.text() or str(Path.home())
-        )
-        if folder:
-            self.ed_workspace.setText(folder)
-
-    def _pick_output(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "출력 폴더 선택", self.ed_output.text() or self.ed_workspace.text()
-        )
-        if folder:
-            self.ed_output.setText(folder)
-
-    def _pick_log_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "로그 저장 경로 선택", self.ed_log_dir.text() or self.ed_workspace.text()
-        )
-        if folder:
-            self.ed_log_dir.setText(folder)
-
-    def _on_accept(self) -> None:
-        workspace = self.ed_workspace.text().strip()
-        output = self.ed_output.text().strip()
-        log_dir = self.ed_log_dir.text().strip()
-        if not workspace:
-            self._error("작업공간 폴더를 지정하세요.")
-            return
-        # 원본 보호: 작업공간/출력/로그 경로가 현재 LOT 내부면 차단.
-        if self._current_lot:
-            targets = [
-                (workspace, "작업공간"),
-                (output or workspace, "출력"),
-            ]
-            if self.btn_dev.isChecked():  # 개발자 모드에서만 로그 경로 사용
-                targets.append((log_dir or workspace, "로그"))
-            for target, label in targets:
-                if conflicting_source(target, [self._current_lot]) is not None:
-                    self._error(
-                        f"{label} 폴더가 현재 LOT 폴더 내부에 있습니다. 원본 보호를 위해 "
-                        "원본 밖의 폴더를 선택하세요."
-                    )
-                    return
-        self.accept()
-
-    def _on_update_clicked(self) -> None:
-        """현재 입력값을 먼저 저장 의도로 반영하고 업데이트를 요청하며 닫는다."""
-        self._wants_update = True
+    def _on_page_update_requested(self) -> None:
+        """업데이트 요청은 창의 비동기 흐름이 처리하므로 값만 넘기고 닫는다."""
         self.updated_settings()
         self.update_requested.emit()
         self.accept()
 
-    def wants_update(self) -> bool:
-        return self._wants_update
+    def _on_update_clicked(self) -> None:
+        self.page._on_update_clicked()
 
-    def _error(self, msg: str) -> None:
-        self.lbl_err.setText(msg)
-        self.lbl_err.setVisible(True)
+    def _on_accept(self) -> None:
+        message = self.page.validate()
+        if message:
+            self.page._error(message)
+            return
+        self.updated_settings()
+        self.accept()
 
-    def updated_settings(self) -> AppSettings:
-        """다이얼로그 입력을 반영한 설정(저장은 호출 측)."""
-        self._settings.workspace = self.ed_workspace.text().strip()
-        self._settings.output_folder = self.ed_output.text().strip()
-        self._settings.log_dir = self.ed_log_dir.text().strip()
-        self._settings.dev_mode = self.btn_dev.isChecked()
-        self._settings.auto_update_check = self.chk_update.isChecked()
-        self._settings.product = self.cmb_product.currentData() or config.DEFAULT_PRODUCT
-        self._settings.device_db_path = self.ed_device_db.text().strip()
-        self._settings.ui_font_size = self.cmb_font.currentData() or "normal"
-        return self._settings
+    def _error(self, message: str) -> None:
+        self.page._error(message)
