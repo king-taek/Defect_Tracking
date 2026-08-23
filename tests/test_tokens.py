@@ -5,9 +5,9 @@ design_handoff_fluent_redesign/02-design-rules.md 의 게이트를 코드로 못
 - 게이트 2: accent 3역할 분리(fill / onAccent / text)
 - 글자 크기 large 에서 높이는 표 값으로 오르고 radius·gap 은 그대로(REVIEW-01 A9)
 
-라이트 테마 4쌍은 현재 게이트 미달이며 QUESTIONS-02 로 질의 중이다. 답이 오기 전까지
-strict xfail 로 남겨 둔다. 토큰을 고쳐 통과시키면 XPASS 로 즉시 드러나므로,
-그때 이 표식을 지우면서 QUESTIONS-02 결론을 함께 반영해야 한다.
+REVIEW-02 로 라이트 4쌍(accent 채움 + 상태색 3종)이 확정값으로 해소됐다. 남은 strict xfail 은
+경계선 하위 기준 4쌍이며 QUESTIONS-03 답변 대기 중이다. 토큰을 고쳐 통과시키면 XPASS 로 즉시
+드러나므로, 그때 표식을 지우면서 결론을 함께 반영해야 한다.
 """
 
 from __future__ import annotations
@@ -18,12 +18,13 @@ import pytest
 from app.ui import theme
 
 
-# QUESTIONS-02 답변 대기 중인 쌍 (라이트 전용, 측정값 기준)
-_PENDING = {
-    ("light", "onAccent", "accentFill"),
-    ("light", "pass", "passBg"),
-    ("light", "warn", "warnBg"),
-    ("light", "danger", "dangerBg"),
+# QUESTIONS-03 답변 대기: A17 하위 기준(3.0)을 경계선 토큰에 적용하면 전부 미달한다.
+# Fluent 경계는 의도적으로 알파 .058~.16 이라 1.13~1.69 수준이다.
+_SUBGATE_PENDING = {
+    ("ctrlBd", "ctrlBg"),
+    ("ctrlBdBottom", "ctrlBg"),
+    ("cardBorder", "layer"),
+    ("cardBorderH", "layer"),
 }
 
 # 읽어야 하는 텍스트 조합 전수. txtDeco 는 장식 전용이라 게이트 대상이 아니다.
@@ -53,16 +54,8 @@ def _case_id(dark: bool, fg: str, bg: str) -> str:
 
 @pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
 @pytest.mark.parametrize("fg,bg", _PAIRS, ids=[f"{f}-on-{b}" for f, b in _PAIRS])
-def test_contrast_gate(request, dark: bool, fg: str, bg: str) -> None:
+def test_contrast_gate(dark: bool, fg: str, bg: str) -> None:
     tokens = theme.fluent_tokens(dark)
-    key = ("dark" if dark else "light", fg, bg)
-    if key in _PENDING:
-        request.node.add_marker(
-            pytest.mark.xfail(
-                strict=True,
-                reason="QUESTIONS-02 답변 대기 (라이트 테마 게이트 미달)",
-            )
-        )
     ratio = theme.contrast(tokens[fg], _resolved_bg(tokens, bg))
     assert ratio >= theme.CONTRAST_GATE, (
         f"{_case_id(dark, fg, bg)} = {ratio:.2f} (게이트 {theme.CONTRAST_GATE})"
@@ -99,14 +92,16 @@ def test_parse_rgba_formats() -> None:
 
 
 def test_accent_three_roles_exact_values() -> None:
-    """게이트 2. 채움과 글자에 같은 색을 쓰지 않는다."""
+    """게이트 2 + REVIEW-02 A15 확정값. 채움과 글자에 같은 색을 쓰지 않는다."""
     light = theme.accent_roles(dark=False)
     dark = theme.accent_roles(dark=True)
 
-    assert light["fill"] == "#0078D4"
+    # 구 #0078D4 는 흰 글자와 4.53 이라 게이트 미달이었다
+    assert light["fill"] == "#0067B8"
+    assert light["hover"] == "#005A9E"
+    assert light["pressed"] == "#004C85"
     assert light["onAccent"] == "#FFFFFF"
     assert light["text"] == "#005A9E"
-    assert light["pressed"] == "#005A9E"
 
     assert dark["fill"] == "#4CC2FF"
     # 다크에서 채움 위 흰 글자는 2.01:1 이라 near-black 을 쓴다
@@ -125,17 +120,63 @@ def test_dark_accent_fill_with_white_text_is_the_trap_we_avoid() -> None:
     assert theme.contrast(dark["onAccent"], dark["fill"]) >= theme.CONTRAST_GATE
 
 
-def test_accent_roles_derive_for_custom_base() -> None:
-    light = theme.accent_roles(dark=False, base="#8B5CF6")
-    dark = theme.accent_roles(dark=True, base="#8B5CF6")
+@pytest.mark.parametrize("preset", ["#0078D4", "#009FAA", "#8B5CF6"])
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+def test_accent_preset_states_pass_the_gate(preset: str, dark: bool) -> None:
+    """REVIEW-02 A17. 프리셋 3종 x 라이트·다크 = 6조합을 회귀로 고정한다.
 
-    assert light["fill"] == "#8B5CF6"
-    assert light["onAccent"] == "#FFFFFF"
-    assert dark["onAccent"] == "#16140F"
-    # 글자용 accent 는 채움보다 어둡고(라이트), 채움은 다크에서 더 밝다
-    assert theme.relative_luminance(light["text"]) < theme.relative_luminance(light["fill"])
-    assert theme.relative_luminance(dark["fill"]) > theme.relative_luminance("#8B5CF6")
-    assert light["tint"].startswith("rgba(139,92,246,")
+    채움뿐 아니라 hover·pressed 에서도 게이트가 유지되어야 한다. 상태에서 채움이 움직이므로
+    onAccent 를 흰색으로 쓰는 어두운 채움은 더 어둡게, near-black 을 쓰는 밝은 채움은 더 밝게
+    가야 한다.
+    """
+    roles = theme.accent_roles(dark, preset)
+    for state in ("fill", "hover", "pressed"):
+        ratio = theme.contrast(roles["onAccent"], roles[state])
+        assert ratio >= theme.CONTRAST_GATE, f"{preset} {state} = {ratio:.2f}"
+
+
+def test_accent_preset_light_values_match_review_02() -> None:
+    """REVIEW-02 A15 가 제시한 라이트 확정 채움."""
+    assert theme.accent_roles(False, "#0078D4")["fill"] == "#0067B8"
+    assert theme.accent_roles(False, "#009FAA")["fill"] == "#009FAA"
+    assert theme.accent_roles(False, "#8B5CF6")["fill"] == "#7B3FE4"
+    # 밝은 청록은 라이트에서도 near-black 글자가 맞다(테마가 아니라 밝기로 고른다)
+    assert theme.accent_roles(False, "#009FAA")["onAccent"] == theme.ONACCENT_DARK
+    assert theme.accent_roles(False, "#0078D4")["onAccent"] == theme.ONACCENT_LIGHT
+
+
+@pytest.mark.parametrize(
+    "base",
+    ["#FFFF00", "#00FF00", "#FF00FF", "#000000", "#FFFFFF", "#808080", "#FF6B00", "#123456"],
+)
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+def test_accent_rule_holds_the_gate_for_any_color(base: str, dark: bool) -> None:
+    """규칙 안전망. 임의 색을 넣어도 게이트를 넘겨야 한다.
+
+    다크에서 명도가 이미 최대인 고채도 색은 더 밝힐 수 없으므로 채도를 낮춰 이어간다.
+    이 확장이 없으면 반복만 소진하고 미달로 빠져나온다.
+    """
+    roles = theme.resolve_accent(base, dark)
+    page = theme.fluent_tokens(dark)["card"]
+    for state in ("fill", "hover", "pressed"):
+        ratio = theme.contrast(roles["onAccent"], roles[state])
+        assert ratio >= theme.CONTRAST_GATE, f"{base} {state} = {ratio:.2f}"
+    text_ratio = theme.contrast(roles["text"], theme.flatten(page))
+    assert text_ratio >= theme.CONTRAST_GATE, f"{base} text = {text_ratio:.2f}"
+
+
+def test_status_colors_match_review_02() -> None:
+    """REVIEW-02 A16. 라이트 글자만 여유값으로 교체하고 배경·다크는 유지."""
+    light = theme.STATUS_LIGHT
+    assert (light["pass"], light["warn"], light["danger"]) == ("#0B6A0B", "#8A5200", "#B02218")
+    assert (light["passBg"], light["warnBg"], light["dangerBg"]) == (
+        "#DFF6DD", "#FFF4CE", "#FDE7E9",
+    )
+    dark = theme.STATUS_DARK
+    assert (dark["pass"], dark["warn"], dark["danger"]) == ("#6CCB70", "#FFD68A", "#FF99A4")
+    # 판정을 나르는 색이라 최소변경(5.0 언저리)이 아니라 여유가 있어야 한다
+    for fg, bg in (("pass", "passBg"), ("warn", "warnBg"), ("danger", "dangerBg")):
+        assert theme.contrast(light[fg], light[bg]) >= 5.7
 
 
 def test_light_and_dark_expose_the_same_token_keys() -> None:
@@ -211,3 +252,78 @@ def test_token_values_are_parseable_colors() -> None:
         for key, value in theme.fluent_tokens(dark).items():
             assert isinstance(key, str) and key
             theme.parse_rgba(value)  # 형식 오류면 여기서 실패
+
+
+# ---- REVIEW-02 A17: 비텍스트 하위 기준 + 게이트 대상 정의 ----
+
+_FOCUS_BACKGROUNDS = ["card", "layer", "win"]
+
+
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+@pytest.mark.parametrize("bg", _FOCUS_BACKGROUNDS)
+def test_focus_ring_meets_subgate(dark: bool, bg: str) -> None:
+    """포커스 링은 조작에 필요한 요소라 하위 기준 3.0 을 넘어야 한다."""
+    tokens = theme.fluent_tokens(dark)
+    ratio = theme.contrast(tokens["accentFill"], _resolved_bg(tokens, bg))
+    assert ratio >= theme.SUBGATE_CONTRAST, f"focus ring on {bg} = {ratio:.2f}"
+
+
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+@pytest.mark.parametrize("fg,bg", sorted(_SUBGATE_PENDING), ids=lambda v: str(v))
+def test_control_borders_meet_subgate(request, dark: bool, fg: str, bg: str) -> None:
+    """경계선 하위 기준. 현재 Fluent 확정 토큰으로는 못 넘는다(QUESTIONS-03).
+
+    ctrlBg 는 그 자체가 반투명이라 페이지 면 위에 먼저 깔고 계산한다.
+    """
+    request.node.add_marker(
+        pytest.mark.xfail(strict=True, reason="QUESTIONS-03 답변 대기 (경계선 하위 기준)")
+    )
+    tokens = theme.fluent_tokens(dark)
+    base = theme.flatten(tokens[bg], tokens["layer"]) if bg == "ctrlBg" else _resolved_bg(tokens, bg)
+    ratio = theme.contrast(tokens[fg], base)
+    assert ratio >= theme.SUBGATE_CONTRAST, f"{fg} on {bg} = {ratio:.2f}"
+
+
+def test_photo_stage_text_passes_the_gate() -> None:
+    """순검정 무대 위 텍스트는 별도 쌍으로 검사한다(A17 대상 목록)."""
+    for alpha, label in ((".62", "매치 없음"), (".66", "사유"), (".55", "스케일바 라벨")):
+        ratio = theme.contrast(f"rgba(255,255,255,{alpha})", theme.PHOTO_BG)
+        assert ratio >= theme.CONTRAST_GATE, f"{label} = {ratio:.2f}"
+
+
+def test_subgate_constant_matches_review_02() -> None:
+    assert theme.SUBGATE_CONTRAST == 3.0
+    assert theme.ACCENT_CLAMP_TARGET == theme.CONTRAST_GATE
+
+
+# ---- REVIEW-02 AD6: txtDeco 오용 방지 정적 검사 ----
+
+_TXTDECO_ALLOWED = (
+    "app/ui/theme.py",  # 토큰 정의 자체
+)
+
+
+def test_txtdeco_is_only_used_for_separators() -> None:
+    """게이트에서 빼는 대가로 사용처를 고정한다(AD6).
+
+    허용: 구분자, 수치 분모, 페이지 경계 라벨. 그 외에서 참조하면 실패한다.
+    실제로 분모에 쓴 값이 2.66:1 까지 떨어진 사례가 보고됐다.
+    """
+    import pathlib
+
+    root = pathlib.Path(theme.__file__).resolve().parents[2]
+    offenders = []
+    for path in sorted((root / "app" / "ui").rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel in _TXTDECO_ALLOWED:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "txtDeco" not in line:
+                continue
+            if any(hint in line for hint in ("구분자", "분모", "페이지 경계", "separator")):
+                continue
+            offenders.append(f"{rel}:{number}")
+    assert not offenders, (
+        "txtDeco 는 구분자·분모·페이지 경계 라벨에만 쓴다. 용도를 주석으로 남기거나 "
+        f"txt2/txt3 을 쓰세요: {offenders}"
+    )

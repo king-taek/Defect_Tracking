@@ -438,17 +438,24 @@ FLUENT_DARK: dict[str, str] = {
     "subtleH": "rgba(255,255,255,.06)",
 }
 
-# ---- 색: accent 3역할 분리 (02 §1.3, 게이트 2) ----
+# ---- 색: accent 3역할 분리 (02 §1.3 + REVIEW-02 A15, 게이트 2) ----
 # 채움(fill) 위의 글자는 반드시 onAccent, 글자·글리프로 쓰는 accent 는 반드시 text.
-ACCENT_BASE = "#0078D4"
+#
+# REVIEW-02 A15: onAccent 를 테마가 아니라 "채움의 밝기"로 고른다. 다크에서 near-black 을 쓰는
+# 이유는 밝은 채움 위에 흰 글자가 안 읽히기 때문이지 테마 때문이 아니다. 그래서 라이트에서도
+# 밝은 accent(#009FAA 등)를 고르면 near-black 이 맞다. resolve_accent() 가 이 규칙을 구현한다.
+ACCENT_BASE = "#0067B8"
+
+ONACCENT_LIGHT = "#FFFFFF"
+ONACCENT_DARK = "#16140F"
 
 ACCENT_LIGHT: dict[str, str] = {
-    "fill": "#0078D4",
-    "hover": "#106EBE",
-    "pressed": "#005A9E",
+    "fill": "#0067B8",   # REVIEW-02 A15. 구 #0078D4 는 흰 글자와 4.53 으로 게이트 미달
+    "hover": "#005A9E",
+    "pressed": "#004C85",
     "onAccent": "#FFFFFF",
     "text": "#005A9E",
-    "tint": "rgba(0,120,212,.09)",
+    "tint": "rgba(0,103,184,.09)",
 }
 
 ACCENT_DARK: dict[str, str] = {
@@ -461,12 +468,14 @@ ACCENT_DARK: dict[str, str] = {
 }
 
 # ---- 색: 상태 (02 §1.4) ----
+# REVIEW-02 A16. 라이트 글자만 여유값으로 교체하고 배경 3색과 다크는 그대로 둔다.
+# 구 값(#0F7B0F / #9D5D00 / #C42B1E)은 4.76~4.79 로 게이트 미달이었다.
 STATUS_LIGHT: dict[str, str] = {
-    "pass": "#0F7B0F",
+    "pass": "#0B6A0B",
     "passBg": "#DFF6DD",
-    "warn": "#9D5D00",
+    "warn": "#8A5200",
     "warnBg": "#FFF4CE",
-    "danger": "#C42B1E",
+    "danger": "#B02218",
     "dangerBg": "#FDE7E9",
     "info": ACCENT_LIGHT["text"],
     "infoBg": "#F4F9FE",
@@ -553,6 +562,10 @@ TOOLTIP_DELAY_MS = 300
 
 # 대비 게이트(게이트 1). 텍스트/배경 전 조합이 이 값 이상이어야 한다.
 CONTRAST_GATE = 5.0
+# 비텍스트 하위 기준(REVIEW-02 A17). 포커스 링·선택 링처럼 조작에 필요한 요소에 적용한다.
+SUBGATE_CONTRAST = 3.0
+# accent 채움을 자동 조정할 때 목표로 삼는 대비. 게이트와 같은 값에서 멈춘다.
+ACCENT_CLAMP_TARGET = CONTRAST_GATE
 
 
 # ---- 색 계산 (Qt 없이 동작) ----
@@ -646,35 +659,164 @@ def _shift_value(color: str, factor: float) -> str:
     return to_hex((nr * 255.0, ng * 255.0, nb * 255.0))
 
 
+def _hsv(color: str) -> tuple[float, float, float]:
+    r, g, b, _a = parse_rgba(color)
+    return colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+
+
+def _from_hsv(h: float, s: float, v: float) -> str:
+    r, g, b = colorsys.hsv_to_rgb(h, max(0.0, min(1.0, s)), max(0.0, min(1.0, v)))
+    return to_hex((r * 255.0, g * 255.0, b * 255.0))
+
+
+def _best_on_accent(fill: str) -> tuple[str, float]:
+    """채움 위 글자를 흰색/near-black 중 대비가 큰 쪽으로 고른다(REVIEW-02 A15)."""
+    white = contrast(ONACCENT_LIGHT, fill)
+    black = contrast(ONACCENT_DARK, fill)
+    return (ONACCENT_LIGHT, white) if white >= black else (ONACCENT_DARK, black)
+
+
+def _clamp_accent_fill(base: str, dark: bool, target: float) -> tuple[str, str, float]:
+    """게이트를 넘을 때까지 채움을 조정한다.
+
+    라이트는 어둡게, 다크는 밝게 옮긴다. 다크에서 명도가 이미 최대인 고채도 색은 더 밝힐 수
+    없으므로 채도를 낮춰 이어간다(문서화된 다크 accent #4CC2FF 가 채도 낮은 파랑인 것과 같은 원리).
+    이 확장이 없으면 고채도 accent 는 반복만 소진하고 게이트 미달로 빠져나온다.
+    """
+    fill = to_hex(parse_rgba(base)[:3])
+    on, ratio = _best_on_accent(fill)
+    for _ in range(60):
+        if ratio >= target:
+            break
+        h, sat, val = _hsv(fill)
+        if dark:
+            if val < 0.999:
+                val = min(1.0, max(val * 1.06, 0.04))
+            elif sat > 0.0:
+                sat = sat * 0.94
+            else:
+                break
+        else:
+            if val > 0.0:
+                val = val / 1.06
+            else:
+                break
+        fill = _from_hsv(h, sat, val)
+        on, ratio = _best_on_accent(fill)
+    return fill, on, ratio
+
+
+def _clamp_accent_text(fill: str, dark: bool, target: float) -> str:
+    """글자로 쓰는 accent 를 페이지 면 대비 게이트까지 옮긴다.
+
+    라이트는 어둡게, 다크는 밝게. 채움과 같은 색을 글자에 그대로 쓰면 밝은 accent(청록 등)에서
+    본문 대비가 무너진다(게이트 2의 3역할 분리가 필요한 이유).
+    """
+    page = FLUENT_DARK["card"] if dark else FLUENT_LIGHT["card"]
+    text = fill
+    for _ in range(60):
+        if contrast(text, page) >= target:
+            break
+        h, sat, val = _hsv(text)
+        if dark:
+            if val < 0.999:
+                val = min(1.0, max(val * 1.06, 0.04))
+            elif sat > 0.0:
+                sat = sat * 0.94
+            else:
+                break
+        else:
+            if val > 0.0:
+                val = val / 1.06
+            else:
+                break
+        text = _from_hsv(h, sat, val)
+    return text
+
+
+def resolve_accent(base: str, dark: bool, target: float | None = None) -> dict[str, str]:
+    """어떤 accent 를 받아도 게이트를 지키는 3역할을 돌려준다(REVIEW-02 A15).
+
+    hover·pressed 는 onAccent 선택을 따라 방향을 정한다. 흰 글자를 쓰는 어두운 채움은 더 어둡게,
+    near-black 글자를 쓰는 밝은 채움은 더 밝게 옮겨야 상태 변화에서도 대비가 유지된다.
+    """
+    goal = ACCENT_CLAMP_TARGET if target is None else target
+    fill, on, _ratio = _clamp_accent_fill(base, dark, goal)
+    h, sat, val = _hsv(fill)
+    r, g, b, _a = parse_rgba(fill)
+    rgb = f"{round(r)},{round(g)},{round(b)}"
+    lighten_states = on == ONACCENT_DARK
+    if lighten_states:
+        hover = _from_hsv(h, sat, val * 1.12)
+        pressed = _from_hsv(h, sat, val * 1.26)
+    else:
+        hover = _from_hsv(h, sat, val / 1.12)
+        pressed = _from_hsv(h, sat, val / 1.26)
+    return {
+        "fill": fill,
+        "hover": hover,
+        "pressed": pressed,
+        "onAccent": on,
+        "text": _clamp_accent_text(fill, dark, goal),
+        "tint": f"rgba({rgb},{'.13' if dark else '.09'})",
+    }
+
+
+# 프로토타입이 제공하는 accent 프리셋의 확정값(REVIEW-02 A15 표).
+# 키는 사용자가 고르는 원래 색, 값은 게이트를 통과하는 확정 3역할.
+ACCENT_PRESETS: dict[str, dict[bool, dict[str, str]]] = {
+    "#0078D4": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},
+    "#0067B8": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},
+    "#009FAA": {
+        False: {
+            "fill": "#009FAA",
+            "hover": "#00B3BF",   # 밝은 채움 + near-black 글자라 hover 는 밝은 쪽으로
+            "pressed": "#00C8D6",
+            "onAccent": ONACCENT_DARK,
+            "text": "#00676E",    # 글자용은 카드 대비 게이트까지 어둡게
+            "tint": "rgba(0,159,170,.09)",
+        },
+        True: {
+            "fill": "#4FD3DC",
+            "hover": "#4FD3DC",
+            "pressed": "#3FB8C0",
+            "onAccent": ONACCENT_DARK,
+            "text": "#4FD3DC",
+            "tint": "rgba(79,211,220,.13)",
+        },
+    },
+    "#8B5CF6": {
+        False: {
+            "fill": "#7B3FE4",
+            "hover": "#6E39CB",
+            "pressed": "#6231B5",
+            "onAccent": ONACCENT_LIGHT,
+            "text": "#6231B5",
+            "tint": "rgba(123,63,228,.09)",
+        },
+        True: {
+            "fill": "#C4A8FF",
+            "hover": "#C4A8FF",
+            "pressed": "#AB8FE6",
+            "onAccent": ONACCENT_DARK,
+            "text": "#C4A8FF",
+            "tint": "rgba(196,168,255,.13)",
+        },
+    },
+}
+
+
 def accent_roles(dark: bool = False, base: str = ACCENT_BASE) -> dict[str, str]:
     """accent 3역할(fill / onAccent / text)과 hover·pressed·tint 를 돌려준다.
 
-    기본 accent 는 02 §1.3 의 확정값 표를 그대로 쓴다. 사용자가 accent 를 바꾸면
-    같은 관계(다크는 밝게, 라이트는 글자용을 어둡게)로 파생한다.
+    프리셋은 확정 표를, 그 외 색은 resolve_accent() 규칙을 쓴다. 어느 경로든 채움 위 글자는
+    게이트를 넘는다.
     """
-    if parse_rgba(base)[:3] == parse_rgba(ACCENT_BASE)[:3]:
-        return dict(ACCENT_DARK if dark else ACCENT_LIGHT)
-
-    r, g, b, _a = parse_rgba(base)
-    rgb = f"{round(r)},{round(g)},{round(b)}"
-    if dark:
-        lifted = _shift_value(base, 1.60)
-        return {
-            "fill": lifted,
-            "hover": lifted,
-            "pressed": _shift_value(base, 1.30),
-            "onAccent": "#16140F",
-            "text": lifted,
-            "tint": f"rgba({rgb},.13)",
-        }
-    return {
-        "fill": to_hex((r, g, b)),
-        "hover": _shift_value(base, 0.89),
-        "pressed": _shift_value(base, 0.77),
-        "onAccent": "#FFFFFF",
-        "text": _shift_value(base, 0.77),
-        "tint": f"rgba({rgb},.09)",
-    }
+    key = to_hex(parse_rgba(base)[:3]).upper()
+    preset = ACCENT_PRESETS.get(key)
+    if preset is not None:
+        return dict(preset[bool(dark)])
+    return resolve_accent(base, bool(dark))
 
 
 def fluent_tokens(dark: bool = False, accent: str = ACCENT_BASE) -> dict[str, str]:

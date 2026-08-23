@@ -64,6 +64,22 @@ Qt 런타임 시스템 라이브러리 = libegl1 libgl1 libxkbcommon0 libdbus-1-
 | Q13 Excel 200블록 | **분할 미구현 + 출력 전 경고** | `EXPORT_WARN_BLOCKS = 200`, REVIEW 확정 문구 |
 | Q14 CommandBar | 승인(QHBox) | A14 시각 고정값 준수 |
 
+## 1-2. REVIEW-02 결정 반영 (QUESTIONS-02 답변)
+
+| 질의 | 결정 | 반영 |
+|---|---|---|
+| Q15 accent 채움 | A/B 대신 **규칙**: onAccent 를 휘도로 선택 + 미달 시 채움 자동 조정. 라이트 기본 `#0067B8` | `theme.resolve_accent()` 신설, `ACCENT_PRESETS` 표 고정. 규칙은 게이트, 기본 hex 는 권장 |
+| Q16 상태색 | **B 여유값**: `#0B6A0B` / `#8A5200` / `#B02218`, 배경·다크 유지 | `STATUS_LIGHT` 교체, 5.7 이상 회귀로 고정 |
+| Q17 게이트 대상 | 제안 승인 + 비텍스트 하위 기준 3.0 + 제외 목록 | `SUBGATE_CONTRAST` 신설, 포커스 링·순검정 무대 텍스트 회귀 추가 |
+| AD6 | `txtDeco` 오용 정적 검사 | `test_txtdeco_is_only_used_for_separators` |
+| AD7 | 홍보 문구 수용(억제 금지) · 핸드오프 폴더 배포 제외 승인 | 별도 억제 코드 없음. `_SKIP_DIRS` 등록 유지 |
+
+구현 중 발견해 `QUESTIONS-03.md` 로 올린 충돌 5건:
+Q18 clamp 가 다크 고채도에서 미달 종료(채도 축소로 보완) · Q19 clamp 목표 5.0 과 A16 여유 논리의
+불일치 · Q20 A15 표 hex 일부가 알고리즘으로 도달 불가(프리셋 상수 고정으로 처리) ·
+Q21 하위 기준 3.0 을 경계선에 적용하면 §1.1·§1.2 전부 미달(strict xfail 로 표시) ·
+Q22 히트맵 선택 링이 램프 최고 채움과 동일 색이라 1.00.
+
 ## 2. 플랜 지적사항(P1~P5) 반영
 
 | # | 조치 | 반영 위치 |
@@ -118,14 +134,19 @@ Qt 런타임 시스템 라이브러리 = libegl1 libgl1 libxkbcommon0 libdbus-1-
 | 항목 | 상태 | 막는 범위 |
 |---|---|---|
 | **Q1 라이선스** | 사업 주체 확인 대기 | 커밋 ③ 이후 전부 |
-| **QUESTIONS-02 Q15·Q16** | 라이트 테마 대비 게이트 미달 4쌍(accent 채움, 상태색 3종) | 토큰 확정. 현재 strict xfail 로 표시 |
-| QUESTIONS-02 Q17 | 게이트 적용 대상 정의 | 테스트 목록만 영향, 구현은 진행 가능 |
+| **QUESTIONS-03 Q18·Q21** | clamp 보완안 승인 / 하위 기준 대상 한정 | 토큰 확정. 현재 보완안으로 전 조합 통과, 경계선 4쌍만 strict xfail |
+| QUESTIONS-03 Q19·Q20 | clamp 목표값 / 프리셋 상수 고정 방식 | 확인 성격, 구현 진행 가능 |
+| QUESTIONS-03 Q22 | 히트맵 선택 링 | 단계 6 착수 전까지 |
+
+QUESTIONS-02 로 걸었던 라이트 대비 미달 4쌍은 REVIEW-02 로 해소되어 strict xfail 을 제거했습니다.
 
 ## 6. 완료 기준 (DoD)
 
 PLAN-01 H절 그대로 유지하고 아래를 추가합니다.
 
-- [ ] QUESTIONS-02 결론 반영 + `tests/test_tokens.py` 의 strict xfail 제거
+- [x] QUESTIONS-02 결론 반영 + 해당 strict xfail 제거 (REVIEW-02)
+- [ ] QUESTIONS-03 결론 반영 + 경계선 하위 기준 strict xfail 제거
+- [ ] accent 프리셋 3종 x 라이트·다크 x (fill·hover·pressed·text) 게이트 유지
 - [ ] die 점프 경로 유지(A12 게이트): 탐색 바 `SLOT · die` 클릭 → 히트맵에서 해당 die 선택
 - [ ] Excel `layer_order` 항상 전달(게이트) + 기준 없음 모드에서 ★ 미표기
 - [ ] 지도가 항상 한 화면(A7 게이트)
