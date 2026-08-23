@@ -90,9 +90,9 @@ class NoMatchGalleryDialog(QDialog):
         head.addStretch()
         head.addWidget(QLabel("사유:"))
         self.cmb_reason = QComboBox()
-        self.cmb_reason.addItem("전체", None)
+        self.cmb_reason.addItem("전체", userData=None)
         for reason in _PRIORITY:
-            self.cmb_reason.addItem(_REASON_META[reason][0], reason.value)
+            self.cmb_reason.addItem(_REASON_META[reason][0], userData=reason.value)
         self.cmb_reason.currentIndexChanged.connect(self._populate)
         head.addWidget(self.cmb_reason)
         outer.addLayout(head)

@@ -267,6 +267,7 @@ class MainWindow(FluentWindow):
         self.btn_heatmap = page.btn_heatmap
         self.btn_add_export = page.btn_add_export
         self.lbl_view = page.lbl_view
+        # SLOT·die 는 탐색 바의 링크로 옮겼다(A12). 이름은 그대로 둔다.
         self.lbl_wafer = page.lbl_wafer
         self._empty_label = page.grid_message
 
@@ -282,6 +283,7 @@ class MainWindow(FluentWindow):
         self.top.cluster_radius_changed.connect(lambda _: self._cluster_timer.start())
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
+        self.top.nomatch_requested.connect(self._jump_unmatched)
         # LOT 폴더 버튼: 우클릭 시 최근 폴더 메뉴
         self.top.btn_open.setContextMenuPolicy(Qt.CustomContextMenu)
         self.top.btn_open.customContextMenuRequested.connect(self._show_recent_menu)
@@ -292,6 +294,8 @@ class MainWindow(FluentWindow):
         self.strip.thumb_clicked.connect(self._goto)
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
+        # 탐색 바의 SLOT·die 를 누르면 히트맵으로 간다. 판독↔히트맵 왕복 경로(A12).
+        self.nav.die_clicked.connect(self._open_heatmap)
         self.btn_heatmap.clicked.connect(self._open_heatmap)
         self.btn_add_export.clicked.connect(self._add_current_to_export)
         self.btn_stop.clicked.connect(self._stop_scan)
@@ -689,7 +693,7 @@ class MainWindow(FluentWindow):
         self.current = -1
         self.strip.set_items([], [])
         self.wafer_map.clear()
-        self.lbl_wafer.setText("")
+        self.nav.set_die("")
         self.nav.set_enabled(False)
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
@@ -982,7 +986,7 @@ class MainWindow(FluentWindow):
 
     def _update_add_export_button(self) -> None:
         n = len(self._export_tray)
-        self.btn_add_export.setText(f"＋ 출력에 추가 ({n})" if n else "＋ 출력에 추가")
+        self.btn_add_export.setText(f"＋ 출력에 담기 ({n})" if n else "＋ 출력에 담기")
         self.btn_add_export.setEnabled(bool(self.matches))
         self.btn_heatmap.setEnabled(bool(self.matches))
 
@@ -1198,7 +1202,7 @@ class MainWindow(FluentWindow):
             origin = (0, 0)
 
         self.wafer_map.set_data(cols, rows, states, current, valid=paint_valid, origin=origin)
-        self.lbl_wafer.setText(caption)
+        self.nav.set_die(caption)
         self.wafer_map.setToolTip(
             "웨이퍼 맵 — die 클릭 시 해당 기준 사진으로 이동"
             + (f"\n{caption}" if caption else "")
@@ -1347,7 +1351,7 @@ class MainWindow(FluentWindow):
     def _on_update_checked(self, status, manual: bool) -> None:
         self._update_status = status
         if status.available:
-            self.top.set_update_available(True)
+            self._set_update_marker(True)
             answer = QMessageBox.question(
                 self,
                 "업데이트",
@@ -1363,10 +1367,10 @@ class MainWindow(FluentWindow):
                     self.nav.set_status("")
                 else:
                     self.banner.show_message(
-                        "상단 '업데이트' 버튼으로 언제든 업데이트할 수 있습니다.", "info"
+                        "설정에서 언제든 업데이트할 수 있습니다.", "info"
                     )
         else:
-            self.top.set_update_available(False)
+            self._set_update_marker(False)
             if manual:
                 if status.error:
                     self.nav.set_status("업데이트 확인 실패")
@@ -1376,6 +1380,11 @@ class MainWindow(FluentWindow):
                 else:
                     self.nav.set_status("최신 버전입니다")
                     self.banner.show_message("이미 최신 버전입니다.", "success")
+
+    def _set_update_marker(self, available: bool) -> None:
+        """업데이트 가용 표식. nav 설정 항목의 배지 하나로 알린다(A10)."""
+        self.top.set_update_available(available)
+        self._set_nav_badge("settingsInterface", 1 if available else 0)
 
     def _do_update(self, status) -> None:
         self._updating = True

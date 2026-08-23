@@ -2,8 +2,9 @@
 
 앱의 주 화면. 기준 layer 사진 한 장과 비교 layer 사진들을 나란히 놓고 같은 defect 인지 본다.
 
-단계 1a 에서는 기존 위젯 구성(사이드바 + 필름스트립 + 그리드)을 그대로 옮겨 담아 셸 전환의
-회귀 위험을 줄인다. 컨트롤 행·판독대 다열화·빈 칸 사유 복원은 단계 2 에서 이 파일 안에서 한다.
+세로 순서는 프로토타입 그대로다(03-screens §1): 헤더 / 컨트롤 행 40 / 판독대(flex 1) /
+탐색 바 44 / 필름스트립 96. 판독대가 남는 높이를 전부 가져가는 것이 이 화면의 전부이므로
+그 위아래는 모두 고정 높이다.
 """
 
 from __future__ import annotations
@@ -12,16 +13,23 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
-    QLabel,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QSplitter,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import BodyLabel, CaptionLabel, PrimaryPushButton, PushButton, SubtitleLabel
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    IndeterminateProgressBar,
+    PrimaryPushButton,
+    ProgressBar,
+    PushButton,
+    SmoothScrollArea,
+    StrongBodyLabel,
+    SubtitleLabel,
+    TitleLabel,
+)
 
 from app.ui import theme
 from app.ui.compare_grid import CompareGrid
@@ -35,6 +43,9 @@ _EMPTY_BODY = (
     "자동으로 매칭합니다."
 )
 _EMPTY_HINT = "Ctrl+O · 버튼 우클릭으로도 최근 폴더를 엽니다"
+
+_PAGE_TITLE = "판독"
+_PAGE_SUB = "기준 layer 의 defect 을 다른 layer 의 같은 자리와 비교합니다"
 
 
 class EmptyState(QWidget):
@@ -105,123 +116,111 @@ class ReviewPage(QWidget):
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.content)
 
-        self._build_content(image_loader, sidebar_width)
+        self._build_content(image_loader)
         self.show_empty_state(True)
 
     # ------------------------------------------------------------ 구성
-    def _build_content(self, image_loader, sidebar_width: int) -> None:
+    def _build_content(self, image_loader) -> None:
         main = QVBoxLayout(self.content)
-        main.setContentsMargins(0, 0, 0, 0)
-        main.setSpacing(theme.SPACING["gapS"])
+        main.setContentsMargins(
+            theme.SPACING["pageH"], theme.SPACING["pageV"], theme.SPACING["pageH"], 0
+        )
+        main.setSpacing(theme.SPACING["gapM"])
 
-        self.splitter = QSplitter(Qt.Horizontal, self.content)
-        self.sidebar = SideBar()
-        self.splitter.addWidget(self.sidebar)
+        main.addLayout(self._build_header())
+        self.sidebar = SideBar(self.content)
+        main.addWidget(self.sidebar)
+        main.addLayout(self._build_progress_row())
+        main.addWidget(self._build_grid_area(image_loader), 1)
+        main.addWidget(self._build_nav_row())
+        main.addWidget(self._build_strip())
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(theme.SPACING["gapS"])
+        # 별칭: 컨트롤 행이 소유하지만 창은 짧은 이름으로 쓴다.
+        self.btn_add_export = self.sidebar.btn_add_export
+        self.lbl_wafer = self.nav.lbl_die
 
-        right_layout.addWidget(self._build_top_band())
-        right_layout.addLayout(self._build_progress_row())
-        right_layout.addWidget(self._build_grid_area(image_loader), 1)
+        # 히트맵/웨이퍼맵은 단계 6에서 전용 페이지로 옮긴다. 그때까지 nav 라우트가 실제
+        # 경로이고, 이 둘은 배선을 끊지 않기 위한 보이지 않는 자리다.
+        self.wafer_map = WaferMapWidget(self.content)
+        self.wafer_map.hide()
+        self.btn_heatmap = PushButton("히트맵 보기", self.content)
+        self.btn_heatmap.setEnabled(False)
+        self.btn_heatmap.hide()
+        # 창 크기 저장 계약(splitter.sizes)을 위해 남기지만 화면에는 없다.
+        self.splitter = None
 
-        self.splitter.addWidget(right)
-        self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 1)
-        self.splitter.setCollapsible(0, False)
-        width = max(180, int(sidebar_width))
-        self.splitter.setSizes([width, max(600, 1200 - width)])
-        main.addWidget(self.splitter, 1)
-
-    def _build_top_band(self) -> QWidget:
-        band = QFrame()
-        band.setObjectName("panel")
-        layout = QVBoxLayout(band)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(6)
-
+    def _build_header(self) -> QVBoxLayout:
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.SPACING["gapS"])
-        self.strip = ThumbnailStrip()
-        row.addWidget(self.strip, 1)
-
-        self.btn_heatmap = QPushButton("히트맵 보기")
-        self.btn_heatmap.setFixedSize(96, 96)
-        self.btn_heatmap.setToolTip(
-            "defect 밀도 히트맵을 엽니다. 위치를 클릭하면 그 자리의 defect 을 layer 별로 "
-            "나란히 비교하고 출력에 담을 수 있습니다."
-        )
-        self.btn_heatmap.setEnabled(False)
-        row.addWidget(self.btn_heatmap, 0, Qt.AlignVCenter)
-
-        wafer_box = QVBoxLayout()
-        wafer_box.setContentsMargins(0, 0, 0, 0)
-        wafer_box.setSpacing(2)
-        self.wafer_map = WaferMapWidget()
-        wafer_box.addWidget(self.wafer_map, 0, Qt.AlignHCenter)
-        self.lbl_wafer = QLabel("")
-        self.lbl_wafer.setObjectName("dim")
-        self.lbl_wafer.setAlignment(Qt.AlignCenter)
-        self.lbl_wafer.setWordWrap(True)
-        self.lbl_wafer.setFixedWidth(140)
-        wafer_box.addWidget(self.lbl_wafer, 0, Qt.AlignHCenter)
-        row.addLayout(wafer_box)
-        layout.addLayout(row)
-
-        self.nav = NavBar()
-        self.btn_add_export = QPushButton("＋ 출력에 담기")
-        self.btn_add_export.setObjectName("mini")
-        self.btn_add_export.setToolTip(
-            "현재 기준 사진을 출력 명세에 담습니다. (A)\n"
-            "담은 것들은 Excel 출력 시 함께 나옵니다."
-        )
-        self.btn_add_export.setEnabled(False)
-        self.nav.add_widget(self.btn_add_export)
-        self.lbl_view = QLabel("")
+        title = TitleLabel(_PAGE_TITLE, self.content)
+        row.addWidget(title)
+        row.addStretch(1)
+        self.lbl_view = CaptionLabel("", self.content)
         self.lbl_view.setObjectName("dim")
-        self.nav.add_widget(self.lbl_view)
-        layout.addWidget(self.nav)
-        return band
+        row.addWidget(self.lbl_view)
+        col.addLayout(row)
+        sub = CaptionLabel(_PAGE_SUB, self.content)
+        sub.setObjectName("dim")
+        col.addWidget(sub)
+        return col
 
     def _build_progress_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.SPACING["gapS"])
-        self.progress = QProgressBar()
+        self.progress = ProgressBar(self.content)
         self.progress.setVisible(False)
-        self.progress.setTextVisible(False)
         row.addWidget(self.progress, 1)
         # 스캔 중단은 계승 필수 항목이다.
-        self.btn_stop = QPushButton("■ 중단")
-        self.btn_stop.setObjectName("mini")
+        self.btn_stop = PushButton("■ 중단", self.content)
+        self.btn_stop.setFixedHeight(theme.fluent_height("control"))
         self.btn_stop.setToolTip("진행 중인 스캔을 중단합니다.")
         self.btn_stop.setVisible(False)
         row.addWidget(self.btn_stop, 0)
         return row
 
     def _build_grid_area(self, image_loader) -> QWidget:
-        scroll = QScrollArea()
+        scroll = SmoothScrollArea(self.content)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        host = QFrame()
-        host.setObjectName("panel")
+        scroll.setStyleSheet("background: transparent;")
+        scroll.viewport().setStyleSheet("background: transparent;")
+        host = QWidget(scroll)
         host_layout = QVBoxLayout(host)
-        host_layout.setContentsMargins(12, 12, 12, 12)
-        self.grid = CompareGrid(loader=image_loader)
-        host_layout.addWidget(self.grid)
-        self.grid_message = QLabel("")
+        # 오른쪽 여백은 겹쳐 그려지는 스크롤바 자리. 없으면 마지막 열이 가려진다.
+        host_layout.setContentsMargins(0, 0, 12, 0)
+        host_layout.setSpacing(0)
+        self.grid = CompareGrid(loader=image_loader, parent=host)
+        # 판독대가 남는 높이를 전부 가져간다. stretch 를 뒤에 두면 칸이 224px 에 붙어 버린다.
+        host_layout.addWidget(self.grid, 1)
+        self.grid_message = BodyLabel("", host)
         self.grid_message.setObjectName("dim")
         self.grid_message.setAlignment(Qt.AlignCenter)
         self.grid_message.setMinimumHeight(200)
         self.grid_message.hide()
         host_layout.addWidget(self.grid_message)
-        host_layout.addStretch()
         scroll.setWidget(host)
         self.grid_scroll = scroll
         return scroll
+
+    def _build_nav_row(self) -> QWidget:
+        self.nav = NavBar(self.content)
+        return self.nav
+
+    def _build_strip(self) -> QWidget:
+        box = QWidget(self.content)
+        box.setFixedHeight(96)
+        box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, theme.SPACING["gapM"])
+        lay.setSpacing(0)
+        self.strip = ThumbnailStrip(box)
+        lay.addWidget(self.strip)
+        return box
 
     # ------------------------------------------------------------ 상태
     def show_empty_state(self, empty: bool) -> None:
@@ -232,5 +231,5 @@ class ReviewPage(QWidget):
         return self.stack.currentWidget() is self.empty_state
 
     def sidebar_width(self) -> int:
-        sizes = self.splitter.sizes()
-        return sizes[0] if sizes else 0
+        """옛 창 지오메트리 계약. 사이드바가 없어졌으므로 0."""
+        return 0

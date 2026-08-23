@@ -497,15 +497,16 @@ def test_safe_filename():
     assert MainWindow._safe_filename("") == "compare"
 
 
-def test_sidebar_settings_button_shows_update_mark(win):
-    assert win.top.btn_settings is not None
-    # 업데이트는 설정 다이얼로그로 이동 → 사이드바엔 업데이트 버튼 없음
+def test_update_marker_moves_to_the_nav_badge(win):
+    """업데이트 표식은 nav 설정 항목의 배지 하나다(A10). 컨트롤 행에는 버튼이 없다."""
+    assert win.top.btn_settings is None
     assert win.top.btn_update is None
-    # 가용 시 설정 버튼에 표식(•)이 붙고, 해제 시 사라진다
-    win.top.set_update_available(True)
-    assert "•" in win.top.btn_settings.text()
-    win.top.set_update_available(False)
-    assert win.top.btn_settings.text() == "⚙ 설정"
+    win._set_update_marker(True)
+    assert win.top.update_available() is True
+    assert "settingsInterface" in win._nav_badges
+    win._set_update_marker(False)
+    assert win.top.update_available() is False
+    assert "settingsInterface" not in win._nav_badges
 
 
 def test_update_check_available_sets_flag(win, monkeypatch):
@@ -518,7 +519,7 @@ def test_update_check_available_sets_flag(win, monkeypatch):
     monkeypatch.setattr(win, "_do_update", lambda s: called.setdefault("do", s))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     win._on_update_checked(st, manual=True)
-    assert "•" in win.top.btn_settings.text()
+    assert "settingsInterface" in win._nav_badges
     assert called.get("do") is st
 
 
@@ -533,7 +534,7 @@ def test_update_check_uptodate_manual_banner(win):
     win.nav.set_status("업데이트 확인 중...")
     st = updater.UpdateStatus(available=False, local="a", remote="a", method="zip")
     win._on_update_checked(st, manual=True)  # 모달 없음(available=False)
-    assert win.top.btn_settings.text() == "⚙ 설정"
+    assert "settingsInterface" not in win._nav_badges
     assert win.nav.lbl_status.text() == "최신 버전입니다"
 
 

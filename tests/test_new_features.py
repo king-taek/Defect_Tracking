@@ -168,7 +168,12 @@ def test_export_all_layers_button_unions_matches(win, app):
 
 # ---- 항목 2: 매치 없는 셀 숨김(re-pack) ----
 
-def test_grid_hides_unmatched_cells(win):
+def test_grid_keeps_unmatched_cells_with_a_reason(win):
+    """매칭이 없어도 칸을 남기고 사유를 적는다(03-screens §1).
+
+    원본은 매칭 없는 셀을 숨기고 남은 셀을 압축했다. 왜 없는지가 화면에서 사라져 "이 layer 는
+    원래 없나, 매칭에 실패했나"를 구분할 수 없었다.
+    """
     from PySide6.QtTest import QTest
 
     def _wait_status(target):
@@ -176,16 +181,25 @@ def test_grid_hides_unmatched_cells(win):
             QTest.qWait(100)
             if win.matches and {win._match_status(m) for m in win.matches} == target:
                 return
-    # 허용오차 0 → 모든 비교 매칭 실패 → 보이는 셀은 기준 하나뿐.
-    # 매칭은 디바운스(250ms)+백그라운드 워커 → 조건까지 폴링 대기.
+
+    # 허용오차 0 → 모든 비교 매칭 실패. 그래도 비교 칸은 남아 있어야 한다.
     win.top.spn_tol.setValue(0.0)
     _wait_status({"none"})
     win._goto(0)
     grid = win.grid
-    # isHidden(): 창을 show 하지 않아도 명시적 숨김 상태를 반영한다.
     visible = [l for l, c in grid._cells.items() if not c.isHidden()]
-    assert visible == [grid._base_layer]
-    # 큰 허용오차 → 비교도 매칭 → 비교 셀도 보인다.
+    assert grid._base_layer in visible
+    compares = set(win.top.compare_layers())
+    assert compares, "이 픽스처는 비교 layer 가 있어야 의미가 있다"
+    assert compares <= set(visible), "매칭이 없어도 비교 칸은 사라지지 않는다"
+
+    # 빈 칸에는 사유가 적혀 있어야 한다.
+    for layer in compares:
+        cell = grid._cells[layer]
+        assert cell._record is None
+        assert "매치 없음" in cell.image.text()
+
+    # 큰 허용오차 → 비교도 매칭.
     win.top.spn_tol.setValue(100000.0)
     _wait_status({"matched"})
     win._goto(0)
@@ -819,7 +833,7 @@ def test_compare_grid_shows_cluster_badge(app, tmp_path):
     grid.update_for_base(item, [])
     cell = grid._cells["B"]
     assert not cell.more_badge.isHidden()  # 명시적으로 표시됨(창 미표시라 isVisible 대신)
-    assert cell.more_badge.text() == "+1"
+    assert cell.more_badge.text() == "＋1 근접"
     # 클릭 시 묶인 멤버 목록을 emit
     got = []
     grid.base_cluster_clicked.connect(lambda m: got.append(m))

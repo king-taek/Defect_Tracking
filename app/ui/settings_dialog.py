@@ -94,8 +94,8 @@ class SettingsDialog(QDialog):
 
         # 전체 UI 글자 크기(보통/크게).
         self.cmb_font = NoScrollComboBox()
-        self.cmb_font.addItem("보통", "normal")
-        self.cmb_font.addItem("크게", "large")
+        self.cmb_font.addItem("보통", userData="normal")
+        self.cmb_font.addItem("크게", userData="large")
         fi = self.cmb_font.findData(getattr(self._settings, "ui_font_size", "normal"))
         self.cmb_font.setCurrentIndex(fi if fi >= 0 else 0)
         self.cmb_font.setToolTip(
@@ -241,11 +241,11 @@ class SettingsDialog(QDialog):
         """
         self.cmb_product.blockSignals(True)
         self.cmb_product.clear()
-        self.cmb_product.addItem("(자동 인식)", config.DEFAULT_PRODUCT)
+        self.cmb_product.addItem("(자동 인식)", userData=config.DEFAULT_PRODUCT)
         for key, prod in config.PRODUCTS.items():
             if key == config.DEFAULT_PRODUCT:
                 continue
-            self.cmb_product.addItem(f"{prod.name} ({key})", key)
+            self.cmb_product.addItem(f"{prod.name} ({key})", userData=key)
         if select:
             idx = self.cmb_product.findData(select)
             if idx >= 0:
