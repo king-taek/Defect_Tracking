@@ -515,14 +515,18 @@ def test_update_marker_moves_to_the_nav_badge(win):
 
 
 def test_update_check_available_sets_flag(win, monkeypatch):
-    """업데이트 확인이 available 이면 설정 버튼 표식 + 사용자가 'Yes' 시 적용 호출(모달 우회)."""
-    from PySide6.QtWidgets import QMessageBox
+    """available 이면 nav 배지 + 사용자가 '지금 업데이트' 를 고르면 적용 호출(모달 우회).
+
+    확인 대화는 순수 Qt QMessageBox 가 아니라 Fluent MessageBox 다. 창이 부르는 이름을
+    막아야 하므로 모듈 함수 `ask_update` 를 갈아끼운다.
+    """
     from app import updater
+    from app.ui import main_window as mw
 
     st = updater.UpdateStatus(available=True, local="a", remote="b", method="zip")
     called = {}
     monkeypatch.setattr(win, "_do_update", lambda s: called.setdefault("do", s))
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr(mw, "ask_update", lambda parent, status=None: True)
     win._on_update_checked(st, manual=True)
     assert "settingsInterface" in win._nav_badges
     assert called.get("do") is st
@@ -559,15 +563,15 @@ def test_update_finished_message_shows_new_version(win, monkeypatch):
     디스크에서 새로 읽은 updater.read_installed_version() 값을 써야 한다.
     """
     from app import updater
-    from PySide6.QtWidgets import QMessageBox
+    from app.ui import main_window as mw
 
     monkeypatch.setattr(updater, "read_installed_version", lambda: "1.99.0")
     shown = {}
 
-    def fake_info(self, title, text):
-        shown["text"] = text
+    def fake_notice(parent, title, content):
+        shown["text"] = content
 
-    monkeypatch.setattr(QMessageBox, "information", fake_info)
+    monkeypatch.setattr(mw, "show_update_notice", fake_notice)
     monkeypatch.setattr(win, "close", lambda: None)
     win._on_update_finished(True, "72개 파일을 갱신했습니다.")
     assert "최신 버전(1.99.0)으로 업데이트 되었습니다." in shown["text"]
