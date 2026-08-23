@@ -173,8 +173,38 @@ offscreen, 병렬 부하가 있는 환경에서 측정했다. 목표는 `PLAN-FI
 | 폴더 목록 `_go_to` (UI 스레드) | 17 ms | 하위 300개. 현재 폴더 아래를 다시 읽지 않음(테스트로 고정) |
 | 판독대 12칸 | 칸 높이 224 px 유지 | 1464x940 창, 4열 x 3행, 세로 스크롤 발생 |
 
-## 4. 남은 것
+## 4. 파일 배치 (P5)
+
+| 위치 | 내용 |
+|---|---|
+| `app/ui/pages/` | nav 로 오갈 수 있는 상주 화면 6개 (review · nomatch · heatmap · export · help · settings) |
+| `app/ui/sheets/` | 그 위에 겹쳐 떴다 사라지는 것들 (folder_picker · image_viewer · cluster_view) |
+
+옛 다이얼로그 `export_dialog.py` · `help_dialog.py` · `settings_dialog.py` · `heatmap_dialog.py` ·
+`nomatch_gallery.py` · `wafer_map.py` · `pages/launcher.py` 는 모두 삭제했다. 라우트 배선이
+끝난 뒤에도 남겨 두면 `app/` 안에서 아무도 import 하지 않는데 테스트만 살려 두는 코드가 된다.
+
+## 5. 테스트
+
+파일별로 나눠 돌린 결과가 전부 그린이다(총 537건).
+
+| 묶음 | 건수 |
+|---|---|
+| `test_ui_smoke` 43 · `test_new_features` 70 | 113 |
+| 페이지·시트: heatmap 29 · folder picker 24 · review 20 · export 19 · settings 18 · nomatch 16 · viewer 11 · help 9 · shell 9 | 155 |
+| 게이트: `test_tokens` 95 · `test_style_hygiene` 2 | 97 |
+| Excel 23 · 순수 로직 14파일 139 · 통합·기타 10 | 172 |
+
+**전체를 한 프로세스에서 `pytest tests/` 로 돌리면 340건쯤에서 멈춘다.** 그 자리의 테스트들은
+따로 돌리면 모두 통과하므로 특정 테스트의 결함이 아니라, offscreen 위젯을 수백 개 만들고 버린
+뒤 Qt 상태가 쌓여 생기는 문제로 보인다. 원인을 좁히지 못했으므로 그대로 적는다. 지금은 파일별
+실행으로 같은 범위를 덮는다.
+
+## 6. 남은 것
 
 - µm 스케일바 2곳(판독대 기준 칸 · 뷰어 무대). 픽셀↔µm 실비율 근거가 생기면 구현한다.
 - 설정의 경로 직접 입력. 되살릴지 사용자 판단이 필요하다.
 - Excel Q4 의 교차 그룹 블록(기준 없음 모드)은 후속 범위로 남겼다.
+- 한 프로세스 전체 실행이 멈추는 문제(위 §5).
+- `theme.py` 의 레거시 `STYLESHEET` 와 `build_bridge_qss`. 아직 옛 objectName 훅에 기대는
+  위젯이 남아 있어 지우지 않았다. 남은 훅을 없애면 두 함수를 함께 지운다.

@@ -174,9 +174,9 @@ PLAN-01 H절 그대로 유지하고 아래를 추가합니다.
 
 - [x] QUESTIONS-02 결론 반영 + 해당 strict xfail 제거 (REVIEW-02)
 - [x] QUESTIONS-03 결론 반영 + 경계선 하위 기준 strict xfail 제거 (REVIEW-03)
-- [ ] accent 프리셋 3종 x 라이트·다크 x (fill·hover·pressed·text) 게이트 유지
-- [ ] die 점프 경로 유지(A12 게이트): 탐색 바 `SLOT · die` 클릭 → 히트맵에서 해당 die 선택
-- [ ] Excel `layer_order` 항상 전달(게이트) + 기준 없음 모드에서 ★ 미표기
-- [ ] 지도가 항상 한 화면(A7 게이트)
-- [ ] 6페이지 `app/ui/pages/` · 시트 `app/ui/sheets/` 배치(P5)
-- [ ] `design_handoff_fluent_redesign` 이 자동 업데이트 배포본에 포함되지 않음(회귀 테스트로 고정)
+- [x] accent 프리셋 3종 x 라이트·다크 x (fill·hover·pressed·text) 게이트 유지
+- [x] die 점프 경로 유지(A12 게이트): 탐색 바 `SLOT · die` 클릭 → 히트맵에서 해당 die 선택
+- [x] Excel `layer_order` 항상 전달(게이트) + 기준 없음 모드에서 ★ 미표기
+- [x] 지도가 항상 한 화면(A7 게이트) - 42 · 1,024 · 4,096 die 실측
+- [x] 6페이지 `app/ui/pages/` · 시트 `app/ui/sheets/` 배치(P5)
+- [x] `design_handoff_fluent_redesign` 이 자동 업데이트 배포본에 포함되지 않음(회귀 테스트로 고정)
