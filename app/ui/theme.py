@@ -361,6 +361,22 @@ def _scaled_sheet(scale: float) -> str:
     return sheet + f"\n* {{ font-size: {round(12 * scale)}px; }}\n"
 
 
+def apply_font_scale(app, scale: float = 1.0) -> None:
+    """앱 기본 글자 크기에 배율을 건다.
+
+    Fluent 전환 후 색은 `build_bridge_qss` 와 qfluentwidgets 가 칠하므로 여기서는 크기만
+    다룬다. 이미 만들어진 위젯의 고정 높이는 다음 실행에 반영된다.
+    """
+    global FONT_SCALE, _ORIG_PT
+    FONT_SCALE = scale
+    if _ORIG_PT is None:
+        f0 = app.font()
+        _ORIG_PT = f0.pointSizeF() if f0.pointSizeF() > 0 else 9.0
+    f = app.font()
+    f.setPointSizeF(_ORIG_PT * scale)
+    app.setFont(f)
+
+
 def apply_theme(app, scale: float = 1.0) -> None:
     global FONT_SCALE, _ORIG_PT
     FONT_SCALE = scale

@@ -42,6 +42,7 @@ from qfluentwidgets import (
     TransparentPushButton,
     isDarkTheme,
     qconfig,
+    setCustomStyleSheet,
 )
 
 from app import config
@@ -181,7 +182,9 @@ class CompareLayerView(FlyoutViewBase):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setStyleSheet("background: transparent;")
+        # Fluent 위젯이라 setStyleSheet 로 덮으면 스크롤바 스타일까지 같이 날아간다.
+        _TRANSPARENT = "SmoothScrollArea { background: transparent; border: none; }"
+        setCustomStyleSheet(self.scroll, _TRANSPARENT, _TRANSPARENT)
         self.scroll.viewport().setStyleSheet("background: transparent;")
         self.host = QWidget(self.scroll)
         self.host.setStyleSheet("background: transparent;")

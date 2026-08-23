@@ -29,6 +29,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SubtitleLabel,
     TitleLabel,
+    setCustomStyleSheet,
 )
 
 from app.ui import theme
@@ -187,7 +188,9 @@ class ReviewPage(QWidget):
         scroll = SmoothScrollArea(self.content)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        # Fluent 위젯이라 setStyleSheet 로 덮으면 스크롤바 스타일까지 같이 날아간다.
+        transparent = "SmoothScrollArea { background: transparent; border: none; }"
+        setCustomStyleSheet(scroll, transparent, transparent)
         scroll.viewport().setStyleSheet("background: transparent;")
         host = QWidget(scroll)
         host_layout = QVBoxLayout(host)

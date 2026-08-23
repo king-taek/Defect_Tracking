@@ -36,6 +36,7 @@ from app.ui.heatmap_dialog import HeatmapDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
+from app.ui import theme
 from app.ui.notifications import NotificationBanner
 from app.ui.pages.launcher import LauncherPage
 from app.ui.pages.review import ReviewPage
@@ -1322,12 +1323,15 @@ class MainWindow(FluentWindow):
         if config.dev_mode(s):
             from app import logging_config
             logging_config.setup_logging(s.log_dir_path)
-        # 글자 크기(보통/크게)가 바뀌면 테마를 다시 적용해 대부분 즉시 반영한다.
+        # 글자 크기(보통/크게)가 바뀌면 기본 글자 크기와 브리지 QSS 를 다시 적용한다.
+        # 옛 apply_theme 은 다크 네온 스타일시트를 통째로 덮어써 Fluent 셸을 지워 버린다.
         if getattr(s, "ui_font_size", "normal") != old_font:
             from PySide6.QtWidgets import QApplication
+            from qfluentwidgets import isDarkTheme
 
-            from app.ui import theme
-            theme.apply_theme(QApplication.instance(), theme.scale_for(s.ui_font_size))
+            application = QApplication.instance()
+            theme.apply_font_scale(application, theme.scale_for(s.ui_font_size))
+            application.setStyleSheet(theme.build_bridge_qss(isDarkTheme()))
         self.banner.show_message("설정을 저장했습니다.", "success")
 
     # ------------------------------------------------------------ 업데이트
@@ -1531,8 +1535,11 @@ class MainWindow(FluentWindow):
             selected=selected,
             thumb_cache=self.thumb_cache,
             source_roots=[self.lot_index.lot_path],
-            # 원래 layer 순서(폴더 스캔 순서) — 기준 layer 를 맨 왼쪽에 고정하지 않는다.
+            # 원래 layer 순서(폴더 스캔 순서). 기준 layer 를 맨 왼쪽에 고정하지 않는다.
             layer_order=self.lot_index.layer_canonicals(),
+            # 화면의 글자 크기 설정을 리포트에도 그대로 적용한다. 크게 로 보는 사람이
+            # 출력물만 작은 글씨로 받으면 설정을 켠 의미가 없다.
+            font_scale=theme.scale_for(getattr(self.settings, "ui_font_size", "normal")),
         )
         worker = ExportWorker(kwargs)
         worker.signals.progress.connect(self._on_export_progress)
