@@ -1,4 +1,4 @@
-"""오프스크린 UI 회귀 테스트 (Round 3 — 연결성/사용성).
+"""오프스크린 UI 회귀 테스트 (Round 3 - 연결성/사용성).
 
 Qt 가 없으면 skip. 모달(QFileDialog/QMessageBox)을 띄우지 않는 내부 메서드만 호출한다.
 합성 데이터를 _on_scan_finished 로 직접 주입하여 스캔 워커/모달을 우회한다.
@@ -87,7 +87,7 @@ def test_cluster_radius_refresh_strip_rebuilds_thumbnail_items(win):
     """
     win._goto(0)
     before_count = len(win.strip._thumbs)
-    # 클러스터 길이가 바뀌어 그룹 하나가 합쳐졌다고 가정 — self.matches 를 한 칸 줄인다.
+    # 클러스터 길이가 바뀌어 그룹 하나가 합쳐졌다고 가정 - self.matches 를 한 칸 줄인다.
     if len(win.matches) < 2:
         return
     win.matches = win.matches[:-1]
@@ -100,7 +100,7 @@ def test_cluster_radius_refresh_strip_rebuilds_thumbnail_items(win):
 def test_tolerance_rematch_does_not_rebuild_strip_items(win):
     """허용오차 변경(refresh_strip=False, 기본값)은 스트립 아이템을 다시 만들지 않는다.
 
-    클러스터링 자체가 안 바뀌므로 기존 위젯 재사용이 맞다 — 위 회귀 수정이 이 경로까지
+    클러스터링 자체가 안 바뀌므로 기존 위젯 재사용이 맞다 - 위 회귀 수정이 이 경로까지
     건드리지 않았는지 확인.
     """
     win._goto(0)
@@ -342,7 +342,7 @@ def test_base_change_keeps_exclusion(win):
             QCoreApplication.processEvents()
     none_idx = {i for i, m in enumerate(win.matches) if win._match_status(m) == "none"}
     # 기본 '매칭만' 필터에서 none 후보는 보기(탐색 후보)에 포함되지 않는다
-    # (단, 전부 none 이면 혼란 방지 폴백으로 전체 표시 — 그 경우는 제외 검사를 건너뜀)
+    # (단, 전부 none 이면 혼란 방지 폴백으로 전체 표시 - 그 경우는 제외 검사를 건너뜀)
     view = set(win._view_indices())
     if len(none_idx) < len(win.matches):
         assert none_idx.isdisjoint(view)
@@ -381,7 +381,7 @@ def test_wafer_map_paints_observed_die_outside_device_shape(win):
 
     device_db 기반 제품의 die_map 이 실제 관측 die 범위를 다 담지 못하면(예:
     zeroX/zeroY 실측 계산으로 col/row 범위가 넓어진 경우), 정합은 성공하되
-    관측 die 하나가 die_map 밖에 남을 수 있다 — 이 die 도 지워지지 않고 그려져야 한다.
+    관측 die 하나가 die_map 밖에 남을 수 있다 - 이 die 도 지워지지 않고 그려져야 한다.
     """
     from app import config
 

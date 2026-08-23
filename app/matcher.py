@@ -2,7 +2,7 @@
 
 기준 layer 의 각 defect 에 대해 비교 layer 에서 다음 조건을 만족하는 defect 를 찾는다:
   1. wafer ID 동일
-  2. die 위치 (col,row) 가 ±DIE_TOL(기본 1) 이내 — 경계 정렬 차이를 흡수
+  2. die 위치 (col,row) 가 ±DIE_TOL(기본 1) 이내 - 경계 정렬 차이를 흡수
   3. local x,y 거리(아래 '정합오차 보정' 적용) <= tolerance
 
 원본 AOI 도구의 비교 알고리즘에서 가져온 개선:
@@ -11,7 +11,7 @@
     두 layer 사이의 계통적 이동량(중앙값 dx,dy)을 추정하고, 그 이동량을 뺀 잔차로
     게이팅·선택한다. 두 스캔 사이에 일정한 위치 오프셋이 있어도 매칭이 성립한다.
     단, 이 오프셋이 die pitch 급으로 비정상적으로 크면(_MAX_OFFSET_MAGNITUDE 초과)
-    실제 정합오차가 아니라 die 라벨링 불일치로 보고 보정을 적용하지 않는다 — 그렇지
+    실제 정합오차가 아니라 die 라벨링 불일치로 보고 보정을 적용하지 않는다 - 그렇지
     않으면 서로 다른 die 를 매칭으로 잘못 보고하게 된다.
 
 대량 이미지에서도 빠르도록 비교 layer record 를 (wafer, col, row) 키로 한 번만
@@ -69,17 +69,17 @@ def _gather_candidates(
 # 정합오차를 신뢰하려면 최소 이만큼의 1:1 표본이 있어야 한다(단일 쌍 오적용 방지).
 _MIN_OFFSET_SAMPLES = 3
 
-# 정합오차(median offset) 크기 상한(µm) — 정답 도구 근거 문서상 KLA↔Camtek 실측
+# 정합오차(median offset) 크기 상한(µm) - 정답 도구 근거 문서상 KLA↔Camtek 실측
 # 정합오차는 ~110~125µm 수준이다. die pitch 급(수만 µm)으로 "일관된" 오프셋이
 # 나온다면 이는 실제 장비 정합오차가 아니라 die 라벨링/파싱 불일치를 정합오차로
-# 오인한 것이다 — 그런 오프셋을 그대로 적용하면 서로 다른 die 를 "매칭"으로
+# 오인한 것이다 - 그런 오프셋을 그대로 적용하면 서로 다른 die 를 "매칭"으로
 # 잘못 보고하면서 실제 거리(raw distance)만 크게 표시되는 문제가 생긴다. 이 상한을
 # 넘는 표본은 아무리 일관돼도(MAD 작아도) 보정하지 않고 미매칭으로 둔다.
 _MAX_OFFSET_MAGNITUDE = 1000.0  # µm
 
 
 def _mad(values: list[float], center: float) -> float:
-    """median absolute deviation — 표본 일관성(흩어짐) 측정."""
+    """median absolute deviation - 표본 일관성(흩어짐) 측정."""
     return statistics.median([abs(v - center) for v in values]) if values else 0.0
 
 

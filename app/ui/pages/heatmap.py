@@ -65,7 +65,7 @@ from app import config, heatmap, wafermap_align
 from app.clustering import Cluster, cluster_records, cross_layer_groups
 from app.heatmap import HeatKey
 from app.ui import theme
-from app.ui.cluster_view import ClusteredThumb
+from app.ui.sheets.cluster_view import ClusteredThumb
 from app.ui.flow_layout import FlowLayout
 from app.ui.notifications import NotificationBanner
 
@@ -1434,7 +1434,7 @@ class HeatmapPage(QWidget):
         return widget
 
     def _open_viewer(self, record) -> None:
-        from app.ui.image_viewer import ImageViewerDialog
+        from app.ui.sheets.image_viewer import ImageViewerDialog
 
         ImageViewerDialog(record, self).exec()
 

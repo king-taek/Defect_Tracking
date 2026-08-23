@@ -77,7 +77,7 @@ def test_parallel_scan_is_deterministic(tmp_path):
 
 
 def test_classify_selection_levels(tmp_path):
-    # DEVICE/MAT/LAYER/WAFER/a.jpg  — 각 레벨 선택 시 분류
+    # DEVICE/MAT/LAYER/WAFER/a.jpg  - 각 레벨 선택 시 분류
     img = tmp_path / "DEVICE" / "MAT" / "LAYER" / "WAFER" / "a.jpg"
     img.parent.mkdir(parents=True)
     img.write_bytes(b"\xff\xd8\xff\xd9")

@@ -1,4 +1,4 @@
-"""외부 디바이스 DB(AOIDeviceDB.xlsx) 로더 — 제품 일반화.
+"""외부 디바이스 DB(AOIDeviceDB.xlsx) 로더 - 제품 일반화.
 
 원본 자료 구조: 시트 1개 = 디바이스 1개. 각 시트에 다음이 있다.
   Package Info

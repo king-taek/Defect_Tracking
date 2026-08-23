@@ -1,4 +1,4 @@
-"""자동 업데이트 로직 테스트 (네트워크 없음 — opener 주입/로컬 zip)."""
+"""자동 업데이트 로직 테스트 (네트워크 없음 - opener 주입/로컬 zip)."""
 
 from __future__ import annotations
 

@@ -141,7 +141,7 @@ def test_export_page_export_intent_is_explicit(win, app):
 def test_export_all_layers_button_unions_matches(win, app):
     """'모든 매치(기준 없이)'는 모든 layer 를 기준으로 한 매치를 백그라운드로 합쳐 담는다.
 
-    회귀: 예전엔 이 계산이 UI 스레드에서 동기 실행돼 앱이 멈췄다 — 이제
+    회귀: 예전엔 이 계산이 UI 스레드에서 동기 실행돼 앱이 멈췄다 - 이제
     AllLayersMatchWorker 로 백그라운드에서 돈다(QThreadPool). 또한 버튼 한 번에 대량
     추가된 항목은 사진 카드 대신 하나의 요약 태그로 묶인다.
     """
@@ -442,7 +442,7 @@ def test_grid_rollback_base_top_left(win):
 
 
 def test_folder_picker_navigation_and_lists(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     lot = generate(tmp_path / "src")  # tmp_path/src/<LOT_NAME>
     root = lot.parent
@@ -464,7 +464,7 @@ def test_folder_picker_navigation_and_lists(app, tmp_path):
 
 
 def test_folder_picker_filter_hides_items(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     root = tmp_path / "root"
     (root / "AlphaLot").mkdir(parents=True)
@@ -481,7 +481,7 @@ def test_folder_picker_filter_hides_items(app, tmp_path):
 
 
 def test_folder_picker_favorite_toggle_persists(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     (tmp_path / "root" / "sub").mkdir(parents=True)
     s = AppSettings(workspace=str(tmp_path / "ws"))
@@ -494,7 +494,7 @@ def test_folder_picker_favorite_toggle_persists(app, tmp_path):
 
 
 def test_folder_picker_corrects_layer_to_material(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     lot = generate(tmp_path / "src")
     layer = next(p for p in lot.iterdir() if p.is_dir())  # 자재 아래 layer
@@ -733,7 +733,7 @@ def test_heatmap_builds_cross_layer_detail(win, app):
 
 def test_folder_picker_tree_lazy_expand_and_click(app, tmp_path):
     from PySide6.QtCore import Qt as _Qt
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     (tmp_path / "root" / "childA").mkdir(parents=True)
     (tmp_path / "root" / "childB").mkdir()
@@ -861,7 +861,7 @@ def _one_cluster(path):
 
 def test_folder_picker_tree_first_and_reveal(app, tmp_path):
     from PySide6.QtCore import Qt as _Qt
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
     (tmp_path / "lot" / "layerA").mkdir(parents=True)
     dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path / "lot"))
     tops = [dlg.sidebar.topLevelItem(i).text(0) for i in range(dlg.sidebar.topLevelItemCount())]
@@ -887,7 +887,7 @@ def test_no_conder_branding_left():
 
 def test_folder_picker_network_unc_root(app, tmp_path):
     """UNC 네트워크 경로(\\\\server\\share)가 트리 최상위 루트로 추가되고 reveal 가능."""
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
     dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
     # 공유 루트 추출(플랫폼 무관)
     assert FolderPickerDialog._unc_anchor(r"\\nas01\lots\LOT") == "\\\\nas01\\lots\\"
@@ -1053,7 +1053,7 @@ def test_heatmap_detail_thumbs_deferred(win, app):
 
 def test_image_viewer_scrollbars_off_and_anchor_zoom(app):
     from PySide6.QtCore import Qt as _Qt
-    from app.ui.image_viewer import ImageViewerDialog
+    from app.ui.sheets.image_viewer import ImageViewerDialog
     from app.models import DefectRecord
     from pathlib import Path
     d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
@@ -1068,7 +1068,7 @@ def test_image_viewer_info_compact_format(app):
     Defect/Path 로 간결하게 표시되고(측정/계산 태그·size 줄 없음), 표시 라벨이
     '정보 복사' 텍스트와 동일하며 작은 글씨(objectName=meta)다."""
     from PySide6.QtCore import Qt as _Qt
-    from app.ui.image_viewer import ImageViewerDialog
+    from app.ui.sheets.image_viewer import ImageViewerDialog
     from app.models import DefectRecord, Source
     from pathlib import Path
 
@@ -1108,7 +1108,7 @@ def test_image_viewer_info_compact_format(app):
 
 def test_image_viewer_shorter_default_and_resizable(app):
     from PySide6.QtCore import Qt as _Qt
-    from app.ui.image_viewer import ImageViewerDialog
+    from app.ui.sheets.image_viewer import ImageViewerDialog
     from app.models import DefectRecord
     from pathlib import Path
     d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
@@ -1123,7 +1123,7 @@ def test_image_viewer_shorter_default_and_resizable(app):
 
 def test_image_viewer_recomputes_fit_on_first_show(app):
     """첫 표시 전 계산한 맞춤 배율을 showEvent 에서 실제 크기로 재계산해 잘림을 없앤다."""
-    from app.ui.image_viewer import ImageViewerDialog
+    from app.ui.sheets.image_viewer import ImageViewerDialog
     from app.models import DefectRecord
     from pathlib import Path
 
@@ -1138,7 +1138,7 @@ def test_image_viewer_recomputes_fit_on_first_show(app):
 
 
 def test_image_viewer_zoom_buttons_have_large_glyph_style(app):
-    from app.ui.image_viewer import ImageViewerDialog
+    from app.ui.sheets.image_viewer import ImageViewerDialog
     from app.models import DefectRecord
     from pathlib import Path
     d = ImageViewerDialog(DefectRecord(image_path=Path("/nope.jpg"), wafer_id="W",
@@ -1151,7 +1151,7 @@ def test_image_viewer_zoom_buttons_have_large_glyph_style(app):
 
 
 def test_folder_picker_goto_scan_root_button(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     target = tmp_path / "ConderScan"
     target.mkdir()
@@ -1167,7 +1167,7 @@ def test_folder_picker_goto_scan_root_button(app, tmp_path):
 
 
 def test_folder_picker_indent_and_explorer_button(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
     dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
     assert dlg.sidebar.indentation() == 12
     assert hasattr(dlg, "btn_explorer")
@@ -1218,7 +1218,7 @@ def test_thumbnail_cache_atomic_write(app, tmp_path):
 
 def test_folder_picker_natural_sort():
     """폴더 나열이 자연 정렬(숫자 인식)로 1., 2., …, 10., 11. 순서가 되어야 한다."""
-    from app.ui.folder_picker import natural_key
+    from app.ui.sheets.folder_picker import natural_key
     assert sorted(["10.", "1.", "11.", "2.", "21.", "3."], key=natural_key) == [
         "1.", "2.", "3.", "10.", "11.", "21."
     ]
@@ -1229,7 +1229,7 @@ def test_folder_picker_natural_sort():
 
 def test_folder_picker_lists_dirs_naturally(app, tmp_path):
     """실제 폴더 나열(_list_subdirs)도 자연 정렬을 따른다."""
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
     for n in ["1.", "2.", "10.", "11.", "21.", "3."]:
         (tmp_path / n).mkdir()
     dlg = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws")), str(tmp_path))
@@ -1237,7 +1237,7 @@ def test_folder_picker_lists_dirs_naturally(app, tmp_path):
 
 
 def test_folder_picker_scan_root_input(app, tmp_path):
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
     (tmp_path / "ScanData" / "LOT").mkdir(parents=True)
     s = AppSettings(workspace=str(tmp_path / "ws"), scan_root_path=str(tmp_path / "ScanData"))
     dlg = FolderPickerDialog(s, str(tmp_path))
@@ -1257,7 +1257,7 @@ def test_folder_picker_scan_root_input(app, tmp_path):
 
 def test_folder_picker_exposes_wafer_selection(app, tmp_path):
     """wafer 폴더를 고르면 selected_wafer_folder() 로 노출되고, selected_path() 는 상위 LOT."""
-    from app.ui.folder_picker import FolderPickerDialog
+    from app.ui.sheets.folder_picker import FolderPickerDialog
 
     wafer = tmp_path / "LOT" / "LAYER" / "WAFER"
     wafer.mkdir(parents=True)

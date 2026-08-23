@@ -18,7 +18,7 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# 제품 프로파일 (좌표 변환 상수 묶음) — 제품별 확장은 PRODUCTS 에 추가만 하면 된다.
+# 제품 프로파일 (좌표 변환 상수 묶음) - 제품별 확장은 PRODUCTS 에 추가만 하면 된다.
 # ---------------------------------------------------------------------------
 
 
@@ -67,7 +67,7 @@ PRODUCTS: dict[str, ProductConfig] = {
         key="DEVAINT",
         name="DEVA Live",
         # AOIDeviceDB.xlsx "DEVA Live" 시트 실측값(정답 도구 원본 기준).
-        # "DEVA"(다른 시트, Y=5/23-die)과 혼동하지 말 것 — 실제 운영 KLARF
+        # "DEVA"(다른 시트, Y=5/23-die)과 혼동하지 말 것 - 실제 운영 KLARF
         # SampleTestPlan(YINDEX -3~+2, 30쌍)과 일치하는 건 "DEVA Live"(Y=6/30-die).
         camtek_pitch_x=37170.0,
         camtek_pitch_y=44830.0,
@@ -142,7 +142,7 @@ def match_product_for_path(lot_path) -> tuple[str | None, int]:
     return best_key, best_score
 
 
-# ---- 하위호환 상수 (기본 제품 값) — 샘플데이터/기존 테스트가 참조 ----
+# ---- 하위호환 상수 (기본 제품 값) - 샘플데이터/기존 테스트가 참조 ----
 _DEFAULT_CFG = PRODUCTS[DEFAULT_PRODUCT]
 CAMTEK_PITCH_X = _DEFAULT_CFG.camtek_pitch_x
 CAMTEK_PITCH_Y = _DEFAULT_CFG.camtek_pitch_y
@@ -290,7 +290,7 @@ class AppSettings:
     theme_mode: str = "light"  # light / dark
     heatmap_layout: int = 0  # 히트맵 팝업 레이아웃 프리셋 인덱스(마지막 선택 기억)
     log_dir: str = field(default_factory=default_log_dir)  # 비어 있으면 workspace/logs 사용
-    window_geometry: str = ""  # "x,y,w,h" — 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
+    window_geometry: str = ""  # "x,y,w,h" - 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
     window_maximized: bool = True  # 시작 시 최대화(기본). 사용자가 해제하면 False 로 저장
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
     auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인

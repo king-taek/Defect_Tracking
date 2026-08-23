@@ -1,4 +1,4 @@
-"""메인 윈도우 — 전체 workflow 조립 (문서 Section 8 전체).
+"""메인 윈도우 - 전체 workflow 조립 (문서 Section 8 전체).
 
 폴더 선택 → 스캔 → 기준/비교 layer 선택 → 매칭 → 탐색/비교 → 결과 출력.
 모든 원본 접근은 read-only, 결과는 output workspace 에만 저장한다.
@@ -32,7 +32,7 @@ from app.safety import conflicting_source
 from app.scanner import LotIndex
 from app.thumbnails import ThumbnailCache
 from app.ui.image_loader import ImageLoader
-from app.ui.image_viewer import ImageViewerDialog
+from app.ui.sheets.image_viewer import ImageViewerDialog
 from app.ui import theme
 from app.ui.notifications import NotificationBanner
 from app.ui.pages.export import ExportPage
@@ -76,7 +76,7 @@ class MainWindow(FluentWindow):
         self._match_idx = None
         self._match_fail = None
         self._layer_offsets: dict = {}  # 비교 layer 별 전역 정합오차(median)
-        # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
+        # 보기 필터는 '매칭만' 고정(드롭다운 제거) - 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
         # 출력 담기 트레이: (BaseDefectMatches, 태그) 튜플 목록(base image_path 로 중복 제거).
         # 태그는 출력 명세 페이지의 '전체 담기' 묶음 표시용(None=개별). 그대로 저장해야
@@ -145,7 +145,7 @@ class MainWindow(FluentWindow):
         self.setMinimumSize(1024, 680)
 
     def show_initial(self) -> None:
-        """초기 표시 — 기본 최대화(설정). 최대화를 끈 적이 있으면 저장된 창 크기로 연다.
+        """초기 표시 - 기본 최대화(설정). 최대화를 끈 적이 있으면 저장된 창 크기로 연다.
 
         _restore_geometry 가 normal 상태의 창 크기/위치를 미리 설정해 두므로, 최대화를
         해제하면 그 크기로 복원된다.
@@ -348,7 +348,7 @@ class MainWindow(FluentWindow):
         last = self.settings.last_lot_folder
         start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
         # 네이티브 탐색기 대신 앱 내 커스텀 폴더 트리 선택기를 사용한다.
-        from app.ui.folder_picker import FolderPickerDialog
+        from app.ui.sheets.folder_picker import FolderPickerDialog
         dlg = FolderPickerDialog(self.settings, start, self)
         if dlg.exec():
             folder = dlg.selected_path()
@@ -409,7 +409,7 @@ class MainWindow(FluentWindow):
                 action=self._choose_folder,
                 timeout_ms=0,
             )
-        else:  # unknown — 그대로 시도(스캔에서 layer 없음 경고로 처리)
+        else:  # unknown - 그대로 시도(스캔에서 layer 없음 경고로 처리)
             self.load_lot(folder)
 
     def _rescan(self) -> None:
@@ -484,7 +484,7 @@ class MainWindow(FluentWindow):
         self.progress.setFormat("스캔 준비 중...")
         self.nav.set_status("스캔 중...")
         self.top.set_lot_name(Path(folder).name)
-        self.setWindowTitle(f"{self._base_title}  —  {Path(folder).name}")
+        self.setWindowTitle(f"{self._base_title}  -  {Path(folder).name}")
 
         worker = ScanWorker(folder)
         self._scan_worker = worker
@@ -698,7 +698,7 @@ class MainWindow(FluentWindow):
             self._show_base_prompt()
             return
         self._save_prefs()
-        # raw 기준 목록(근접 중복 접기 전) — 매칭 입력·재매칭에 사용.
+        # raw 기준 목록(근접 중복 접기 전) - 매칭 입력·재매칭에 사용.
         self._base_records_raw = [
             r for r in self.lot_index.records_for_layer(base_layer) if r.ok
         ]
@@ -769,7 +769,7 @@ class MainWindow(FluentWindow):
         """비교 토글/허용오차/클러스터 길이 변경: 재매칭(비동기). 현재 인덱스는 유지(범위 clamp).
 
         refresh_strip: 클러스터 길이 변경처럼 base 클러스터링 자체(그룹 개수·대표·+n)가
-        바뀔 수 있는 경우 True — 상단 썸네일 스트립의 아이템(캡션·이미지)도 다시 만든다.
+        바뀔 수 있는 경우 True - 상단 썸네일 스트립의 아이템(캡션·이미지)도 다시 만든다.
         허용오차/비교 layer 토글은 클러스터링을 바꾸지 않으므로 기본값(False)이면 충분하다.
         """
         if self.lot_index is None or not self._base_records_raw:
@@ -927,7 +927,7 @@ class MainWindow(FluentWindow):
     # ------------------------------------------------- 썸네일 확대율
     @staticmethod
     def _thumbnail_center_ratio() -> float:
-        """상단 썸네일 중앙 crop 비율 — 5× 고정(사진 중앙 20%)."""
+        """상단 썸네일 중앙 crop 비율 - 5× 고정(사진 중앙 20%)."""
         return config.THUMBNAIL_CENTER_RATIO
 
     # ------------------------------------------------- 출력 담기 트레이(항목 1)
@@ -1133,10 +1133,10 @@ class MainWindow(FluentWindow):
             dlg.exec()
 
     def _show_cluster_members(self, members: list) -> None:
-        """기준 셀의 '+n' 클릭 — 근접(<50)으로 접힌 defect 전체를 팝업으로 보여준다."""
+        """기준 셀의 '+n' 클릭 - 근접(<50)으로 접힌 defect 전체를 팝업으로 보여준다."""
         if not members:
             return
-        from app.ui.cluster_view import ClusterMembersPopup
+        from app.ui.sheets.cluster_view import ClusterMembersPopup
         ClusterMembersPopup(
             members, self.top.base_layer(), self.thumb_cache, self._open_viewer, self,
             add_to_export=self._add_records_to_export,

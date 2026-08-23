@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from qfluentwidgets import Theme, isDarkTheme, setTheme  # noqa: E402
 
 from app.config import AppSettings  # noqa: E402
-from app.ui.folder_picker import (  # noqa: E402
+from app.ui.sheets.folder_picker import (  # noqa: E402
     RANK_LOT,
     RANK_OTHER,
     RANK_UNSURE,
@@ -249,7 +249,7 @@ def test_rail_shows_favorites_and_recents(app, tmp_path):
 
 def test_favorite_tip_is_shown_once_per_run(app, tmp_path, monkeypatch):
     """추가 방법 안내는 즐겨찾기가 비었을 때 실행당 한 번만 뜬다(반복 안내 금지)."""
-    import app.ui.folder_picker as picker
+    import app.ui.sheets.folder_picker as picker
 
     monkeypatch.setattr(picker, "_TIP_SHOWN", False)
     first = FolderPickerDialog(AppSettings(workspace=str(tmp_path / "ws1")), str(tmp_path))
@@ -494,7 +494,9 @@ def test_copy_has_no_emoji_or_em_dash():
 
     금지 문자를 그대로 적으면 이 파일이 규칙을 어기게 되므로 코드포인트로만 쓴다.
     """
-    source = Path(__file__).resolve().parent.parent / "app" / "ui" / "folder_picker.py"
+    source = (
+        Path(__file__).resolve().parent.parent / "app" / "ui" / "sheets" / "folder_picker.py"
+    )
     text = source.read_text(encoding="utf-8")
     assert "\u2014" not in text  # em-dash
     # 원본에 있던 장식 문자들(별·압정·집·디스켓·지구본·회전화살표·폴더).

@@ -30,7 +30,7 @@ def _norm_wafer(wafer_id: str) -> str:
 
 @dataclass
 class Cluster:
-    """근접 defect 묶음 — 대표 1개 + 전체 members(대표 포함)."""
+    """근접 defect 묶음 - 대표 1개 + 전체 members(대표 포함)."""
 
     representative: DefectRecord
     members: list[DefectRecord] = field(default_factory=list)
@@ -58,7 +58,7 @@ class _UnionFind:
 
 
 def _rep_of(members: list[DefectRecord]) -> DefectRecord:
-    """대표 선택 — image_path 이름순 첫 항목(결정론)."""
+    """대표 선택 - image_path 이름순 첫 항목(결정론)."""
     return min(members, key=lambda r: str(r.image_path))
 
 

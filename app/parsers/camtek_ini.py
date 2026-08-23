@@ -8,7 +8,7 @@
   x   = X - Col * camtek_pitch_x
   y   = Y - Row * camtek_pitch_y
 
-(상수는 활성 제품 프로파일(`config.active_product()`)에서 온다 — 기본 DEVA 은
+(상수는 활성 제품 프로파일(`config.active_product()`)에서 온다 - 기본 DEVA 은
 col_offset=2, row_base=7, pitch_x=37170.0, pitch_y=44830.0.)
 
 원본 INI 는 read-only 로만 읽는다.

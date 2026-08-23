@@ -1,4 +1,4 @@
-"""로딩(작업 중) 오버레이 — 부모 위 반투명 막 + 중앙 카드(부드러운 스피너·메시지·진행바).
+"""로딩(작업 중) 오버레이 - 부모 위 반투명 막 + 중앙 카드(부드러운 스피너·메시지·진행바).
 
 무거운 작업이 진행되는 동안 '멈춘 것'처럼 보이지 않도록, 부드럽게 회전하는 네온 링과
 (가능하면) 진행도를 표시한다. 부모의 크기에 맞춰 자동으로 덮는다.
@@ -195,7 +195,7 @@ class BusyOverlay(QWidget):
 
     def eventFilter(self, obj, event):  # noqa: N802
         # 호스트가 파괴된 뒤에도 필터 등록이 남아 shiboken 이 __init__ 없이 재래핑한
-        # 인스턴스로 호출될 수 있다(_host 없음) — 그런 경우 조용히 무시한다.
+        # 인스턴스로 호출될 수 있다(_host 없음) - 그런 경우 조용히 무시한다.
         host = getattr(self, "_host", None)
         if host is not None and obj is host and event.type() == QEvent.Resize and self.isVisible():
             self._reposition()

@@ -33,7 +33,7 @@ def setup_logging(log_dir: Optional[Path] = None, level: int = logging.DEBUG) ->
     """루트 `defect_tracker` 로거를 1회 구성한다(중복 핸들러 방지).
 
     log_dir 이 주어지고 쓰기 가능하면 회전 파일 핸들러를 그 디렉터리에 바로 추가한다
-    (하위에 별도 "logs" 폴더를 만들지 않음 — 호출자가 최종 로그 디렉터리를 넘긴다).
+    (하위에 별도 "logs" 폴더를 만들지 않음 - 호출자가 최종 로그 디렉터리를 넘긴다).
     파일 핸들러 설치에 실패해도(권한 등) 콘솔 로깅은 유지하며 예외를 던지지 않는다.
     """
     global _CONFIGURED

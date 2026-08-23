@@ -37,7 +37,7 @@ class ScanWorker(QRunnable):
         self._cancelled = False
 
     def cancel(self) -> None:
-        """협조적 취소 — 다음 wafer 처리 지점에서 스캔 루프가 멈춘다."""
+        """협조적 취소 - 다음 wafer 처리 지점에서 스캔 루프가 멈춘다."""
         self._cancelled = True
 
     @Slot()
@@ -157,7 +157,7 @@ class AllLayersMatchWorker(QRunnable):
     """모든 layer 를 각각 기준으로 매칭해, 어느 layer 에서든 매치된 defect 을 백그라운드에서 합친다.
 
     '기준 layer 없이 전체 매치'는 layer 수만큼 전체 매칭을 다시 도는 무거운 작업이라
-    UI 스레드에서 돌리면 완료될 때까지 앱이 멈춘다 — MatchWorker 와 같은 이유로 백그라운드로 뺀다.
+    UI 스레드에서 돌리면 완료될 때까지 앱이 멈춘다 - MatchWorker 와 같은 이유로 백그라운드로 뺀다.
     """
 
     def __init__(self, layers, records_by_layer, records_for_layer, tolerance, wafer_filter=None):

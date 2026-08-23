@@ -140,7 +140,7 @@ def test_large_systematic_offset_auto_corrected():
 
 def test_die_pitch_scale_offset_not_applied():
     """die pitch 급(예: +37247)으로 '일관된' 오프셋은 실제 정합오차가 아니라 die
-    라벨링 불일치로 보고 보정을 적용하지 않는다(회귀 — 먼 die 오매칭 방지)."""
+    라벨링 불일치로 보고 보정을 적용하지 않는다(회귀 - 먼 die 오매칭 방지)."""
     bases = [
         _rec("LYA4", "W1", 1, 1, 1000.0, 0.0),
         _rec("LYA4", "W1", 3, 3, 1000.0, 0.0),

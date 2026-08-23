@@ -1,4 +1,4 @@
-"""웨이퍼 맵 die 정합(alignment) — 관측 die 와 디바이스 DB die_map 의 원점 맞추기.
+"""웨이퍼 맵 die 정합(alignment) - 관측 die 와 디바이스 DB die_map 의 원점 맞추기.
 
 배경: 디바이스 DB 의 die_map 은 Map 그리드의 (ci,ri)(좌상단 원점)인데, record 의
 (col,row) 는 파서마다 다른 오프셋(KLA `+count//2`, Camtek INI `row_base-row`, 파일명
@@ -54,7 +54,7 @@ def align_observed_to_diemap(
         for dc, dr in die_map:
             votes[(oc - dc, orow - dr)] += 1
 
-    # 동점(같은 최다 득표) translation 이 여럿일 수 있다 — 관측 die 가 성기면 작은
+    # 동점(같은 최다 득표) translation 이 여럿일 수 있다 - 관측 die 가 성기면 작은
     # cluster 가 큰(dense) 디바이스 모양 안 여러 위치에 똑같이 맞아 overlap 이 같아진다.
     # 해시 순서로 임의 선택하면 윤곽이 defect 셀 옆으로 밀려 보이고, 관측 중심으로 맞추면
     # 오히려 이미 제자리인 die 를 밀어버린다(관측이 die_map 부분집합일 때 shift 0 이 정답인데

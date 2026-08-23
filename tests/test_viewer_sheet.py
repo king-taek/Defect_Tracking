@@ -23,8 +23,8 @@ from qfluentwidgets import isDarkTheme  # noqa: E402
 
 from app.models import DefectRecord  # noqa: E402
 from app.ui import theme  # noqa: E402
-from app.ui.cluster_view import ClusterMembersPopup  # noqa: E402
-from app.ui.image_viewer import ImageViewerDialog  # noqa: E402
+from app.ui.sheets.cluster_view import ClusterMembersPopup  # noqa: E402
+from app.ui.sheets.image_viewer import ImageViewerDialog  # noqa: E402
 
 _IMG_W, _IMG_H = 1200, 900
 

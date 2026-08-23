@@ -42,7 +42,7 @@ def _record_scan_error(path: Path, exc: OSError) -> None:
     msg = f"{path}: {exc.__class__.__name__}: {exc}"
     with _scan_errors_lock:
         _scan_errors.append(msg)
-    _log.warning("접근 실패 — %s", msg)
+    _log.warning("접근 실패 - %s", msg)
 
 
 @dataclass
@@ -174,13 +174,13 @@ def _has_greatgrandchild_dir_with_images(root: Path, breadth: int = 24) -> bool:
 def classify_selection(path: str | Path) -> tuple[str, Optional[Path]]:
     """선택한 폴더가 자재/LOT/layer/wafer/사진 구조에서 어느 레벨인지 **구조로** 판별.
 
-    LOT 폴더의 정의: `LOT/layer/wafer/사진` — 사진이 정확히 2단계 아래(wafer 폴더)에
+    LOT 폴더의 정의: `LOT/layer/wafer/사진` - 사진이 정확히 2단계 아래(wafer 폴더)에
     있어야 LOT 으로 인정한다. 자재 폴더는 LOT 의 상위(사진이 3단계 아래)로, LOT 과
     구분해 판정한다. 얕은 위치(LOT·layer 폴더)에 흔히 섞여 있는 요약/맵 이미지 같은
     잡파일에 흔들리지 않도록 **가장 깊은 구조가 우선**하도록 판정한다.
 
     Returns:
-        (kind, material_path) — kind 는
+        (kind, material_path) - kind 는
           'material'(LOT 정상) / 'layer' / 'wafer'(둘 다 자동으로 상위 LOT 으로 보정) /
           'material_parent'(자재 폴더 = LOT 상위, 안으로 들어가 LOT 재선택 필요) /
           'too_high'(그보다 더 상위, 재선택 필요) / 'unknown'(이미지 못 찾음).
@@ -475,7 +475,7 @@ def scan_lot(
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for done, recs in enumerate(ex.map(_scan_task, tasks), start=1):
                 if cancel_check and cancel_check():
-                    _log.info("스캔 중단 요청 — %d/%d wafer 에서 멈춤", done, wafer_total)
+                    _log.info("스캔 중단 요청 - %d/%d wafer 에서 멈춤", done, wafer_total)
                     break
                 index.records.extend(recs)
                 if progress:
