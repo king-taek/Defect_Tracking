@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&amp;family=Inter+Tight:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1013;font-family:'Segoe UI','Noto Sans KR',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#4CC2FF;text-decoration:none}a:hover{color:#6BCDFF}
+</style>
+</helmet>
+<div style="width:1560px;margin:0 auto;padding:26px 24px 44px;color:#E6E8EA">
+
+  <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+    <div style="flex:1">
+      <div style="font-family:'Inter Tight',sans-serif;font-size:22px;font-weight:600;letter-spacing:-0.4px;color:#F3F5F7">Excel 리포트 재설계</div>
+      <div style="font-size:12.5px;color:#9BA3AB;margin-top:5px;line-height:1.65;max-width:1080px">근거: <span style="font-family:'Inter Tight',monospace">app/export/excel_report.py</span> · 실사용 규모 <b style="color:#E6E8EA">layer 12개 · layer당 40~60장 · 총 599장 · 기준 후보 52장</b>. 요청대로 <b style="color:#E6E8EA">사진 대조 한 장</b>만 남기고, 미매칭은 전부 회색 1단으로 낮추고 거리 표기를 없애 시선이 매칭된 사진에만 가도록 했습니다. 필터·정렬·layer 집계는 리포트 범위에서 제외하고 앱에서 수행합니다(사용자 결정).</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <sc-for list="{{modeBtns}}" as="m" hint-placeholder-count="2">
+        <button onClick="{{m.on}}" style="height:32px;padding:0 14px;border:1px solid {{m.bd}};border-radius:5px;background:{{m.bg}};color:{{m.co}};font-size:12.5px;font-weight:{{m.wt}};font-family:inherit;cursor:pointer;transition:background-color .14s linear,border-color .14s linear" style-active="transform:translateY(1px)">{{m.label}}</button>
+      </sc-for>
+      <sc-if value="{{baseOn}}" hint-placeholder-val="{{true}}">
+        <div style="display:flex;align-items:center;gap:6px;padding-left:6px">
+          <span style="font-size:11.5px;color:#8B939B">기준</span>
+          <sc-for list="{{baseBtns}}" as="b" hint-placeholder-count="3">
+            <button onClick="{{b.on}}" title="기준 layer 변경 — 열 순서는 그대로, ★ 표시만 이동합니다" style="height:32px;padding:0 12px;border:1px solid {{b.bd}};border-radius:5px;background:{{b.bg}};color:{{b.co}};font-family:'Inter Tight',monospace;font-size:12px;font-weight:{{b.wt}};cursor:pointer;transition:background-color .14s linear,border-color .14s linear" style-active="transform:translateY(1px)">{{b.label}}</button>
+          </sc-for>
+        </div>
+      </sc-if>
+      <button onClick="{{tgPrint}}" style="height:32px;padding:0 14px;border:1px solid #2E3339;border-radius:5px;background:#1B1E22;color:#E6E8EA;font-size:12.5px;font-family:inherit;cursor:pointer;transition:background-color .14s linear" style-hover="background:#22262B" style-active="transform:translateY(1px)">{{printLbl}}</button>
+    </div>
+  </div>
+
+  <!-- ═══ 지표 대조 ═══ -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#23272C;border:1px solid #23272C;border-radius:7px;overflow:hidden;margin-bottom:22px">
+    <sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
+      <div style="background:#15181B;padding:15px 18px 17px">
+        <div style="font-size:11px;color:#8B939B">{{k.t}}</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-top:7px">
+          <span style="font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;font-size:19px;font-weight:600;color:#FF9B90">{{k.b}}</span>
+          <span style="font-size:11px;color:#6E767E">→</span>
+          <span style="font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;font-size:19px;font-weight:600;color:#7BD88F">{{k.a}}</span>
+        </div>
+        <div style="font-size:11px;color:#8B939B;margin-top:6px;line-height:1.55">{{k.note}}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:flex;gap:20px;align-items:flex-start">
+    <!-- ═══ BEFORE ═══ -->
+    <div style="width:520px;flex:none">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+        <span style="border:1px solid #A5271E;color:#FF9B90;padding:2px 9px;border-radius:4px;font-family:'Inter Tight',monospace;font-size:10.5px;font-weight:700;letter-spacing:1.6px">BEFORE</span>
+        <span style="font-size:11.5px;color:#8B939B">시트 1개 · 「비교 결과」</span>
+      </div>
+      <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 18px 44px -18px rgba(0,0,0,.6)">
+        <div style="height:26px;background:#217346;display:flex;align-items:center;padding:0 12px;gap:8px">
+          <span style="color:#fff;font-size:11px;font-weight:600">비교_결과_204.DEVAINT.226_20260823.xlsx</span>
+          <div style="flex:1"></div>
+          <span style="color:rgba(255,255,255,.82);font-family:'Inter Tight',monospace;font-size:10px">318 MB</span>
+        </div>
+        <div style="height:432px;overflow:auto;background:#fff;color:#1B2A4A">
+          <div style="width:1180px">
+            <div style="height:26px;background:#1B2A4A;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;padding:0 8px">Defect Tracker 비교 결과 보고서</div>
+            <div style="height:20px;background:#1E90FF;color:#fff;font-size:10px;display:flex;align-items:center;padding:0 8px">LOT: 204. DEVAINT.226 (PKG)    기준 Layer: LYA4    허용 오차: 100    생성: 2026-08-23 03:34    ※ 각 블록의 'Layer' 행이 실제 기준/비교 layer 를 표시</div>
+            <div style="height:14px"></div>
+            <sc-for list="{{beBlocks}}" as="b" hint-placeholder-count="3">
+              <div>
+                <div style="display:flex;height:18px;font-size:9.5px">
+                  <div style="width:104px;flex:none;background:#6B7280;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;border:1px solid #B8C4DE;box-sizing:border-box">{{b.no}}</div>
+                  <div style="flex:1;background:#F2F6FF;font-weight:700;display:flex;align-items:center;padding:0 6px;border:1px solid #B8C4DE;box-sizing:border-box">{{b.head}}</div>
+                </div>
+                <div style="display:flex;height:18px;font-size:9px">
+                  <div style="width:104px;flex:none;background:#F2F6FF;font-weight:700;display:flex;align-items:center;justify-content:center;border:1px solid #B8C4DE;box-sizing:border-box">Layer</div>
+                  <sc-for list="{{b.cols}}" as="c" hint-placeholder-count="12">
+                    <div style="width:88px;flex:none;background:{{c.bg}};color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;border:1px solid #B8C4DE;box-sizing:border-box">{{c.ly}}</div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;height:104px;font-size:9px">
+                  <div style="width:104px;flex:none;background:#F2F6FF;font-weight:700;display:flex;align-items:center;justify-content:center;border:1px solid #B8C4DE;box-sizing:border-box">이미지</div>
+                  <sc-for list="{{b.cols}}" as="c" hint-placeholder-count="12">
+                    <div style="width:88px;flex:none;border:1px solid #B8C4DE;box-sizing:border-box;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff">
+                      <sc-if value="{{c.img}}" hint-placeholder-val="{{true}}"><img src="{{c.img}}" style="max-width:88%;max-height:88%;object-fit:contain;flex:none" alt=""></sc-if>
+                      <sc-if value="{{c.none}}" hint-placeholder-val="{{false}}"><span style="color:#B00020;font-weight:700">매칭 없음</span></sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;height:52px;font-size:8.5px">
+                  <div style="width:104px;flex:none;background:#F2F6FF;font-weight:700;display:flex;align-items:center;justify-content:center;border:1px solid #B8C4DE;box-sizing:border-box">정보</div>
+                  <sc-for list="{{b.cols}}" as="c" hint-placeholder-count="12">
+                    <div style="width:88px;flex:none;border:1px solid #B8C4DE;box-sizing:border-box;padding:3px 4px;color:{{c.ico}};line-height:1.45;overflow:hidden">{{c.info}}</div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;height:22px;font-size:8.5px">
+                  <div style="width:104px;flex:none;background:#F2F6FF;font-weight:700;display:flex;align-items:center;justify-content:center;border:1px solid #B8C4DE;box-sizing:border-box">원본경로</div>
+                  <sc-for list="{{b.cols}}" as="c" hint-placeholder-count="12">
+                    <div style="width:88px;flex:none;border:1px solid #B8C4DE;box-sizing:border-box;padding:0 4px;display:flex;align-items:center"><span style="color:#1E90FF;text-decoration:underline">원본 사진 열기</span></div>
+                  </sc-for>
+                </div>
+                <div style="height:14px"></div>
+              </div>
+            </sc-for>
+            <div style="padding:10px 8px 18px;font-size:10px;color:#6B7280">… 블록 #4 ~ #44 (총 44블록 · 2,600행) 계속</div>
+          </div>
+        </div>
+        <div style="height:24px;background:#F3F3F3;border-top:1px solid #D8D8D8;display:flex;align-items:center;padding:0 8px;gap:6px">
+          <span style="height:18px;padding:0 10px;background:#fff;border:1px solid #D8D8D8;border-bottom:2px solid #217346;font-size:10px;font-weight:600;display:flex;align-items:center;color:#1B2A4A">비교 결과</span>
+        </div>
+      </div>
+      <div style="margin-top:12px;background:#15181B;border:1px solid #23272C;border-radius:7px;padding:15px 18px">
+        <div style="font-family:'Inter Tight',monospace;font-size:10.5px;font-weight:700;letter-spacing:1.6px;color:#FF9B90">발견된 문제 9건</div>
+        <sc-for list="{{issues}}" as="i" hint-placeholder-count="8">
+          <div style="display:flex;gap:10px;margin-top:11px">
+            <span style="font-family:'Inter Tight',monospace;font-size:10.5px;font-weight:700;color:#6E767E;flex:none;width:16px">{{i.n}}</span>
+            <div><div style="font-size:12.5px;color:#E6E8EA;font-weight:600">{{i.t}}</div><div style="font-size:11.5px;color:#9BA3AB;margin-top:3px;line-height:1.6">{{i.d}}</div></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- ═══ AFTER ═══ -->
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+        <span style="background:#009FAA;color:#06231F;padding:3px 10px;border-radius:4px;font-family:'Inter Tight',monospace;font-size:10.5px;font-weight:700;letter-spacing:1.6px">AFTER</span>
+        <span style="font-size:11.5px;color:#8B939B">시트 1개 · 사진 대조만 · 담은 12건 × layer 12칸</span>
+      </div>
+      <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 18px 44px -18px rgba(0,0,0,.6)">
+        <div style="height:26px;background:#217346;display:flex;align-items:center;padding:0 12px;gap:8px">
+          <span style="color:#fff;font-size:11px;font-weight:600">DefectReport_204.DEVAINT.226_LYA4_20260823.xlsx</span>
+          <div style="flex:1"></div>
+          <span style="color:rgba(255,255,255,.82);font-family:'Inter Tight',monospace;font-size:10px">14 MB</span>
+        </div>
+
+        <div style="height:432px;overflow:auto;background:#fff;color:#20303F">
+          <!-- SHEET 요약 (제거됨) -->
+          <div style="display:none;padding:0">
+            <div style="height:30px;background:#20303F;color:#fff;display:flex;align-items:center;padding:0 14px;gap:10px">
+              <span style="font-size:12.5px;font-weight:700">Defect 비교 리포트</span>
+              <span style="font-size:10.5px;color:rgba(255,255,255,.75)">204. DEVAINT.226 (PKG)</span>
+              <div style="flex:1"></div>
+              <span style="font-family:'Inter Tight',monospace;font-size:10px;color:rgba(255,255,255,.75)">2026-08-23 03:34 · v1.4.2</span>
+            </div>
+            <div style="display:flex;gap:0;border-bottom:1px solid #DCE3EA">
+              <sc-for list="{{sumMeta}}" as="m" hint-placeholder-count="5">
+                <div style="flex:1;padding:11px 14px;border-right:1px solid #EDF1F5">
+                  <div style="font-size:9.5px;color:#5B6B7A;font-weight:600;letter-spacing:.6px">{{m.k}}</div>
+                  <div style="font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;font-size:13.5px;font-weight:600;color:#20303F;margin-top:4px">{{m.v}}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="padding:14px 14px 6px;font-size:11px;font-weight:700;color:#20303F">Layer 커버리지 — 12 layer</div>
+            <div style="padding:0 14px">
+              <div style="display:flex;height:22px;background:#F1F5F9;border:1px solid #DCE3EA;font-size:10px;font-weight:700;color:#5B6B7A;align-items:center">
+                <span style="width:74px;padding-left:8px">Layer</span><span style="width:58px">깊이</span><span style="width:52px;text-align:right">사진</span><span style="width:52px;text-align:right">매칭</span><span style="width:58px;text-align:right">미매칭</span><span style="width:64px;text-align:right">커버리지</span><span style="flex:1;padding-left:12px">분포</span>
+              </div>
+              <sc-for list="{{cover}}" as="c" hint-placeholder-count="12">
+                <div style="display:flex;height:21px;border:1px solid #DCE3EA;border-top:none;font-size:10.5px;align-items:center;background:{{c.bg}}">
+                  <span style="width:74px;padding-left:8px;font-family:'Inter Tight',monospace;font-weight:{{c.wt}};color:#20303F">{{c.ly}}</span>
+                  <span style="width:58px;color:#5B6B7A;font-size:10px">{{c.dep}}</span>
+                  <span style="width:52px;text-align:right;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums">{{c.ph}}</span>
+                  <span style="width:52px;text-align:right;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:#1F7A1F">{{c.mt}}</span>
+                  <span style="width:58px;text-align:right;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:{{c.nmCo}}">{{c.nm}}</span>
+                  <span style="width:64px;text-align:right;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;font-weight:600;color:{{c.pcCo}};padding-right:2px">{{c.pc}}</span>
+                  <span style="flex:1;padding:0 12px;display:flex;align-items:center"><span style="height:9px;width:{{c.bar}};background:{{c.barCo}};border-radius:1px"></span></span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:14px;padding:16px 14px 18px">
+              <div style="flex:1">
+                <div style="font-size:11px;font-weight:700;color:#20303F;margin-bottom:6px">미매칭 사유 분포</div>
+                <sc-for list="{{reasons}}" as="r" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:10px;height:24px;font-size:10.5px">
+                    <span style="width:112px;color:#20303F">{{r.t}}</span>
+                    <span style="flex:1;height:10px;background:#EDF1F5;border-radius:1px;overflow:hidden"><span style="display:block;height:100%;width:{{r.bar}};background:{{r.co}}"></span></span>
+                    <span style="width:64px;text-align:right;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:#20303F">{{r.v}}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="flex:1">
+                <div style="font-size:11px;font-weight:700;color:#20303F;margin-bottom:6px">시트 안내</div>
+                <sc-for list="{{sheetGuide}}" as="g" hint-placeholder-count="3">
+                  <div style="display:flex;gap:8px;height:24px;align-items:center;font-size:10.5px">
+                    <span style="color:#0F6CBD;text-decoration:underline;width:88px">{{g.n}}</span>
+                    <span style="color:#5B6B7A">{{g.d}}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <!-- SHEET 매칭 표 (제거됨) -->
+          <div style="display:none">
+            <div style="position:sticky;top:0;background:#fff;z-index:3">
+              <div style="display:flex;height:24px;align-items:center;padding:0 12px;gap:10px;background:#F1F5F9;border-bottom:1px solid #DCE3EA">
+                <span style="font-size:10.5px;font-weight:700;color:#20303F">매칭 표 · 44행 × 12 layer</span>
+                <span style="font-family:'Inter Tight',monospace;font-size:10px;color:#5B6B7A">자동 필터 · 창 고정 A3 · 조건부 서식</span>
+                <div style="flex:1"></div>
+                <span style="font-size:10px;color:#5B6B7A">값 = 좌표 거리 Δ µm (허용 100)</span>
+              </div>
+              <div style="display:flex;height:26px;background:#20303F;color:#fff;font-size:10px;font-weight:700;align-items:center">
+                <span style="width:34px;text-align:center;flex:none">#</span>
+                <span style="width:96px;flex:none">wafer</span>
+                <span style="width:52px;flex:none">die</span>
+                <span style="width:78px;flex:none">pos</span>
+                <span style="width:74px;flex:none">결함</span>
+                <sc-for list="{{tblCols}}" as="c" hint-placeholder-count="11">
+                  <span style="width:56px;flex:none;text-align:right;padding-right:6px;background:{{c.bg}};height:26px;display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box">{{c.ly}}<span style="font-size:8px;opacity:.7;margin-left:2px">▾</span></span>
+                </sc-for>
+                <span style="width:52px;flex:none;text-align:right;padding-right:8px">매칭</span>
+                <span style="width:52px;flex:none;text-align:right;padding-right:8px">판정</span>
+              </div>
+            </div>
+            <sc-for list="{{tblRows}}" as="r" hint-placeholder-count="16">
+              <div style="display:flex;height:21px;font-size:10.5px;align-items:center;background:{{r.bg}};border-bottom:1px solid #EDF1F5">
+                <span style="width:34px;flex:none;text-align:center;font-family:'Inter Tight',monospace;color:#5B6B7A">{{r.no}}</span>
+                <span style="width:96px;flex:none;font-family:'Inter Tight',monospace;color:#20303F">{{r.w}}</span>
+                <span style="width:52px;flex:none;font-family:'Inter Tight',monospace;color:#20303F">{{r.die}}</span>
+                <span style="width:78px;flex:none;font-family:'Inter Tight',monospace;color:#5B6B7A">{{r.pos}}</span>
+                <span style="width:74px;flex:none;font-size:10px;color:#5B6B7A">{{r.nm}}</span>
+                <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="11">
+                  <span style="width:56px;flex:none;text-align:right;padding-right:6px;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:{{c.co}};background:{{c.bg}};height:21px;display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;font-weight:{{c.wt}}">{{c.v}}</span>
+                </sc-for>
+                <span style="width:52px;flex:none;text-align:right;padding-right:8px;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:#20303F;font-weight:600">{{r.mc}}</span>
+                <span style="width:52px;flex:none;text-align:right;padding-right:8px;font-size:10px;font-weight:700;color:{{r.vco}}">{{r.verd}}</span>
+              </div>
+            </sc-for>
+            <div style="padding:10px 12px 16px;font-size:10px;color:#5B6B7A">44행 전체 · 피벗/필터로 layer별·wafer별 집계 가능 (열 머리 ▾)</div>
+          </div>
+
+          <!-- SHEET 사진 대조 (단일 시트) -->
+          <div>
+            <!-- 시트 머리 (1~2행: 창 고정 대상) -->
+            <div style="position:sticky;top:0;z-index:4;background:#fff">
+              <div style="height:28px;background:#20303F;color:#fff;display:flex;align-items:center;padding:0 12px;gap:10px">
+                <span style="font-size:12px;font-weight:700">{{shTitle}}</span>
+                <span style="font-size:10.5px;color:rgba(255,255,255,.78)">{{shMeta}}</span>
+                <div style="flex:1"></div>
+                <span style="font-family:'Inter Tight',monospace;font-size:10px;color:rgba(255,255,255,.78)">{{shCount}}</span>
+              </div>
+              <div style="height:22px;background:#F1F5F9;border-bottom:1px solid #DCE3EA;display:flex;align-items:center;padding:0 12px;gap:10px">
+                <span style="font-family:'Inter Tight',monospace;font-size:9.5px;color:#5B6B7A">{{shRule}}</span>
+                <div style="flex:1"></div>
+                <span style="font-family:'Inter Tight',monospace;font-size:9.5px;color:#5B6B7A">{{shNote}}</span>
+              </div>
+            </div>
+
+            <sc-for list="{{afBlocks}}" as="b" hint-placeholder-count="4">
+              <div style="border-bottom:{{b.pgBd}}">
+                <sc-if value="{{b.pgLbl}}" hint-placeholder-val="{{false}}">
+                  <div style="height:16px;background:#F7FAFC;border-bottom:1px dashed #C6D2DE;display:flex;align-items:center;justify-content:flex-end;padding:0 12px">
+                    <span style="font-family:'Inter Tight',monospace;font-size:8.5px;color:#8A99A8;letter-spacing:.6px">{{b.pgLbl}}</span>
+                  </div>
+                </sc-if>
+                <div style="display:flex;height:26px;align-items:center;background:#EEF3F8;padding:0 12px;gap:10px;border-bottom:1px solid #DCE3EA">
+                  <span style="font-family:'Inter Tight',monospace;font-size:10.5px;font-weight:700;color:#20303F;width:26px">{{b.no}}</span>
+                  <span style="font-size:11px;font-weight:600;color:#20303F">{{b.w}}</span>
+                  <span style="font-family:'Inter Tight',monospace;font-size:10.5px;color:#20303F">die {{b.die}}</span>
+                  <span style="font-family:'Inter Tight',monospace;font-size:10px;color:#5B6B7A">{{b.pos}}</span>
+                  <span style="height:16px;padding:0 7px;border-radius:2px;background:#E3EAF1;color:#20303F;font-size:9.5px;font-weight:600;display:flex;align-items:center">{{b.nm}}</span>
+                  <span style="height:16px;padding:0 7px;border-radius:2px;background:{{b.kindBg}};color:{{b.kindCo}};font-size:9.5px;font-weight:700;display:flex;align-items:center">{{b.kind}}</span>
+                  <div style="flex:1"></div>
+                  <span style="font-family:'Inter Tight',monospace;font-size:10px;color:#1F7A1F;font-weight:600">매칭 {{b.mc}}</span>
+                </div>
+                <div style="display:flex;padding:8px 12px 11px;gap:6px;overflow-x:auto">
+                  <sc-for list="{{b.cells}}" as="c" hint-placeholder-count="12">
+                    <div style="width:{{c.w}};flex:none">
+                      <div style="height:20px;background:{{c.hbg}};color:{{c.hco}};font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:2px 2px 0 0">{{c.ly}}<span style="font-size:8px;font-weight:400;opacity:.8">{{c.dep}}</span></div>
+                      <div style="height:{{c.imgH}};background:{{c.imgBg}};overflow:hidden;display:flex;align-items:center;justify-content:center;border-left:1px solid #DCE3EA;border-right:1px solid #DCE3EA;box-sizing:border-box;position:relative">
+                        <sc-if value="{{c.img}}" hint-placeholder-val="{{true}}"><img src="{{c.img}}" style="width:100%;height:100%;object-fit:cover" alt=""></sc-if>
+                        <sc-if value="{{c.rsTag}}" hint-placeholder-val="{{false}}">
+                          <span style="font-size:9.5px;font-weight:600;color:{{c.rsCo}};letter-spacing:.4px">{{c.rsTag}}</span>
+                        </sc-if>
+                        <sc-if value="{{c.plus}}" hint-placeholder-val="{{false}}">
+                          <span style="position:absolute;right:3px;bottom:3px;background:rgba(255,255,255,.9);border:1px solid #C6D2DE;border-radius:2px;font-family:'Inter Tight',monospace;font-size:8px;font-weight:700;color:#20303F;padding:0 4px">{{c.plus}}</span>
+                        </sc-if>
+                      </div>
+                      <div style="height:18px;border:1px solid #DCE3EA;border-top:none;display:flex;align-items:center;justify-content:center;gap:4px;background:{{c.dBg}};box-sizing:border-box">
+                        <span style="font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;font-size:9.5px;font-weight:{{c.dWt}};color:{{c.dco}}">{{c.d}}</span>
+                      </div>
+                      <div style="height:16px;display:flex;align-items:center;justify-content:center;font-size:8.5px;color:{{c.fCo}};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 3px;text-decoration:{{c.fDec}}">{{c.file}}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+            <div style="padding:11px 12px 18px;font-size:10px;color:#5B6B7A;line-height:1.7">{{shFoot}}
+              <sc-if value="{{crossOn}}" hint-placeholder-val="{{false}}"><br>기준 열(★)이 없으므로 블록의 첫 칸도 일반 layer입니다. 파일명은 헤더 대신 각 칸 하단에 남아 어느 layer의 사진인지 추적됩니다.</sc-if>
+            </div>
+          </div>
+
+          <!-- SHEET 미매칭 (제거됨) -->
+          <div style="display:none">
+            <div style="display:flex;height:24px;align-items:center;padding:0 12px;gap:10px;background:#F1F5F9;border-bottom:1px solid #DCE3EA">
+              <span style="font-size:10.5px;font-weight:700;color:#20303F">미매칭 · 167건</span>
+              <span style="font-family:'Inter Tight',monospace;font-size:10px;color:#5B6B7A">사유별 정렬 · 최근접 거리 포함 · 자동 필터</span>
+            </div>
+            <div style="display:flex;height:26px;background:#20303F;color:#fff;font-size:10px;font-weight:700;align-items:center">
+              <span style="width:34px;flex:none;text-align:center">#</span>
+              <span style="width:96px;flex:none">wafer</span>
+              <span style="width:52px;flex:none">die</span>
+              <span style="width:66px;flex:none">layer</span>
+              <span style="width:132px;flex:none">사유</span>
+              <span style="width:88px;flex:none;text-align:right;padding-right:8px">최근접 Δ µm</span>
+              <span style="width:74px;flex:none;text-align:right;padding-right:8px">허용 대비</span>
+              <span style="flex:1;padding-left:10px">조치</span>
+            </div>
+            <sc-for list="{{nmRows}}" as="r" hint-placeholder-count="12">
+              <div style="display:flex;height:21px;font-size:10.5px;align-items:center;background:{{r.bg}};border-bottom:1px solid #EDF1F5">
+                <span style="width:34px;flex:none;text-align:center;font-family:'Inter Tight',monospace;color:#5B6B7A">{{r.no}}</span>
+                <span style="width:96px;flex:none;font-family:'Inter Tight',monospace;color:#20303F">{{r.w}}</span>
+                <span style="width:52px;flex:none;font-family:'Inter Tight',monospace;color:#20303F">{{r.die}}</span>
+                <span style="width:66px;flex:none;font-family:'Inter Tight',monospace;color:#20303F">{{r.ly}}</span>
+                <span style="width:132px;flex:none;font-size:10px;font-weight:600;color:{{r.co}}">{{r.rs}}</span>
+                <span style="width:88px;flex:none;text-align:right;padding-right:8px;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:#20303F">{{r.dist}}</span>
+                <span style="width:74px;flex:none;text-align:right;padding-right:8px;font-family:'Inter Tight',monospace;font-variant-numeric:tabular-nums;color:{{r.ratioCo}};font-weight:600">{{r.ratio}}</span>
+                <span style="flex:1;padding-left:10px;font-size:10px;color:#5B6B7A">{{r.act}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="height:26px;background:#F3F3F3;border-top:1px solid #D8D8D8;display:flex;align-items:center;padding:0 8px;gap:4px">
+          <span style="height:20px;padding:0 14px;background:#fff;border:1px solid #D8D8D8;border-bottom:2px solid #217346;font-size:10.5px;font-weight:700;display:flex;align-items:center;color:#20303F">사진 대조</span>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1px;margin-top:12px;background:#23272C;border:1px solid #23272C;border-radius:7px;overflow:hidden">
+        <sc-for list="{{fixes}}" as="f" hint-placeholder-count="8">
+          <div style="background:#15181B;padding:14px 17px 16px">
+            <div style="display:flex;align-items:baseline;gap:9px">
+              <span style="font-family:'Inter Tight',monospace;font-size:10px;font-weight:700;color:#009FAA;letter-spacing:1.4px">{{f.n}}</span>
+              <span style="font-size:12.5px;font-weight:600;color:#E6E8EA">{{f.t}}</span>
+            </div>
+            <div style="font-size:11.5px;color:#9BA3AB;margin-top:6px;line-height:1.65">{{f.d}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 1560, &quot;height&quot;: 1180}}">
+class Component extends DCLogic {
+  state={sheet:3,print:false,mode:'base',baseLy:'LYA3'};
+  setBase(b){this.setState({baseLy:b});}
+  tgPrint=()=>this.setState({print:!this.state.print});
+  setMode(m){this.setState({mode:m});}
+  LY=[['LYA4','원본',52],['LYB4','재재리뷰',58],['LYA3','재리뷰',47],['LYB3','재리뷰',44],['LYA2','재리뷰',51],
+      ['LYB2','재리뷰',60],['LYA1','원본',43],['FS','재리뷰',55],['LYC1','원본',41],['LYC2','원본',49],
+      ['LYD1','원본',46],['LYD2','원본',53]];
+  SL=['4556857003','4556857005','4556857007','4556857009','4556857011','4556857013','4556857015','4556857017'];
+  DEF=['PARTICLE','SCRATCH','DISCOLOR','BUMP-MISS','SMEAR'];
+  img(i){return 'img/def'+String(((i%10)+1)).padStart(2,'0')+'.jpg';}
+  go(n){this.setState({sheet:n});}
+  renderVals(){
+    const s=this.state;
+    let sd=77;
+    const rr=()=>{sd=(sd*1103515245+12345)>>>0;return sd/4294967296;};
+    const cmp=this.LY.slice(1).map(x=>x[0]);
+
+    const tabs=[[1,'요약'],[2,'매칭 표'],[3,'사진 대조'],[4,'미매칭']].map(x=>({
+      label:x[1], on:()=>this.go(x[0]),
+      bg:s.sheet===x[0]?'#009FAA':'#1B1E22', co:s.sheet===x[0]?'#06231F':'#E6E8EA',
+      bd:s.sheet===x[0]?'#009FAA':'#2E3339', wt:s.sheet===x[0]?'700':'400',
+      tabBg:s.sheet===x[0]?'#fff':'#E8E8E8', tabBd:s.sheet===x[0]?'2px solid #217346':'1px solid #D8D8D8'}));
+
+    const kpis=[
+      {t:'파일 크기',b:'318 MB',a:'11 MB',note:'전량 528셀 190px → 담은 12건 × 12칸, 96px 셀 고정'},
+      {t:'블록 수',b:'44건 전량',a:'12건',note:'담지 않은 32건까지 넣던 것을 선택분만'},
+      {t:'열기 시간',b:'40초+',a:'2초',note:'이미지 5,000장 → 144장'},
+      {t:'인쇄',b:'설정 없음',a:'1건 = 1p',note:'가로·폭 맞춤 · 페이지 나눔 · 머리글 반복'},
+      {t:'미매칭 표기',b:'적색 강조',a:'회색 1단',note:'중요하지 않은 칸이 시선을 끌지 않게 전부 회색'}
+    ];
+
+    const beCols=(bi)=>[{ly:'★ LYA4 (기준)',bg:'#1E90FF'},...cmp.map(l=>({ly:l,bg:'#1B2A4A'}))].map((c,ci)=>{
+      const miss=(bi*3+ci)%7===4;
+      return {...c, img:miss?'':this.img(bi*3+ci), none:miss?'매칭 없음':'',
+        info:ci===0?('기준 ★\n위치 '+(2210+bi*7)+'_'+(1180+bi*3)+'\n'+(4+bi)+'_'+(3+bi)+'_x_y.jpg')
+          :(miss?'매칭 X':('매칭 O (거리 '+(6+((bi*13+ci*7)%88)).toFixed(1)+')\n위치 …\n'+(4+bi)+'_'+(3+bi)+'_x_y.jpg')),
+        ico:ci===0?'#1E90FF':(miss?'#B00020':'#1F7A1F')};
+    });
+    const beBlocks=[0,1,2].map(bi=>({no:'#'+(bi+1),
+      head:'기준 LYA4   wafer W'+this.SL[bi]+'   die ('+(4+bi)+','+(3+bi)+')   pos '+(4+bi)+'_'+(3+bi)+'_'+(2210+bi*7)+'_'+(1180+bi*3)+'   [CAMTEK]',
+      cols:beCols(bi)}));
+
+    const issues=[
+      {n:'00',t:'기준 layer가 맨 앞으로 끌려나옴',d:'layer_order 없이 호출하면 entries=[기준]+비교 로 기준이 첫 데이터 열에 고정됩니다. LOT 폴더 순서와 열 순서가 어긋나고, 기준을 바꾸면 열이 좌우로 재배치돼 블록 간 비교가 어렵습니다.'},
+      {n:'01',t:'담지 않은 건까지 전량 삽입',d:'44건 × 12열 = 528셀에 190px 썸네일. 검토해 담은 12건만 필요한데 전량이 들어가 318 MB · 열기 40초가 됩니다.'},
+      {n:'02',t:'미매칭이 적색으로 튄다',d:'중요하지 않은 칸인데 "매칭 없음"이 적색(#B00020)으로 강조돼, 정작 봐야 하는 매칭 사진보다 먼저 눈에 들어옵니다.'},
+      {n:'03',t:'6행 라벨 블록의 낭비',d:'#/Layer/이미지/정보/원본경로 라벨 열이 기준 1건마다 반복됩니다. 판정(매칭 몇/몇·재판독 여부)은 정작 어디에도 없습니다.'},
+      {n:'04',t:'이미지가 셀에 묶여 있지 않음',d:'xl.anchor 로 위치만 지정하고 크기를 셀에 맞추지 않습니다. 열 폭을 조절하거나 글자 크기를 "크게"(1.3배)로 쓰면 셀만 커지고 사진은 190px 그대로여서 정렬이 깨집니다.'},
+      {n:'05',t:'쓰지 않는 거리 값이 자리를 차지',d:'"매칭 O (거리 12.4)" — 판독에 쓰지 않는 수치가 정보 행 3줄을 차지해 사진 영역을 줄입니다.'},
+      {n:'06',t:'링크 텍스트가 전부 동일',d:'528개 셀이 모두 "원본 사진 열기". 복사·검색·추적이 불가능합니다.'},
+      {n:'07',t:'창 고정·인쇄 설정 없음',d:'스크롤하면 layer 머리글이 사라지고, 인쇄하면 블록이 페이지 경계에서 잘립니다(가로/폭 맞춤·나눔 미설정).'},
+      {n:'08',t:'대비 미달 색',d:'#1E90FF 채움 + 흰 글자 = 3.0:1. 흑백 인쇄에서 상태 구분이 사라집니다.'}
+    ];
+
+    const sumMeta=[{k:'LOT',v:'204. DEVAINT.226'},{k:'기준 LAYER',v:'LYA4 (52장)'},{k:'허용 오차',v:'100 µm'},
+      {k:'매칭 / 전체 쌍',v:'317 / 484'},{k:'기준 커버리지',v:'44 / 52 (85%)'}];
+
+    const cover=this.LY.map((x,i)=>{
+      const ph=x[2], mt=x[0]==='LYA4'?44:Math.round(ph*(0.55+rr()*0.32)), nm=ph-mt;
+      const pc=Math.round(mt/ph*100);
+      return {ly:x[0],dep:x[1],ph,mt,nm,pc:pc+'%',bar:Math.round(pc*0.72)+'%',
+        wt:x[0]==='LYA4'?'700':'400', bg:x[0]==='LYA4'?'#F7FAFC':(i%2?'#FCFDFE':'#fff'),
+        nmCo:nm>18?'#B00020':'#5B6B7A', pcCo:pc<65?'#B00020':(pc<80?'#8A5A00':'#1F7A1F'),
+        barCo:pc<65?'#D9776E':(pc<80?'#E0A94F':'#5AA85A')};
+    });
+
+    const reasons=[{t:'허용오차 초과',v:'92건 (55%)',bar:'55%',co:'#E0A94F'},
+      {t:'같은 die 사진 없음',v:'57건 (34%)',bar:'34%',co:'#9AA7B4'},
+      {t:'좌표 추출 실패',v:'18건 (11%)',bar:'11%',co:'#D9776E'}];
+    const sheetGuide=[{n:'매칭 표',d:'기준 1건 = 1행 · 자동 필터로 재판독 대상 추출'},
+      {n:'사진 대조',d:'담은 12건만 · 인쇄 1건 = 1페이지'},
+      {n:'미매칭',d:'167건 · 사유·최근접 거리·조치'}];
+
+    const tblCols=cmp.map((l,i)=>({ly:l,bg:i%2?'rgba(255,255,255,.06)':'transparent'}));
+    const tblRows=Array.from({length:16},(_,i)=>{
+      const cells=cmp.map(()=>{
+        const roll=rr();
+        if(roll<0.66){const v=+(3+rr()*90).toFixed(1);
+          return {v:v.toFixed(1),co:v<=100?'#1F7A1F':'#8A5A00',bg:v>70?'#FFF8E8':'transparent',wt:'400'};}
+        if(roll<0.80){const v=+(105+rr()*90).toFixed(1);
+          return {v:v.toFixed(1),co:'#B00020',bg:'#FDECEA',wt:'600'};}
+        if(roll<0.90) return {v:'—',co:'#9AA7B4',bg:'#F5F7F9',wt:'400'};
+        return {v:'FAIL',co:'#B00020',bg:'#FDECEA',wt:'700'};
+      });
+      const mc=cells.filter(c=>c.v!=='—'&&c.v!=='FAIL'&&parseFloat(c.v)<=100).length;
+      return {no:String(i+1),w:'W'+this.SL[i%8],die:'('+(i%7)+','+(i%6)+')',
+        pos:(i%7)+'_'+(i%6)+'_'+(1200+i*37),nm:this.DEF[i%5],cells,mc:mc+'/11',
+        verd:mc>=6?'양호':(mc>=3?'주의':'재판독'),
+        vco:mc>=6?'#1F7A1F':(mc>=3?'#8A5A00':'#B00020'),
+        bg:i%2?'#FCFDFE':'#fff'};
+    });
+
+    const DEPM={LYB4:'재재',LYA3:'재',LYB3:'재',LYA2:'재',LYB2:'재',FS:'재'};
+    const cross=s.mode==='cross';
+    const allLy=this.LY.map(x=>x[0]);
+    const afCross=[0,1,2,3].map(bi=>{
+      const cc=(bi*2+1)%7, rw=(bi*3+2)%6, x=1980+bi*211, y=1040+bi*97;
+      const solo=bi===3;
+      const cells=allLy.map((l,ci)=>{
+        const com={ly:l,dep:DEPM[l]||'',w:'116px',imgH:'96px'};
+        const hit=solo?(ci===4):((bi*4+ci*3)%11!==2&&(bi*4+ci*3)%11!==6&&(bi*4+ci*3)%11!==9);
+        if(!hit) return {...com,hbg:'#EFF1F3',hco:'#8A949E',imgBg:'#F6F7F8',img:'',plus:'',
+          rsTag:'미매칭',rsCo:'#8A949E',rs:'',d:'—',dco:'#A8B0B8',dWt:'400',dBg:'#F6F7F8',
+          file:'',fCo:'#A8B0B8',fDec:'none'};
+        return {...com,hbg:'#E8EEF4',hco:'#20303F',imgBg:'#000',img:this.img(bi+ci+3),
+          rs:'',rsTag:'',rsCo:'',plus:(bi+ci)%9===4?'＋1':'',
+          d:'매칭',dco:'#1F7A1F',dWt:'600',dBg:'#EEF7EE',
+          file:cc+'_'+rw+'_'+(x+ci*4)+'_'+(y+ci*3)+'.jpg',fCo:'#0F6CBD',fDec:'underline'};
+      });
+      const mc=cells.filter(c=>c.img).length;
+      return {no:'#'+(bi+1),w:'W'+this.SL[(bi+2)%8],die:'('+cc+', '+rw+')',
+        pos:cc+'_'+rw+'_'+x+'_'+y,nm:this.DEF[(bi+2)%5],
+        kind:solo?'개별':'교차매치', kindBg:solo?'#F1F3F5':'#E6F0F4', kindCo:solo?'#8A949E':'#1B6B78',
+        mc:mc+' / 12', nmc:String(12-mc), nmCo:'#8A949E',
+        verd:'', vBg:'transparent', vCo:'#8A949E',
+        pgBd:s.print?'2px dashed #C6D2DE':'2px solid #DCE3EA',
+        pgLbl:s.print?('페이지 '+(bi+1)+' / 9 — 가로 A4 · 폭 맞춤'):'',
+        cells};
+    });
+    const BL=s.baseLy;
+    const afBase=[0,1,2,3].map(bi=>{
+      const cc=bi%7, rw=(bi*3)%6, x=2210+bi*137, y=1180+bi*53;
+      const cells=allLy.map((l,ci)=>{
+        const com={ly:l,dep:DEPM[l]||'',w:'116px',imgH:'96px'};
+        if(l===BL) return {...com,dep:'★ 기준',hbg:'#20303F',hco:'#fff',imgBg:'#000',
+          img:this.img(bi),rs:'',rsTag:'',rsCo:'',plus:bi===1?'＋2':'',
+          d:'기준',dco:'#20303F',dWt:'700',dBg:'#E3EAF1',
+          file:cc+'_'+rw+'_'+x+'_'+y+'.jpg',fCo:'#0F6CBD',fDec:'underline'};
+        const roll=(bi*5+ci*3)%11;
+        if(roll===2||roll===6||roll===9)
+          return {...com,hbg:'#EFF1F3',hco:'#8A949E',imgBg:'#F6F7F8',img:'',plus:'',
+            rsTag:'미매칭',rsCo:'#8A949E',rs:'',
+            d:'—',dco:'#A8B0B8',dWt:'400',dBg:'#F6F7F8',
+            file:'',fCo:'#A8B0B8',fDec:'none'};
+        return {...com,hbg:'#E8EEF4',hco:'#20303F',imgBg:'#000',img:this.img(bi+ci+2),
+          rs:'',rsTag:'',rsCo:'',plus:(bi+ci)%8===3?'＋1':'',
+          d:'매칭',dco:'#1F7A1F',dWt:'600',dBg:'#EEF7EE',
+          file:cc+'_'+rw+'_'+(x+ci*3)+'_'+(y+ci*2)+'.jpg',fCo:'#0F6CBD',fDec:'underline'};
+      });
+      const mc=cells.filter(c=>c.img&&c.dep!=='★ 기준').length;
+      const nmc=11-mc;
+      return {no:'#'+(bi+1),w:'W'+this.SL[bi],die:'('+cc+', '+rw+')',
+        pos:cc+'_'+rw+'_'+x+'_'+y,nm:this.DEF[bi%5],
+        kind:'기준 '+BL, kindBg:'#E3EAF1', kindCo:'#20303F',
+        mc:mc+' / 11',nmc:String(nmc),nmCo:'#8A949E',
+        verd:'', vBg:'transparent', vCo:'#8A949E',
+        pgBd:s.print?'2px dashed #C6D2DE':'2px solid #DCE3EA',
+        pgLbl:s.print?('페이지 '+(bi+1)+' / 12 — 가로 A4 · 폭 맞춤'):'',
+        cells};
+    });
+
+    const RS=[['허용오차 초과','#8A5A00','재판독 대상'],['같은 die 사진 없음','#5B6B7A','해당 layer 촬영 누락'],['좌표 추출 실패','#B00020','파일명·INI 확인']];
+    const nmRows=Array.from({length:12},(_,i)=>{
+      const k=i%3, over=k===0;
+      const dist=over?(105+((i*23)%88)):null;
+      return {no:String(i+1),w:'W'+this.SL[i%8],die:'('+(i%7)+','+(i%6)+')',ly:cmp[i%11],
+        rs:RS[k][0],co:RS[k][1],act:RS[k][2],
+        dist:dist!=null?dist.toFixed(1):'—',
+        ratio:dist!=null?('+'+Math.round(dist-100)+'%'):'—',
+        ratioCo:dist!=null?'#B00020':'#9AA7B4',
+        bg:i%2?'#FCFDFE':'#fff'};
+    });
+
+    const fixes=[
+      {n:'FIX 00',t:'열은 LOT 순서, 기준은 ★ 표시로',d:'기준 layer를 맨 앞에 고정하던 것을 폴더 스캔 순서(LYA4·LYB4·LYA3·LYB3·LYA2·LYB2·LYA1·FS·LYC1·LYC2·LYD1·LYD2) 고정으로 바꿨습니다. 기준은 자기 자리에서 ★ 배지 + 진한 머리글로만 구분됩니다 — 블록마다 열 의미가 흔들리지 않고, 기준을 바꿔도 좌우로 재배치되지 않습니다. 상단 기준 버튼으로 ★만 이동하는 것을 확인해 보세요.'},
+      {n:'FIX 01',t:'담은 건만, 전량 아님',d:'44건 전량 528셀에 190px 썸네일을 심던 것을 담은 12건 × 12칸(144장)으로 한정. 318 MB → 11 MB, 열기 40초 → 2초. 리포트는 "검토가 끝난 것"을 담는 문서라는 원칙에 맞췄습니다.'},
+      {n:'FIX 02',t:'미매칭은 전부 회색 1단',d:'사유·거리·적색 강조를 모두 걷어내고 회색 채움 + "미매칭" 한 단어로 통일. 시선은 매칭된 사진에만 갑니다. 흑백 인쇄에서도 빈 칸이 조용히 남습니다.'},
+      {n:'FIX 03',t:'블록 머리 한 줄',d:'wafer·die·pos·결함명 + 매칭 n/11. 기준 1건마다 반복되던 6행 라벨 열(#/Layer/이미지/정보/원본경로)을 한 줄로 접었습니다.'},
+      {n:'FIX 04',t:'거리 표기 제거',d:'거리는 판독에 쓰지 않으므로 Δ µm 열을 없애고 매칭/미매칭 두 상태만 남겼습니다. 셀 폭과 행 높이가 사진에 더 돌아갑니다.'},
+      {n:'FIX 05',t:'링크는 실제 파일명으로',d:'"원본 사진 열기" 528개 동일 텍스트 → 4_3_2210_1180.jpg 형태의 실제 파일명 하이퍼링크. 복사·검색·추적이 가능해집니다.'},
+      {n:'FIX 06',t:'인쇄를 전제로 설계',d:'A3 창 고정(머리 2행 유지), 가로·폭 맞춤, 블록당 1페이지 나눔. 사진은 셀 크기에 맞춰 삽입하므로 열 폭·글자 크기를 바꿔도 정렬이 유지됩니다. 상단 버튼으로 페이지 경계를 확인해 보세요.'},
+      {n:'FIX 07',t:'인쇄 가능한 색',d:'#1E90FF 채움 + 흰 글자(3.0:1)를 걷어내고 머리글 #20303F + 흰 글자(12.6:1). 상태는 연한 채움 + 진한 글자라 흑백 인쇄에서도 구분됩니다.'},
+      {n:'FIX 08',t:'근접 클러스터 표기 유지',d:'대표 1장으로 접힌 묶음은 사진 칸 우하단에 ＋n 배지로 남깁니다. 앱의 클러스터링 규칙과 리포트 표기가 일치합니다.'}
+    ];
+
+    return {tabs,kpis,beBlocks,issues,sumMeta,cover,reasons,sheetGuide,
+      tblCols,tblRows,nmRows,fixes,
+      tgPrint:this.tgPrint, printLbl:s.print?'페이지 경계 숨기기':'인쇄 페이지 경계 보기',
+      afBlocks:cross?afCross:afBase,
+      modeBtns:[['base','기준 있음'],['cross','기준 없음 · 히트맵 교차매치']].map(m=>({
+        label:m[1], on:()=>this.setMode(m[0]),
+        bg:s.mode===m[0]?'#009FAA':'#1B1E22', co:s.mode===m[0]?'#06231F':'#E6E8EA',
+        bd:s.mode===m[0]?'#009FAA':'#2E3339', wt:s.mode===m[0]?'700':'400'})),
+      shTitle:cross?'사진 대조 · 기준 없음(교차매치)':'사진 대조',
+      shMeta:cross?'204. DEVAINT.226 (PKG) · 기준 없음 · 조사 layer 12 · 허용 100 µm'
+                  :'204. DEVAINT.226 (PKG) · 기준 '+BL+' · 허용 100 µm',
+      shCount:cross?'히트맵 선택 4위치 · 교차 3 + 개별 1 · 2026-08-23 03:41'
+                   :'담은 12건 · layer 12 · 2026-08-23 03:34',
+      shRule:cross?'열 = LOT layer 순서(기준 열 없음) · 블록 = die 위치 단위 교차 그룹'
+                  :'열 = LOT layer 순서 고정 · 기준은 ★ 표시로만 구분 · A3 창 고정 · 블록당 1페이지',
+      baseBtns:['LYA4','LYA3','LYB2'].map(b=>({label:b,on:()=>this.setBase(b),
+        bg:BL===b?'#20303F':'#1B1E22', co:BL===b?'#fff':'#9BA3AB',
+        bd:BL===b?'#20303F':'#2E3339', wt:BL===b?'700':'400'})),
+      baseOn:!cross,
+      shNote:cross?'미매칭 = 회색 처리 · 거리 표기 없음 · 어느 layer도 못 만난 defect 은 개별 블록'
+                  :'미매칭 = 회색 처리 · 거리 표기 없음',
+      shFoot:cross?'히트맵에서 담은 4위치 · 9페이지 · 기준 열이 없어 layer 12개가 동등한 폭으로 놓입니다'
+                  :'담은 12건 전체 · 12페이지 · 200블록 초과 시 「사진 대조 (2)」로 자동 분할',
+      crossOn:cross,
+      sh1:'none', sh2:'none', sh3:'block', sh4:'none'};
+  }
+}
+</script>
+</body>
+</html>

@@ -35,6 +35,7 @@ ProgressCb = Optional[Callable[[str], None]]
 _SKIP_DIRS = {
     ".git", "__pycache__", ".pytest_cache", ".venv", "venv",  # (1) 로컬 전용/재생성
     ".claude", "tests", "tools", ".github",                    # (2) 개발 전용
+    "design_handoff_fluent_redesign",                          # (2) 디자인 핸드오프 문서
 }
 # 자동 업데이트로 받아오지 않을(로컬 유지/미배포) 파일 이름 — 앱 실행에 불필요:
 #   개발 문서(CLAUDE.md·README.md), 개발용 빌드 스크립트(build_exe.py), git 설정(.gitignore).
