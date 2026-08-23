@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import colorsys
 import re
 
 # ---- UI 글자 크기(전역 스케일) ----
@@ -25,7 +26,7 @@ def fpx(base: int) -> int:
     return max(1, round(base * FONT_SCALE))
 
 
-# 팔레트 — 저채도 슬레이트 다크 테마(부드러운 대비, 넓은 여백 지향)
+# 팔레트: 저채도 슬레이트 다크 테마(부드러운 대비, 넓은 여백 지향)
 BG = "#11151c"
 BG_PANEL = "#171c26"
 BG_ELEV = "#1f2632"
@@ -125,7 +126,7 @@ QPushButton#mini:checked {{
     font-weight: 700;
 }}
 QPushButton#mini:checked:hover {{ background-color: {NEON}; }}
-/* 확대 화면 줌 −/＋ 버튼 — 버튼 크기는 그대로 두고 글자만 키운다 */
+/* 확대 화면 줌 −/＋ 버튼. 버튼 크기는 그대로 두고 글자만 키운다 */
 QPushButton#zoomGlyph {{
     font-size: 20px;
     font-weight: 700;
@@ -228,7 +229,7 @@ QListWidget::item {{ padding: 10px; border-radius: 8px; min-height: 30px; }}
 QListWidget::item:hover {{ background: {NEON_SOFT}; }}
 QListWidget::item:selected {{ background: {NEON_DIM}; color: {TEXT}; }}
 
-/* ---- 우클릭/드롭다운 메뉴 — 어두운 테마 통일(흰 배경 방지) ---- */
+/* ---- 우클릭/드롭다운 메뉴: 어두운 테마 통일(흰 배경 방지) ---- */
 QMenu {{
     background-color: {BG_ELEV};
     color: {TEXT};
@@ -243,7 +244,7 @@ QMenu::item:selected {{ background: {NEON_DIM}; color: {TEXT}; }}
 QMenu::item:disabled {{ color: {TEXT_DIM}; }}
 QMenu::separator {{ height: 1px; background: {NEON_SOFT}; margin: 4px 8px; }}
 
-/* ---- 아이템 뷰(트리/리스트/테이블) — 어두운 테마 통일(흰 배경 방지) ---- */
+/* ---- 아이템 뷰(트리/리스트/테이블): 어두운 테마 통일(흰 배경 방지) ---- */
 QTreeView, QListView, QTableView, QColumnView {{
     background-color: {BG_ELEV};
     alternate-background-color: {BG_ELEV};
@@ -383,3 +384,319 @@ QAbstractSpinBox::down-arrow {{ image: url("{down}"); width: 9px; height: 9px; }
 QAbstractSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
 """
     app.setStyleSheet(_scaled_sheet(scale) + arrow_qss)
+
+
+# ======================================================================
+# Fluent 재설계 토큰
+# ======================================================================
+# 단일 출처: design_handoff_fluent_redesign/02-design-rules.md (+ REVIEW-01 확정값).
+# 화면에서 색·간격·duration 을 새로 만들지 말고 여기서만 가져다 쓴다.
+#
+# 위쪽 레거시 팔레트/STYLESHEET 는 화면 이행이 끝날 때까지 함께 남는다.
+# 이 절은 Qt 를 import 하지 않는 순수 값·계산이라 단위 테스트에서 바로 검증된다.
+
+# ---- 색: 표면 (02 §1.1 라이트 / §1.2 다크) ----
+FLUENT_LIGHT: dict[str, str] = {
+    "win": "#F3F3F3",
+    "layer": "#F9F9F9",
+    "card": "#FFFFFF",
+    "cardHover": "#F7F7F7",
+    "cardBorder": "rgba(0,0,0,.058)",
+    "cardBorderH": "rgba(0,0,0,.16)",
+    "txt1": "rgba(0,0,0,.90)",
+    "txt2": "rgba(0,0,0,.61)",
+    "txt3": "rgba(0,0,0,.62)",
+    "txtDeco": "rgba(0,0,0,.38)",
+    "divider": "rgba(0,0,0,.08)",
+    "ctrlBg": "rgba(255,255,255,.70)",
+    "ctrlBgH": "rgba(249,249,249,.50)",
+    "ctrlBgP": "rgba(249,249,249,.30)",
+    "ctrlBd": "rgba(0,0,0,.07)",
+    "ctrlBdBottom": "rgba(0,0,0,.16)",
+    "subtle": "rgba(0,0,0,.03)",
+    "subtleH": "rgba(0,0,0,.037)",
+}
+
+FLUENT_DARK: dict[str, str] = {
+    "win": "#202020",
+    "layer": "#272727",
+    "card": "#2B2B2B",
+    "cardHover": "#313131",
+    "cardBorder": "rgba(255,255,255,.07)",
+    "cardBorderH": "rgba(255,255,255,.16)",
+    "txt1": "rgba(255,255,255,.94)",
+    "txt2": "rgba(255,255,255,.72)",
+    "txt3": "rgba(255,255,255,.72)",
+    "txtDeco": "rgba(255,255,255,.42)",
+    "divider": "rgba(255,255,255,.09)",
+    "ctrlBg": "rgba(255,255,255,.06)",
+    "ctrlBgH": "rgba(255,255,255,.09)",
+    "ctrlBgP": "rgba(255,255,255,.04)",
+    "ctrlBd": "rgba(255,255,255,.09)",
+    "ctrlBdBottom": "rgba(255,255,255,.09)",
+    "subtle": "rgba(255,255,255,.04)",
+    "subtleH": "rgba(255,255,255,.06)",
+}
+
+# ---- 색: accent 3역할 분리 (02 §1.3, 게이트 2) ----
+# 채움(fill) 위의 글자는 반드시 onAccent, 글자·글리프로 쓰는 accent 는 반드시 text.
+ACCENT_BASE = "#0078D4"
+
+ACCENT_LIGHT: dict[str, str] = {
+    "fill": "#0078D4",
+    "hover": "#106EBE",
+    "pressed": "#005A9E",
+    "onAccent": "#FFFFFF",
+    "text": "#005A9E",
+    "tint": "rgba(0,120,212,.09)",
+}
+
+ACCENT_DARK: dict[str, str] = {
+    "fill": "#4CC2FF",
+    "hover": "#4CC2FF",
+    "pressed": "#3AA9E0",
+    "onAccent": "#16140F",  # 다크에서 채움 위 흰 글자는 2.01:1 이므로 near-black 을 쓴다
+    "text": "#4CC2FF",
+    "tint": "rgba(76,194,255,.13)",
+}
+
+# ---- 색: 상태 (02 §1.4) ----
+STATUS_LIGHT: dict[str, str] = {
+    "pass": "#0F7B0F",
+    "passBg": "#DFF6DD",
+    "warn": "#9D5D00",
+    "warnBg": "#FFF4CE",
+    "danger": "#C42B1E",
+    "dangerBg": "#FDE7E9",
+    "info": ACCENT_LIGHT["text"],
+    "infoBg": "#F4F9FE",
+}
+
+STATUS_DARK: dict[str, str] = {
+    "pass": "#6CCB70",
+    "passBg": "rgba(15,123,15,.18)",
+    "warn": "#FFD68A",
+    "warnBg": "rgba(157,93,0,.20)",
+    "danger": "#FF99A4",
+    "dangerBg": "rgba(196,43,30,.20)",
+    "info": ACCENT_DARK["text"],
+    "infoBg": "rgba(76,194,255,.14)",
+}
+
+# 사진 바탕은 두 테마 모두 순검정. 예외 없음(명암 판독에 바탕색이 섞이면 안 된다).
+PHOTO_BG = "#000000"
+
+# ---- 형태 (02 §2) ----
+RADIUS: dict[str, int] = {"control": 5, "card": 7, "sheet": 8, "chip": 13}
+
+SPACING: dict[str, int] = {
+    "pageV": 22,
+    "pageH": 28,
+    "cardMin": 14,
+    "cardMax": 18,
+    "gapXs": 6,
+    "gapS": 8,
+    "gapM": 12,
+    "gapL": 16,
+}
+
+# 글자 크기·굵기·자간. 크기는 FONT_SCALES 배율을 곱해 쓴다(fluent_font_px 참고).
+TYPO: dict[str, dict[str, float]] = {
+    "title": {"size": 26.0, "weight": 600, "tracking": -0.5},
+    "section": {"size": 17.0, "weight": 600, "tracking": 0.0},
+    "body": {"size": 13.0, "weight": 400, "tracking": 0.0},
+    "bodySm": {"size": 12.5, "weight": 400, "tracking": 0.0},
+    "caption": {"size": 12.0, "weight": 400, "tracking": 0.0},
+    "captionSm": {"size": 11.5, "weight": 400, "tracking": 0.0},
+    "label": {"size": 11.0, "weight": 600, "tracking": 0.0},
+}
+
+# 높이는 고정값이 아니라 하한(min-height)으로 쓴다. 글자 크기 large 에서는 아래 표 값으로
+# 올린다(곱셈이 아니라 표로 고정). radius·gap·패딩은 두 배율에서 동일하다(게이트).
+HEIGHTS: dict[str, dict[str, int]] = {
+    "control": {"normal": 32, "large": 40},
+    "primary": {"normal": 36, "large": 44},
+    "navItem": {"normal": 40, "large": 48},
+    "tableRow": {"normal": 21, "large": 27},
+    "specRow": {"normal": 60, "large": 72},
+    "titleBar": {"normal": 48, "large": 48},
+    "icon": {"normal": 16, "large": 20},
+}
+
+# 판독대 한 칸의 최소 높이(게이트 4: layer 12개를 켜도 사진이 읽혀야 한다).
+WELL_MIN_PX = 224
+
+# ---- 모션 (02 §3) ----
+# (지속시간 ms, Qt easing curve 이름). CSS cubic-bezier 대응은 02 §3 번역표를 따른다.
+MOTION: dict[str, tuple[int, str]] = {
+    "control": (120, "Linear"),
+    "enter": (250, "OutQuint"),
+    "exit": (150, "InQuart"),
+    "navPill": (300, "OutQuart"),
+    "flyoutIn": (187, "OutQuint"),
+    "flyoutOut": (120, "InQuart"),
+    "scrim": (200, "Linear"),
+    "sheet": (250, "OutQuint"),
+    "infoBarIn": (200, "OutQuint"),
+    "photoSwap": (220, "OutQuint"),
+    "rowExpand": (250, "OutQuint"),
+    "rowCollapse": (150, "InQuart"),
+    "spinner": (900, "Linear"),
+    "zoom": (250, "OutQuint"),
+    "themeSwap": (280, "Linear"),
+}
+
+# InfoBar 자동 소멸(ms). qfluentwidgets 기본값 1000 은 너무 짧다.
+INFOBAR_DURATION_MS = 3400
+# 툴팁 지연(ms).
+TOOLTIP_DELAY_MS = 300
+
+# 대비 게이트(게이트 1). 텍스트/배경 전 조합이 이 값 이상이어야 한다.
+CONTRAST_GATE = 5.0
+
+
+# ---- 색 계산 (Qt 없이 동작) ----
+_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+_FUNC_RE = re.compile(
+    r"^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*(?:,\s*([0-9.]*\.?[0-9]+)\s*)?\)$"
+)
+
+
+def parse_rgba(color: str) -> tuple[float, float, float, float]:
+    """'#RGB' / '#RRGGBB' / 'rgb(r,g,b)' / 'rgba(r,g,b,a)' 를 (r, g, b, a) 로 판다.
+
+    r/g/b 는 0~255, a 는 0~1.
+    """
+    value = color.strip()
+    if _HEX_RE.match(value):
+        digits = value[1:]
+        if len(digits) == 3:
+            digits = "".join(ch * 2 for ch in digits)
+        return (
+            float(int(digits[0:2], 16)),
+            float(int(digits[2:4], 16)),
+            float(int(digits[4:6], 16)),
+            1.0,
+        )
+    m = _FUNC_RE.match(value)
+    if m:
+        alpha = 1.0 if m.group(4) is None else float(m.group(4))
+        return (float(m.group(1)), float(m.group(2)), float(m.group(3)), alpha)
+    raise ValueError(f"색 형식을 알 수 없습니다: {color!r}")
+
+
+def to_hex(rgb: tuple[float, float, float]) -> str:
+    """(r, g, b) 실수 튜플을 '#RRGGBB' 로."""
+    return "#" + "".join(f"{max(0, min(255, round(c))):02X}" for c in rgb)
+
+
+def flatten(*layers: str) -> str:
+    """위에서 아래 순서로 알파 합성해 불투명 '#RRGGBB' 를 만든다.
+
+    맨 마지막 층(가장 아래)은 불투명해야 한다. 예: flatten(txt2, card).
+    """
+    if not layers:
+        raise ValueError("합성할 색이 없습니다")
+    r, g, b, a = parse_rgba(layers[-1])
+    if a < 1.0:
+        raise ValueError(f"가장 아래 층은 불투명해야 합니다: {layers[-1]!r}")
+    out = (r, g, b)
+    for layer in reversed(layers[:-1]):
+        lr, lg, lb, la = parse_rgba(layer)
+        out = (
+            lr * la + out[0] * (1 - la),
+            lg * la + out[1] * (1 - la),
+            lb * la + out[2] * (1 - la),
+        )
+    return to_hex(out)
+
+
+def _linearize(channel: float) -> float:
+    v = channel / 255.0
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+
+def relative_luminance(color: str) -> float:
+    """WCAG 상대 휘도. 불투명 색만 받는다(알파가 있으면 먼저 flatten)."""
+    r, g, b, a = parse_rgba(color)
+    if a < 1.0:
+        raise ValueError(f"불투명 색이 필요합니다(먼저 flatten): {color!r}")
+    return 0.2126 * _linearize(r) + 0.7152 * _linearize(g) + 0.0722 * _linearize(b)
+
+
+def contrast(fg: str, bg: str) -> float:
+    """전경/배경 대비비. 전경에 알파가 있으면 배경 위에 합성한 뒤 계산한다.
+
+    배경은 불투명이어야 한다(다크 상태 배경처럼 알파가 있으면 flatten 으로 먼저 깔 것).
+    """
+    bg_hex = flatten(bg)
+    fg_hex = flatten(fg, bg_hex)
+    l1 = relative_luminance(fg_hex)
+    l2 = relative_luminance(bg_hex)
+    hi, lo = (l1, l2) if l1 >= l2 else (l2, l1)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _shift_value(color: str, factor: float) -> str:
+    """QColor.lighter/darker 와 같은 방식(HSV 의 V 에 배율)으로 밝기를 옮긴다."""
+    r, g, b, _a = parse_rgba(color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+    v = max(0.0, min(1.0, v * factor))
+    nr, ng, nb = colorsys.hsv_to_rgb(h, s, v)
+    return to_hex((nr * 255.0, ng * 255.0, nb * 255.0))
+
+
+def accent_roles(dark: bool = False, base: str = ACCENT_BASE) -> dict[str, str]:
+    """accent 3역할(fill / onAccent / text)과 hover·pressed·tint 를 돌려준다.
+
+    기본 accent 는 02 §1.3 의 확정값 표를 그대로 쓴다. 사용자가 accent 를 바꾸면
+    같은 관계(다크는 밝게, 라이트는 글자용을 어둡게)로 파생한다.
+    """
+    if parse_rgba(base)[:3] == parse_rgba(ACCENT_BASE)[:3]:
+        return dict(ACCENT_DARK if dark else ACCENT_LIGHT)
+
+    r, g, b, _a = parse_rgba(base)
+    rgb = f"{round(r)},{round(g)},{round(b)}"
+    if dark:
+        lifted = _shift_value(base, 1.60)
+        return {
+            "fill": lifted,
+            "hover": lifted,
+            "pressed": _shift_value(base, 1.30),
+            "onAccent": "#16140F",
+            "text": lifted,
+            "tint": f"rgba({rgb},.13)",
+        }
+    return {
+        "fill": to_hex((r, g, b)),
+        "hover": _shift_value(base, 0.89),
+        "pressed": _shift_value(base, 0.77),
+        "onAccent": "#FFFFFF",
+        "text": _shift_value(base, 0.77),
+        "tint": f"rgba({rgb},.09)",
+    }
+
+
+def fluent_tokens(dark: bool = False, accent: str = ACCENT_BASE) -> dict[str, str]:
+    """표면 + accent + 상태 토큰을 한 딕셔너리로 합쳐 돌려준다.
+
+    accent 는 'accentFill' 처럼 접두어를 붙여 표면 토큰과 이름이 겹치지 않게 한다.
+    """
+    merged: dict[str, str] = dict(FLUENT_DARK if dark else FLUENT_LIGHT)
+    for role, value in accent_roles(dark, accent).items():
+        key = "onAccent" if role == "onAccent" else f"accent{role[0].upper()}{role[1:]}"
+        merged[key] = value
+    merged.update(STATUS_DARK if dark else STATUS_LIGHT)
+    merged["photo"] = PHOTO_BG
+    return merged
+
+
+def fluent_height(key: str, size_key: str | None = None) -> int:
+    """컨트롤 최소 높이(px). size_key 는 설정의 ui_font_size(normal/large)."""
+    row = HEIGHTS[key]
+    return row.get(size_key or "normal", row["normal"])
+
+
+def fluent_font_px(role: str, size_key: str | None = None) -> float:
+    """타이포 역할별 글자 크기(px)에 글자 크기 배율을 적용해 돌려준다."""
+    return TYPO[role]["size"] * scale_for(size_key)
