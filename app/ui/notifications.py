@@ -1,188 +1,135 @@
-"""비차단 알림 배너(토스트) — 매끄러운 오류/안내 처리 (문서 Section 9 / 사용성).
+"""알림. 작업 흐름을 끊지 않는 비차단 안내.
 
-화면을 막는 모달 팝업 대신, 창 상단에 부드럽게 나타났다 사라지는 인라인 배너를 사용한다.
-info/success/warn/error 레벨별 색상, 선택적 액션 버튼, 자동 소멸을 지원한다.
-배너는 비차단이므로 작업 흐름이 끊기지 않는다.
+원본은 창 상단 중앙에 배너 하나를 띄우고 다음 메시지가 그것을 덮어썼다. 재설계는 우상단
+InfoBar 스택이라 연속으로 오는 알림이 서로를 지우지 않는다(03-screens §9).
+
+`NotificationBanner` 라는 이름과 `show_message(...)` 시그니처를 유지한다. 호출부가 20곳이 넘어
+한꺼번에 바꾸면 회귀 원인을 분리할 수 없기 때문이다. 화면을 옮기는 단계마다 호출부를 제목+본문
+두 조각으로 다듬는다.
 """
 
 from __future__ import annotations
 
-import warnings
 from typing import Callable, Optional
 
-from PySide6.QtCore import (
-    QEasingCurve,
-    QParallelAnimationGroup,
-    QPropertyAnimation,
-    Qt,
-    QTimer,
-)
-from PySide6.QtWidgets import (
-    QFrame,
-    QGraphicsOpacityEffect,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QWidget,
-)
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import InfoBar, InfoBarPosition, PushButton, isDarkTheme, setCustomStyleSheet
 
 from app.ui import theme
 
-_LEVEL_COLORS = {
-    "info": (theme.NEON_DIM, "#ffffff"),
-    "success": ("#15803d", "#ffffff"),
-    "warn": ("#b45309", "#ffffff"),
-    "error": ("#b00020", "#ffffff"),
+# 레벨 -> 좌측 톤 바 색을 고르는 상태 토큰 이름.
+_TONES = {
+    "info": "accentText",
+    "success": "pass",
+    "warn": "warn",
+    "warning": "warn",
+    "error": "danger",
 }
 
-_ICONS = {"info": "ℹ", "success": "✓", "warn": "⚠", "error": "✕"}
+# 레벨 -> InfoBar 생성자. 원본 4레벨을 그대로 받는다.
+_LEVELS = {
+    "info": InfoBar.info,
+    "success": InfoBar.success,
+    "warn": InfoBar.warning,
+    "warning": InfoBar.warning,
+    "error": InfoBar.error,
+}
 
 
-class NotificationBanner(QFrame):
-    """창 상단의 비차단 알림 배너."""
+class NotificationBanner(QWidget):
+    """InfoBar 스택 어댑터.
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    자기 자신은 그리지 않는다. 부모 창을 기억했다가 InfoBar 를 그 위에 띄운다. 위젯으로 남겨
+    둔 것은 기존 호출부가 `NotificationBanner(root)` 로 만들고 `reposition()` 을 부르기 때문이다.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setObjectName("banner")
-        self._action_cb: Optional[Callable[[], None]] = None
-        self._build()
+        # 레이아웃 자리를 차지하지 않는다. InfoBar 가 위치를 스스로 잡는다.
+        self.setFixedSize(0, 0)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._bars: list[InfoBar] = []
 
-        self._effect = QGraphicsOpacityEffect(self)
-        self._effect.setOpacity(0.0)
-        self.setGraphicsEffect(self._effect)
-
-        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
-        self._fade.setDuration(180)
-        self._fade.setEasingCurve(QEasingCurve.InOutCubic)
-        self._collapse = QPropertyAnimation(self, b"maximumHeight", self)
-        self._collapse.setDuration(200)
-        self._collapse.setEasingCurve(QEasingCurve.InOutCubic)
-        self._group = QParallelAnimationGroup(self)
-        self._group.addAnimation(self._fade)
-        self._group.addAnimation(self._collapse)
-
-        self._auto_hide = QTimer(self)
-        self._auto_hide.setSingleShot(True)
-        self._auto_hide.timeout.connect(self.dismiss)
-
-        self.setMaximumHeight(0)
-        self.setVisible(False)
-
-    def _build(self) -> None:
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 8, 10, 8)
-        lay.setSpacing(10)
-        self._icon = QLabel("")
-        self._icon.setStyleSheet("font-weight:700; color:#ffffff; background:transparent;")
-        self._label = QLabel("")
-        self._label.setWordWrap(True)
-        self._label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self._label.setStyleSheet("color:#ffffff; background:transparent;")
-        self._action = QPushButton("")
-        self._action.setCursor(Qt.PointingHandCursor)
-        self._action.setVisible(False)
-        self._action.clicked.connect(self._on_action)
-        self._action.setStyleSheet(
-            "QPushButton { color:#ffffff; background:rgba(255,255,255,0.18);"
-            " border:1px solid rgba(255,255,255,0.45); border-radius:6px;"
-            " padding:3px 10px; }"
-            "QPushButton:hover { background:rgba(255,255,255,0.32); }"
-        )
-        self._close = QPushButton("✕")
-        self._close.setCursor(Qt.PointingHandCursor)
-        self._close.setFixedSize(22, 22)
-        self._close.clicked.connect(self.dismiss)
-        self._close.setStyleSheet(
-            "QPushButton { color:#ffffff; background:transparent; border:none;"
-            " font-size:13px; }"
-            "QPushButton:hover { background:rgba(255,255,255,0.22); border-radius:11px; }"
-        )
-
-        lay.addWidget(self._icon)
-        lay.addWidget(self._label, 1)
-        lay.addWidget(self._action)
-        lay.addWidget(self._close)
-
-    def _on_action(self) -> None:
-        cb = self._action_cb
-        self.dismiss()
-        if cb is not None:
-            cb()
-
+    # ------------------------------------------------------------ 표시
     def show_message(
         self,
         text: str,
         level: str = "info",
         *,
+        title: Optional[str] = None,
         action_text: Optional[str] = None,
         action: Optional[Callable[[], None]] = None,
-        timeout_ms: int = 4500,
-    ) -> None:
-        """배너를 표시한다. timeout_ms<=0 이면 자동 소멸하지 않는다."""
-        bg, _fg = _LEVEL_COLORS.get(level, _LEVEL_COLORS["info"])
-        # 프레임 배경만 레벨별로 바꾸고, 자식(라벨/버튼) 스타일은 _build 에서 고정.
-        self.setStyleSheet(
-            f"QFrame#banner {{ background:{bg}; border:none; border-radius:8px; }}"
-        )
-        self._icon.setText(_ICONS.get(level, "ℹ"))
-        self._label.setText(text)
-        self._action_cb = action
-        if action_text and action is not None:
-            self._action.setText(action_text)
-            self._action.setVisible(True)
+        timeout_ms: Optional[int] = None,
+    ) -> InfoBar:
+        """알림 하나를 우상단에 띄운다.
+
+        timeout_ms 를 주지 않으면 3.4초 뒤 사라진다. 0 이하면 사용자가 닫을 때까지 남는다
+        (조치가 필요한 오류용).
+        """
+        maker = _LEVELS.get(level, InfoBar.info)
+        if timeout_ms is None:
+            duration = theme.INFOBAR_DURATION_MS
+        elif timeout_ms <= 0:
+            duration = -1
         else:
-            self._action.setVisible(False)
+            duration = int(timeout_ms)
 
-        self.setVisible(True)
-        target = max(self.sizeHint().height(), 40)
-        self._group.stop()
-        self._fade.setStartValue(self._effect.opacity())
-        self._fade.setEndValue(1.0)
-        self._collapse.setStartValue(self.maximumHeight())
-        self._collapse.setEndValue(target)
-        self._group.start()
-        # 오버레이로 부모 위에 떠서 표시 — 레이아웃을 밀지 않아 화면이 흔들리지 않는다.
-        self.reposition()
-        self.raise_()
+        head, body = (title, text) if title else (text, "")
+        bar = maker(
+            title=head,
+            content=body,
+            orient=Qt.Vertical if body else Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=duration,
+            parent=self._host(),
+        )
+        _add_tone_bar(bar, level)
+        if action_text and action is not None:
+            button = PushButton(action_text, bar)
+            # 액션을 누르면 알림을 먼저 닫고 실행한다. 눌렀는데 남아 있으면 두 번 눌리기 쉽다.
+            button.clicked.connect(bar.close)
+            button.clicked.connect(action)
+            bar.addWidget(button)
 
-        self._auto_hide.stop()
-        if timeout_ms > 0:
-            self._auto_hide.start(timeout_ms)
+        self._bars = [b for b in self._bars if _alive(b)]
+        self._bars.append(bar)
+        return bar
+
+    # ------------------------------------------------------------ 제어
+    def dismiss(self) -> None:
+        """떠 있는 알림을 모두 닫는다. 여러 번 불러도 안전하다."""
+        for bar in self._bars:
+            if _alive(bar):
+                bar.close()
+        self._bars.clear()
 
     def reposition(self) -> None:
-        """부모 위 상단 중앙에 배너를 배치한다(오버레이). 부모 크기 변화 시 호출."""
-        parent = self.parentWidget()
-        if parent is None:
-            return
-        w = min(760, max(320, parent.width() - 40))
-        self.setFixedWidth(w)
-        self.move((parent.width() - w) // 2, 12)
+        """InfoBar 가 위치를 스스로 잡으므로 할 일이 없다(호출부 호환용)."""
 
-    def dismiss(self) -> None:
-        self._auto_hide.stop()
-        if not self.isVisible():
-            return
-        self._group.stop()
-        self._fade.setStartValue(self._effect.opacity())
-        self._fade.setEndValue(0.0)
-        self._collapse.setStartValue(self.maximumHeight())
-        self._collapse.setEndValue(0)
-        # _after_hide 가 이미 자기 자신을 disconnect 해두므로 대개 연결이 없다 —
-        # PySide 는 그 경우 예외가 아니라 RuntimeWarning 을 내므로 여기서 억제한다.
-        # (연속 dismiss() 로 아직 연결이 남아있는 드문 경우엔 정상적으로 끊어진다.)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            try:
-                self._group.finished.disconnect()
-            except (RuntimeError, TypeError):
-                pass
-        self._group.finished.connect(self._after_hide)
-        self._group.start()
+    def _host(self) -> QWidget:
+        """InfoBar 는 실제 부모가 있어야 뜬다. 없으면 화면에 나타나지 않는다."""
+        window = self.window()
+        return window if window is not None else self
 
-    def _after_hide(self) -> None:
-        try:
-            self._group.finished.disconnect(self._after_hide)
-        except (RuntimeError, TypeError):
-            pass
-        if self._effect.opacity() <= 0.01:
-            self.setVisible(False)
+
+def _add_tone_bar(bar: InfoBar, level: str) -> None:
+    """좌측 4px 톤 바(03-screens §9). 아이콘만으로는 레벨이 흑백 인쇄·저시력에서 약하다."""
+    key = _TONES.get(level, "accentText")
+    light = theme.fluent_tokens(False)[key]
+    dark = theme.fluent_tokens(True)[key]
+    radius = theme.RADIUS["control"]
+    rule = "InfoBar {{ border-left: 4px solid {0}; border-top-left-radius: {1}px;" \
+           " border-bottom-left-radius: {1}px; }}"
+    # Fluent 위젯이라 setStyleSheet 대신 setCustomStyleSheet 로 합성한다.
+    setCustomStyleSheet(bar, rule.format(light, radius), rule.format(dark, radius))
+
+
+def _alive(bar: InfoBar) -> bool:
+    """C++ 쪽이 이미 지워진 InfoBar 를 건드리지 않게 한다."""
+    try:
+        bar.isVisible()
+    except RuntimeError:
+        return False
+    return True
