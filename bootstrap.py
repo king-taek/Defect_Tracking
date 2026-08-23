@@ -26,6 +26,9 @@ from pathlib import Path
 # import 이름 -> requirements 표기(설치 이름/버전)
 REQUIRED: dict[str, str] = {
     "PySide6": "PySide6>=6.6",
+    # Fluent 화면 구성요소. 자동 업데이트는 코드만 배포하고 pip 를 돌리지 않으므로,
+    # 이 목록에 없으면 기존 설치본이 원시 트레이스백으로 죽는다.
+    "qfluentwidgets": "PySide6-Fluent-Widgets==1.11.3",
     "PIL": "Pillow>=10.0",
     "openpyxl": "openpyxl>=3.1",
 }
@@ -185,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     print(f"Python: {sys.version.split()[0]}  ({sys.executable})")
     if is_externally_managed():
-        print("환경: 외부 관리(PEP 668, 예: uv) — 적절한 설치 옵션을 자동 선택합니다.")
+        print("환경: 외부 관리(PEP 668, 예: uv) - 적절한 설치 옵션을 자동 선택합니다.")
 
     if "--venv" in argv:
         return install_in_venv()
