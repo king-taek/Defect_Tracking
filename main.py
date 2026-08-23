@@ -140,7 +140,10 @@ def main() -> int:
 
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     setThemeColor(theme.ACCENT_BASE)
-    theme.apply_theme(app, theme.scale_for(settings.ui_font_size))
+    # 다크 네온 전역 QSS 는 여기서 끊는다. Fluent 위젯을 덮어써 테마가 반만 적용되기 때문이다.
+    # 아직 옮기지 않은 화면(단계 4~8)은 토큰으로 만든 브리지 QSS 로 읽히게 한다.
+    theme.FONT_SCALE = theme.scale_for(settings.ui_font_size)
+    app.setStyleSheet(theme.build_bridge_qss(dark))
 
     # Qt 준비 직후 즉시 스플래시 표시. 무거운 구성 동안 "로딩 중" 피드백을 보여준다.
     from app.ui.splash import make_splash, show_status

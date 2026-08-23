@@ -19,19 +19,11 @@ from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
     QMenu,
     QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QSplitter,
-    QVBoxLayout,
-    QWidget,
 )
+from qfluentwidgets import FluentIcon, InfoBadge, InfoBadgePosition, NavigationItemPosition
+from qfluentwidgets import FluentWindow
 
 from app import __version__, config, layout, matcher, scanner, updater
 from app.config import AppSettings
@@ -39,22 +31,20 @@ from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import conflicting_source
 from app.scanner import LotIndex
 from app.thumbnails import ThumbnailCache
-from app.ui.compare_grid import CompareGrid
-from app.ui.controls import NavBar, SideBar
 from app.ui.export_dialog import ExportTrayDialog
 from app.ui.heatmap_dialog import HeatmapDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui.notifications import NotificationBanner
+from app.ui.pages.launcher import LauncherPage
+from app.ui.pages.review import ReviewPage
 from app.ui.settings_dialog import SettingsDialog
-from app.ui.thumbnail_strip import ThumbnailStrip
-from app.ui.wafer_map import WaferMapWidget
 from app.ui.busy_overlay import BusyOverlay
 from app.workers import ExportWorker, MatchWorker, ScanWorker, ThumbnailWorker
 
 
-class MainWindow(QMainWindow):
+class MainWindow(FluentWindow):
     def __init__(self, settings: Optional[AppSettings] = None):
         super().__init__()
         self._base_title = f"{config.APP_NAME}  ·  v{__version__}"
@@ -188,21 +178,103 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
-        root = QWidget()
-        root.setObjectName("root")
-        main = QVBoxLayout(root)
-        main.setContentsMargins(10, 10, 10, 10)
-        main.setSpacing(8)
+        """FluentWindow 셸 + nav 6라우트.
 
+        판독만 실제 페이지이고 나머지는 단계 4~8 에서 채운다. 그때까지 기존 다이얼로그를 여는
+        임시 라우트를 둬서 기능이 끊기지 않게 한다.
+        """
         # 알림 배너는 레이아웃에 넣지 않고 창 위 오버레이로 띄운다(표시 시 UI 가 밀리지 않음).
-        self.banner = NotificationBanner(root)
+        self.banner = NotificationBanner(self)
         self.banner.hide()
 
-        # 좌측 사이드바 | 우측(짧은 상단 + 큰 그리드) — 수평 스플리터
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.review_page = ReviewPage(self.image_loader, self.settings.sidebar_width, self)
+        self._alias_review_widgets()
+        self._wire_review_page()
 
-        # ── 좌측: 컨트롤 사이드바
-        self.top = SideBar()
+        self.nomatch_page = LauncherPage(
+            "nomatchInterface",
+            "미매칭",
+            "어떤 비교 layer 와도 매칭되지 않아 후보에서 제외된 기준 사진을 사유별로 봅니다.",
+            "다음 미매칭으로 점프",
+        )
+        self.nomatch_page.triggered.connect(self._jump_unmatched)
+
+        self.heatmap_page = LauncherPage(
+            "heatmapInterface",
+            "히트맵",
+            "defect 밀도 지도에서 위치를 고르면 그 자리의 layer 교차 판독을 봅니다.",
+            "히트맵 열기",
+        )
+        self.heatmap_page.triggered.connect(self._open_heatmap)
+        self.heatmap_page.set_enabled(False)
+
+        self.export_page = LauncherPage(
+            "exportInterface",
+            "출력 명세",
+            "Excel 로 내보낼 사진 목록을 확인하고 개별로 제거합니다.",
+            "출력 명세 열기",
+        )
+        self.export_page.triggered.connect(self._export)
+
+        self.help_page = LauncherPage(
+            "helpInterface",
+            "도움말",
+            "단축키와 기능 안내입니다.",
+            "도움말 열기",
+        )
+        self.help_page.triggered.connect(self._open_help)
+
+        self.settings_page = LauncherPage(
+            "settingsInterface",
+            "설정",
+            "경로 · 표시 · 동작 설정을 바꿉니다.",
+            "설정 열기",
+        )
+        self.settings_page.triggered.connect(self._open_settings)
+
+        self.addSubInterface(self.review_page, FluentIcon.VIEW, "판독")
+        # FluentIcon.CANCEL 은 이 버전에서 되돌리기 화살표로 그려진다. D 표의 대체안 CLOSE 를 쓴다.
+        self.addSubInterface(self.nomatch_page, FluentIcon.CLOSE, "미매칭")
+        self.addSubInterface(self.heatmap_page, FluentIcon.TILES, "히트맵")
+        self.addSubInterface(self.export_page, FluentIcon.DOCUMENT, "출력 명세")
+        self.addSubInterface(
+            self.help_page, FluentIcon.HELP, "도움말", NavigationItemPosition.BOTTOM
+        )
+        self.addSubInterface(
+            self.settings_page, FluentIcon.SETTING, "설정", NavigationItemPosition.BOTTOM
+        )
+        self._nav_badges: dict[str, InfoBadge] = {}
+        # 프로토타입 기본은 200px 펼침. 창이 좁아지면 자동으로 접힌다.
+        self.navigationInterface.setExpandWidth(200)
+        self.navigationInterface.setMinimumExpandWidth(1100)
+        self.navigationInterface.expand(useAni=False)
+
+    def _alias_review_widgets(self) -> None:
+        """판독 페이지 위젯을 창에서도 같은 이름으로 쓸 수 있게 별칭을 건다.
+
+        기존 코드와 테스트가 win.top / win.grid 같은 이름에 기대고 있다. 단계 2 에서 페이지
+        내부를 다시 짜더라도 이 별칭 계약은 유지한다.
+        """
+        page = self.review_page
+        self.splitter = page.splitter
+        self.top = page.sidebar
+        self.strip = page.strip
+        self.nav = page.nav
+        self.grid = page.grid
+        self.wafer_map = page.wafer_map
+        self.progress = page.progress
+        self.btn_stop = page.btn_stop
+        self.btn_heatmap = page.btn_heatmap
+        self.btn_add_export = page.btn_add_export
+        self.lbl_view = page.lbl_view
+        self.lbl_wafer = page.lbl_wafer
+        self._empty_label = page.grid_message
+
+    def _wire_review_page(self) -> None:
+        page = self.review_page
+        page.empty_state.open_requested.connect(self._choose_folder)
+        page.empty_state.recent_requested.connect(self._show_recent_menu)
+
         self.top.open_folder.connect(self._choose_folder)
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
         self.top.compare_layers_changed.connect(lambda: self._rematch(rebuild_grid=True))
@@ -210,126 +282,40 @@ class MainWindow(QMainWindow):
         self.top.cluster_radius_changed.connect(lambda _: self._cluster_timer.start())
         self.top.export_requested.connect(self._export)
         self.top.settings_requested.connect(self._open_settings)
-        # 업데이트는 설정 다이얼로그로 이동(_open_settings 에서 연결)
         # LOT 폴더 버튼: 우클릭 시 최근 폴더 메뉴
         self.top.btn_open.setContextMenuPolicy(Qt.CustomContextMenu)
         self.top.btn_open.customContextMenuRequested.connect(self._show_recent_menu)
         self.top.btn_open.setToolTip(
             "리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
         )
-        self.splitter.addWidget(self.top)
 
-        # ── 우측: 짧은 상단(썸네일 + 탐색) + 큰 비교 그리드
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-
-        top_band = QFrame()
-        top_band.setObjectName("panel")
-        band_layout = QVBoxLayout(top_band)
-        band_layout.setContentsMargins(10, 8, 10, 8)
-        band_layout.setSpacing(6)
-        self.strip = ThumbnailStrip()
         self.strip.thumb_clicked.connect(self._goto)
-        # 썸네일 + 웨이퍼 맵을 한 줄에(맵은 현재 wafer 의 die 현황)
-        strip_row = QHBoxLayout()
-        strip_row.setContentsMargins(0, 0, 0, 0)
-        strip_row.setSpacing(8)
-        strip_row.addWidget(self.strip, 1)
-        # defect 히트맵 보기(항목 4) — 웨이퍼맵에 defect 밀도를 표시하고 위치별 비교.
-        self.btn_heatmap = QPushButton("히트맵\n보기")
-        self.btn_heatmap.setFixedSize(96, 96)
-        self.btn_heatmap.setToolTip(
-            "defect 밀도 히트맵을 새 창으로 엽니다. 위치를 클릭하면 그 자리의 defect 들을 "
-            "layer 별로 나란히 비교하고 출력에 담을 수 있습니다."
-        )
-        self.btn_heatmap.clicked.connect(self._open_heatmap)
-        self.btn_heatmap.setEnabled(False)
-        strip_row.addWidget(self.btn_heatmap, 0, Qt.AlignVCenter)
-        # 웨이퍼 맵 + 캡션(디바이스/정합 안내)을 세로로 묶는다.
-        wafer_box = QVBoxLayout()
-        wafer_box.setContentsMargins(0, 0, 0, 0)
-        wafer_box.setSpacing(2)
-        self.wafer_map = WaferMapWidget()
-        self.wafer_map.die_clicked.connect(self._jump_to_die)
-        wafer_box.addWidget(self.wafer_map, 0, Qt.AlignHCenter)
-        self.lbl_wafer = QLabel("")
-        self.lbl_wafer.setObjectName("dim")
-        self.lbl_wafer.setStyleSheet("font-size:9px;")
-        self.lbl_wafer.setAlignment(Qt.AlignCenter)
-        self.lbl_wafer.setWordWrap(True)
-        self.lbl_wafer.setFixedWidth(140)
-        wafer_box.addWidget(self.lbl_wafer, 0, Qt.AlignHCenter)
-        strip_row.addLayout(wafer_box)
-        band_layout.addLayout(strip_row)
-        self.nav = NavBar()
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
-        # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 어떤 비교 layer 와도 매칭 안 된
-        # 기준 사진은 항상 후보에서 제외한다.
-        # 항목 9 에서 비운 자리에 '출력에 추가'(트레이 담기) 버튼을 둔다(항목 1).
-        self.btn_add_export = QPushButton("＋ 출력에 추가")
-        self.btn_add_export.setObjectName("mini")
-        self.btn_add_export.setToolTip(
-            "현재 기준 사진을 출력 목록(트레이)에 담습니다. (A)\n"
-            "담은 것들은 '결과 출력' 시 함께 Excel 로 나옵니다."
-        )
+        self.btn_heatmap.clicked.connect(self._open_heatmap)
         self.btn_add_export.clicked.connect(self._add_current_to_export)
-        self.btn_add_export.setEnabled(False)
-        self.nav.add_widget(self.btn_add_export)
-        self.lbl_view = QLabel("")
-        self.lbl_view.setObjectName("dim")
-        self.nav.add_widget(self.lbl_view)
-        band_layout.addWidget(self.nav)
-        right_layout.addWidget(top_band)
-
-        # 진행바 + 중단 버튼(스캔 중에만 표시)
-        progress_row = QHBoxLayout()
-        progress_row.setContentsMargins(0, 0, 0, 0)
-        progress_row.setSpacing(8)
-        self.progress = QProgressBar()
-        self.progress.setVisible(False)
-        self.progress.setTextVisible(False)
-        progress_row.addWidget(self.progress, 1)
-        self.btn_stop = QPushButton("■ 중단")
-        self.btn_stop.setObjectName("mini")
-        self.btn_stop.setToolTip("진행 중인 스캔을 중단합니다.")
         self.btn_stop.clicked.connect(self._stop_scan)
-        self.btn_stop.setVisible(False)
-        progress_row.addWidget(self.btn_stop, 0)
-        right_layout.addLayout(progress_row)
-
-        # 비교 그리드 (스크롤 가능) — 큰 메인 영역
-        grid_scroll = QScrollArea()
-        grid_scroll.setWidgetResizable(True)
-        grid_scroll.setFrameShape(QFrame.NoFrame)
-        grid_host = QFrame()
-        grid_host.setObjectName("panel")
-        grid_host_layout = QVBoxLayout(grid_host)
-        grid_host_layout.setContentsMargins(12, 12, 12, 12)
-        self.grid = CompareGrid(loader=self.image_loader)
+        self.wafer_map.die_clicked.connect(self._jump_to_die)
         self.grid.image_clicked.connect(self._open_viewer)
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
-        grid_host_layout.addWidget(self.grid)
-        self._empty_label = QLabel("LOT 폴더를 선택하면 비교 화면이 표시됩니다.")
-        self._empty_label.setObjectName("dim")
-        self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setMinimumHeight(200)
-        grid_host_layout.addWidget(self._empty_label)
-        grid_host_layout.addStretch()
-        grid_scroll.setWidget(grid_host)
-        right_layout.addWidget(grid_scroll, 1)
 
-        self.splitter.addWidget(right)
-        self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 1)
-        self.splitter.setCollapsible(0, False)
-        sw = max(180, int(self.settings.sidebar_width))
-        self.splitter.setSizes([sw, max(600, self.width() - sw)])
-        main.addWidget(self.splitter, 1)
-
-        self.setCentralWidget(root)
+    def _set_nav_badge(self, route: str, count: int) -> None:
+        """nav 항목 배지. 0 이면 숨긴다."""
+        existing = self._nav_badges.pop(route, None)
+        if existing is not None:
+            existing.setParent(None)
+            existing.deleteLater()
+        if count <= 0:
+            return
+        item = self.navigationInterface.widget(route)
+        if item is None:
+            return
+        self._nav_badges[route] = InfoBadge.attension(
+            text=count,
+            parent=item.parent(),
+            target=item,
+            position=InfoBadgePosition.NAVIGATION_ITEM,
+        )
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -590,6 +576,8 @@ class MainWindow(QMainWindow):
         self.lot_index = index
         # 새 LOT: 웨이퍼 맵 정합 캐시를 비운다(id(lot_index) 재사용으로 인한 stale 방지).
         self._align_cache.clear()
+        # LOT 이 들어왔으니 빈 상태를 걷는다.
+        self.review_page.show_empty_state(False)
         layers = index.layer_canonicals()
         if not layers:
             self.banner.show_message(

@@ -846,3 +846,83 @@ def fluent_height(key: str, size_key: str | None = None) -> int:
 def fluent_font_px(role: str, size_key: str | None = None) -> float:
     """타이포 역할별 글자 크기(px)에 글자 크기 배율을 적용해 돌려준다."""
     return TYPO[role]["size"] * scale_for(size_key)
+
+
+def build_bridge_qss(dark: bool = False, accent: str = ACCENT_BASE) -> str:
+    """아직 Fluent 로 옮기지 않은 화면이 새 테마에서도 읽히게 하는 임시 QSS.
+
+    레거시 화면은 objectName 훅(`panel`/`dim`/`mini`/`primary` 등)에 기대고 있는데, 다크 네온
+    STYLESHEET 적용을 멈추면 기본 Qt 팔레트로 떨어져 다크 셸에서 흰 상자가 된다. 화면을 단계별로
+    옮기는 동안만 토큰 값으로 같은 훅을 다시 칠한다. 단계 9에서 이 함수와 STYLESHEET 를 함께
+    지운다.
+
+    Fluent 위젯에는 적용하지 않는다(qfluentwidgets 가 위젯 단위로 칠하므로 위젯 시트가 이긴다).
+    """
+    t = fluent_tokens(dark, accent)
+    txt1 = flatten(t["txt1"], t["card"])
+    txt2 = flatten(t["txt2"], t["card"])
+    txt3 = flatten(t["txt3"], t["card"])
+    border = flatten(t["cardBorder"], t["layer"])
+    border_hover = flatten(t["cardBorderH"], t["layer"])
+    ctrl = flatten(t["ctrlBg"], t["layer"])
+    ctrl_hover = flatten(t["ctrlBgH"], t["layer"])
+    divider = flatten(t["divider"], t["card"])
+    control_h = HEIGHTS["control"]["normal"]
+    return f"""
+QDialog {{ background-color: {t["win"]}; color: {txt1}; }}
+QLabel {{ color: {txt1}; background: transparent; }}
+QLabel#dim, QLabel#diag {{ color: {txt2}; }}
+QLabel#title {{ font-size: {int(TYPO["section"]["size"])}px; font-weight: 600; color: {txt1}; }}
+QLabel#meta {{ font-size: 13px; color: {txt1}; }}
+QLabel#section {{ font-size: 11px; font-weight: 600; color: {txt2}; letter-spacing: 1px; }}
+QLabel#lotName {{ font-size: 13px; font-weight: 600; color: {t["accentText"]}; }}
+QLabel#diagWarn {{ color: {t["warn"]}; }}
+QLabel#layerBadge, QLabel#layerBadgeBase {{
+    background-color: rgba(0, 0, 0, 0.62); color: #FFFFFF;
+    border-radius: {RADIUS["control"]}px; padding: 3px 10px; font-weight: 600;
+}}
+QFrame#panel, QFrame#sidebar, QFrame#cell {{
+    background-color: {t["card"]}; border: 1px solid {border};
+    border-radius: {RADIUS["card"]}px;
+}}
+QPushButton {{
+    background-color: {ctrl}; color: {txt1};
+    border: 1px solid {border}; border-bottom-color: {flatten(t["ctrlBdBottom"], t["layer"])};
+    border-radius: {RADIUS["control"]}px; padding: 5px 14px;
+    min-height: {control_h - 12}px;
+}}
+QPushButton:hover {{ background-color: {ctrl_hover}; border-color: {border_hover}; }}
+QPushButton:disabled {{ color: {txt3}; background-color: {flatten(t["subtle"], t["layer"])}; }}
+QPushButton#primary {{
+    background-color: {t["accentFill"]}; color: {t["onAccent"]};
+    border: none; font-weight: 600;
+}}
+QPushButton#primary:hover {{ background-color: {t["accentHover"]}; }}
+QPushButton#mini {{ padding: 3px 10px; font-size: 11px; }}
+QPushButton#mini:checked {{
+    background-color: {t["accentFill"]}; color: {t["onAccent"]}; border: none; font-weight: 600;
+}}
+QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
+    background-color: {t["card"]}; color: {txt1};
+    border: 1px solid {border}; border-bottom-color: {flatten(t["ctrlBdBottom"], t["layer"])};
+    border-radius: {RADIUS["control"]}px; padding: 4px 8px;
+}}
+QListWidget, QTreeWidget, QTreeView, QListView, QTableView {{
+    background-color: {t["card"]}; color: {txt1};
+    border: 1px solid {border}; border-radius: {RADIUS["control"]}px;
+}}
+QMenu {{
+    background-color: {t["card"]}; color: {txt1};
+    border: 1px solid {border}; border-radius: {RADIUS["control"]}px; padding: 4px;
+}}
+QMenu::item {{ padding: 6px 18px; border-radius: 4px; }}
+QMenu::item:selected {{ background: {t["accentTint"]}; color: {t["accentText"]}; }}
+QMenu::separator {{ height: 1px; background: {divider}; margin: 4px 8px; }}
+QScrollArea {{ background: transparent; border: none; }}
+QSplitter::handle {{ background: {divider}; }}
+QProgressBar {{
+    background-color: {flatten(t["subtle"], t["layer"])}; border: none;
+    border-radius: 3px; height: 6px;
+}}
+QProgressBar::chunk {{ background-color: {t["accentFill"]}; border-radius: 3px; }}
+"""
