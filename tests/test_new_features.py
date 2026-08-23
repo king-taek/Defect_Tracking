@@ -327,7 +327,7 @@ def test_wafer_map_bbox_normalized_no_margin_or_clip(win, app):
 
 
 def test_excel_no_top_item_header(win, app, tmp_path):
-    """엑셀 상단 '항목' 컬럼 헤더 행이 제거됐다(블록마다 Layer 행 사용)."""
+    """라벨 열/라벨 행이 사라졌다. 시트는 「사진 대조」 한 장이고 머리 2행 뒤 바로 블록이다."""
     from app.export.excel_report import export_excel
     from openpyxl import load_workbook
 
@@ -336,19 +336,28 @@ def test_excel_no_top_item_header(win, app, tmp_path):
     export_excel(out, lot_name="L", base_layer=win.top.base_layer(),
                  compare_layers=win.top.compare_layers(), tolerance=100.0,
                  selected=sel, thumb_cache=win.thumb_cache,
-                 source_roots=[win.lot_index.lot_path])
+                 source_roots=[win.lot_index.lot_path],
+                 layer_order=win.lot_index.layer_canonicals())
     wb = load_workbook(out)
-    ws = wb.active
-    firsts = {row[0] for row in ws.iter_rows(values_only=True) if row}
-    assert "항목" not in firsts
-    assert "Layer" in firsts  # 블록별 Layer 행은 있다
+    assert wb.sheetnames == ["사진 대조"]
+    ws = wb["사진 대조"]
+    firsts = {ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)}
+    # 옛 라벨 열(#/Layer/이미지/정보/원본경로)과 '항목' 헤더는 전부 없다.
+    assert not ({"항목", "Layer", "이미지", "정보", "원본경로"} & firsts)
+    assert ws.cell(row=1, column=1).value == "사진 대조"
+    assert "미매칭 = 회색 처리" in " ".join(
+        str(ws.cell(row=2, column=c).value or "") for c in range(1, ws.max_column + 1)
+    )
+    assert ws.freeze_panes == "A3"
+    # 머리 2행 다음 첫 행은 곧바로 블록 머리다.
+    assert str(ws.cell(row=3, column=1).value).startswith("#1 · ")
 
 
 def test_excel_original_path_is_hyperlink(win, app, tmp_path):
-    """'원본경로' 셀이 텍스트가 아니라 클릭하면 원본을 여는 링크여야 한다(고화질 심기 대신).
+    """파일명 칸이 텍스트가 아니라 클릭하면 원본을 여는 링크여야 한다(고화질 심기 대신).
 
-    엑셀에 원본을 통째로 심으면(고화질) 파일이 수백 MB~GB 로 불어나므로, 대신 항상
-    최신 원본을 가리키는 가벼운 하이퍼링크로 연결한다.
+    엑셀에 원본을 통째로 심으면(고화질) 파일이 수백 MB 이상으로 불어나므로, 대신 항상
+    최신 원본을 가리키는 가벼운 하이퍼링크로 연결한다. 표시 글자는 실제 파일명이다.
     """
     from pathlib import Path
     from app.export.excel_report import export_excel
@@ -360,22 +369,21 @@ def test_excel_original_path_is_hyperlink(win, app, tmp_path):
     export_excel(out, lot_name="L", base_layer=win.top.base_layer(),
                  compare_layers=win.top.compare_layers(), tolerance=100.0,
                  selected=sel, thumb_cache=win.thumb_cache,
-                 source_roots=[win.lot_index.lot_path])
-    wb = load_workbook(out)
-    ws = wb.active
-    row_idx = next(
-        r for r in range(1, ws.max_row + 1)
-        if ws.cell(row=r, column=1).value == "원본경로"
-    )
-    cell = ws.cell(row=row_idx, column=2)
-    # 표시 텍스트는 고정 문구(파일명은 '정보' 행에 이미 있다), 링크 대상은 원본 URI.
-    assert cell.value == "원본 사진 열기"
-    assert cell.hyperlink is not None
-    assert cell.hyperlink.target == Path(base.image_path).resolve().as_uri()
+                 source_roots=[win.lot_index.lot_path],
+                 layer_order=win.lot_index.layer_canonicals())
+    ws = load_workbook(out)["사진 대조"]
+    links = {
+        cell.hyperlink.target: cell.value
+        for row in ws.iter_rows() for cell in row if cell.hyperlink is not None
+    }
+    target = Path(base.image_path).resolve().as_uri()
+    assert links[target] == Path(base.image_path).name
+    # 고정 문구는 더 쓰지 않는다(전 칸이 같은 글자여서 복사·검색·추적이 안 됐다).
+    assert "원본 사진 열기" not in set(links.values())
 
 
 def test_excel_layer_order_preserved(win, app, tmp_path):
-    """layer_order 를 주면 기준 layer 를 맨 왼쪽에 고정하지 않고 원래 순서를 유지한다."""
+    """열은 LOT layer 순서 고정. 기준은 제자리에서 ★ 표시로만 구분한다."""
     from pathlib import Path
     from app.export.excel_report import export_excel
     from app.models import BaseDefectMatches, DefectRecord, MatchResult
@@ -392,25 +400,18 @@ def test_excel_layer_order_preserved(win, app, tmp_path):
                  tolerance=100.0, selected=[item], thumb_cache=win.thumb_cache,
                  source_roots=[win.lot_index.lot_path],
                  layer_order=["L1", "L2", "L3"])
-    ws = load_workbook(out).active
-    row_idx = next(
-        r for r in range(1, ws.max_row + 1)
-        if ws.cell(row=r, column=1).value == "Layer"
-    )
-    vals = [ws.cell(row=row_idx, column=c).value for c in (2, 3, 4)]
-    assert vals == ["L1", "★ L2 (기준)", "L3"]
-    # layer_order 없이(기존 동작) 기준이 첫 데이터 열에 온다.
+    ws = load_workbook(out)["사진 대조"]
+    # 블록 머리(3행) 다음 행이 layer 행이다.
+    vals = [ws.cell(row=4, column=c).value for c in (1, 2, 3)]
+    assert vals == ["L1", "L2 ★ 기준", "L3"]
+    # layer_order 없이도 기준을 첫 열로 끌어오지 않는다(제자리 유지).
     out2 = tmp_path / "o2.xlsx"
     export_excel(out2, lot_name="L", base_layer="L2", compare_layers=["L1", "L3"],
                  tolerance=100.0, selected=[item], thumb_cache=win.thumb_cache,
                  source_roots=[win.lot_index.lot_path])
-    ws2 = load_workbook(out2).active
-    row_idx2 = next(
-        r for r in range(1, ws2.max_row + 1)
-        if ws2.cell(row=r, column=1).value == "Layer"
-    )
-    vals2 = [ws2.cell(row=row_idx2, column=c).value for c in (2, 3, 4)]
-    assert vals2 == ["★ L2 (기준)", "L1", "L3"]
+    ws2 = load_workbook(out2)["사진 대조"]
+    vals2 = [ws2.cell(row=4, column=c).value for c in (1, 2, 3)]
+    assert vals2 == ["L1", "L2 ★ 기준", "L3"]
 
 
 def test_grid_rollback_base_top_left(win):
@@ -940,21 +941,25 @@ def test_busy_overlay_event_filter_survives_missing_host(app):
     assert b.eventFilter(host, QEvent(QEvent.Resize)) is False
 
 
-def test_notification_banner_dismiss_no_warning(app):
-    """dismiss() 가 연결된 슬롯 없이 disconnect() 해도 RuntimeWarning 이 새지 않아야 한다."""
+def test_notification_banner_dismiss_is_idempotent(app):
+    """dismiss() 를 두 번 불러도 경고나 예외가 새지 않아야 한다.
+
+    원본은 애니메이션 finished 를 반복 disconnect 하며 RuntimeWarning 을 냈다. InfoBar 로
+    바꾼 뒤에도 이미 닫힌 알림을 다시 닫는 경로가 남아 있어 같은 회귀를 막아 둔다.
+    """
     import warnings
     from PySide6.QtWidgets import QWidget
     from app.ui.notifications import NotificationBanner
 
     parent = QWidget()
-    parent.show()  # dismiss() 의 isVisible() 가드를 실제 사용처럼 통과시키기 위해 필요
+    parent.resize(600, 400)
+    parent.show()
     banner = NotificationBanner(parent)
     banner.show_message("테스트", "info", timeout_ms=0)
     banner.dismiss()
-    banner._after_hide()  # 애니메이션 완료를 흉내(스스로 disconnect)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        banner.dismiss()  # 이제 finished 에 연결된 슬롯이 없음 — 예전엔 여기서 RuntimeWarning
+        banner.dismiss()
     assert not any(issubclass(w.category, RuntimeWarning) for w in caught)
     parent.close()
 
