@@ -425,7 +425,6 @@ def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
     """설정에서 제품을 바꾸면 다음 네비게이션을 기다리지 않고 바로 다시 그려야 한다."""
     from app import config
     from app.config import ProductConfig
-    from app.ui.settings_dialog import SettingsDialog
 
     prod = config.active_product()
     other_key = "TESTDEV_SWITCH"
@@ -440,11 +439,10 @@ def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
         for _ in range(5):
             QCoreApplication.processEvents()
         before_cols = win.heatmap_page.map._cols
-        # 다이얼로그가 새 제품으로 초기화되도록 미리 설정한 뒤, 모달을 띄우지 않고
-        # 바로 accept 된 것처럼 흉내 낸다(exec() monkeypatch — 실제 _open_settings() 호출).
+        # 설정은 모달이 아니라 라우트다. 카드가 값을 바꾸면 페이지가 창에 알리고, 창이
+        # 그 자리에서 적용한다. 그 신호를 그대로 흉내 낸다.
         win.settings.product = other_key
-        monkeypatch.setattr(SettingsDialog, "exec", lambda self: True)
-        win._open_settings()
+        win._apply_settings(win.settings)
         assert config.active_product().key == other_key
         # 더 큰 package 크기를 쓰는 제품으로 바꿨으니 격자가 즉시(다음 네비게이션 전에) 커져야 한다.
         win._open_heatmap()

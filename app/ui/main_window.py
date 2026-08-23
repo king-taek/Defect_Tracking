@@ -52,6 +52,9 @@ class MainWindow(FluentWindow):
         self.setWindowTitle(self._base_title)
 
         self.settings = settings or AppSettings.load()
+        # 무거운 재적용(디바이스 DB·재스캔·캐시)을 '바뀐 것' 에만 걸기 위한 기준선.
+        # 첫 변경을 놓치지 않도록 시작 값으로 미리 채운다.
+        self._settings_applied = self._settings_snapshot(self.settings)
         self.settings.ensure_workspace()
         self.thumb_cache = ThumbnailCache(self.settings.cache_path)
         self.image_loader = ImageLoader(max_dim=self._target_image_dim())
@@ -1212,10 +1215,10 @@ class MainWindow(FluentWindow):
         if problem:
             # 원본 폴더 안을 작업공간으로 잡는 것 같은 경우. 페이지가 이미 문구를 보여 준다.
             return
-        before = getattr(self, "_settings_applied", None) or self._settings_snapshot(s)
+        before = self._settings_applied
         now = self._settings_snapshot(s)
 
-        if now["device_db_path"] != before["device_db_path"] or not hasattr(self, "_settings_applied"):
+        if now["device_db_path"] != before["device_db_path"]:
             self._reload_device_db(s)
         if now["product"] != before["product"]:
             self._apply_product(s)
