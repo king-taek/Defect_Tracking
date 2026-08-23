@@ -469,11 +469,11 @@ def test_jump_to_die(win):
     assert (got.col, got.row) == (tb.col, tb.row)
 
 
-def test_help_dialog_constructs(app):
-    from app.ui.help_dialog import ShortcutsDialog
+def test_help_page_constructs(app):
+    from app.ui.pages.help import HelpPage
 
-    dlg = ShortcutsDialog()
-    assert dlg.windowTitle() == "도움말"
+    page = HelpPage()
+    assert page.objectName() == "helpInterface"
 
 
 def test_open_folder_classifies(win, tmp_path, monkeypatch):
@@ -578,58 +578,52 @@ def test_update_finished_message_shows_new_version(win, monkeypatch):
     assert "72개 파일" not in shown["text"]
 
 
-def test_settings_dialog_update_button_requests(app, tmp_path):
-    """설정 다이얼로그의 업데이트 버튼이 update_requested 를 emit 하고 wants_update 설정."""
+def test_settings_update_button_requests(app, tmp_path):
+    """설정의 업데이트 버튼이 update_requested 를 emit 하고 wants_update 를 세운다."""
     from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.pages.settings import SettingsPage
 
     s = AppSettings(workspace=str(tmp_path / "ws"))
-    dlg = SettingsDialog(s, current_lot=None, update_available=True)
+    page = SettingsPage(s, None, update_available=True)
     fired = []
-    dlg.update_requested.connect(lambda: fired.append(1))
-    dlg._on_update_clicked()
-    assert dlg.wants_update() is True
+    page.update_requested.connect(lambda: fired.append(1))
+    page._on_update_clicked()
+    assert page.wants_update() is True
     assert fired == [1]
 
 
-def test_settings_dialog_constructs(app, tmp_path):
+def test_settings_cards_write_through(app, tmp_path):
+    """카드가 값을 바꾸면 곧바로 설정 객체에 반영된다(라우트라 확인 버튼이 없다)."""
     from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.pages.settings import SettingsPage
 
     s = AppSettings(workspace=str(tmp_path / "ws"))
-    dlg = SettingsDialog(s, current_lot=None)
-    dlg.ed_workspace.setText(str(tmp_path / "ws2"))
-    dlg.chk_update.setChecked(False)
-    out = dlg.updated_settings()
-    # 기준 오차는 설정에서 제거됨(사이드바에서만 조절).
-    assert not hasattr(dlg, "spn_tol")
+    page = SettingsPage(s, None)
+    page.card_workspace.set_path(str(tmp_path / "ws2"))
+    page.card_update.setChecked(False)
+    out = page.updated_settings()
+    # 허용오차는 판독 화면의 컨트롤 행에서만 조절한다.
+    assert not hasattr(page, "spn_tol")
     assert out.auto_update_check is False
     assert out.workspace == str(tmp_path / "ws2")
 
 
-def test_settings_dialog_dev_mode_toggle(app, tmp_path):
-    """개발자 모드 토글(작은 버튼)이 dev 섹션을 표시/숨기고 설정에 저장된다."""
+def test_settings_dev_mode_toggle(app, tmp_path):
+    """개발자 모드 스위치가 설정에 저장된다(로그 경로는 펼침 카드 안에 있다)."""
     from app import config
     from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.pages.settings import SettingsPage
 
     s = AppSettings(workspace=str(tmp_path / "ws"), dev_mode=False)
-    dlg = SettingsDialog(s, current_lot=None)
-    # 기본 꺼짐: 버튼 라벨 '꺼짐', dev 섹션(로그 경로·로그 폴더) 숨김.
-    assert dlg.btn_dev.text() == "꺼짐"
-    assert dlg.btn_dev.isChecked() is False
-    assert dlg._dev_box.isHidden()
-    # 켜면 섹션이 보이고 라벨이 '켜짐'.
-    dlg.btn_dev.setChecked(True)
-    assert dlg.btn_dev.text() == "켜짐"
-    assert not dlg._dev_box.isHidden()
-    # 저장 시 settings.dev_mode 반영 → config.dev_mode 가 True.
-    out = dlg.updated_settings()
+    page = SettingsPage(s, None)
+    assert page.sw_dev.isChecked() is False
+    page.sw_dev.setChecked(True)
+    out = page.updated_settings()
     assert out.dev_mode is True
     assert config.dev_mode(out) is True
     # 다시 끄면 False 로 저장.
-    dlg.btn_dev.setChecked(False)
-    assert dlg.updated_settings().dev_mode is False
+    page.sw_dev.setChecked(False)
+    assert page.updated_settings().dev_mode is False
 
 
 def test_sidebar_cluster_radius(app):

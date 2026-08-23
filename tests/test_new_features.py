@@ -69,12 +69,13 @@ def test_export_tray_add_and_persist(win):
     assert len(win._export_tray) == 2
 
 
-def test_export_tray_dialog_remove_and_add_all(win, app):
-    from app.ui.export_dialog import ExportTrayDialog
+def test_export_page_remove_and_add_all(win, app):
+    from app.ui.pages.export import ExportPage
 
     entries = [win.matches[i] for i in range(min(3, len(win.matches)))]
     all_matched = [m for m in win.matches if win._match_status(m) != "none"]
-    dlg = ExportTrayDialog(entries, win.thumb_cache, all_matched=all_matched)
+    dlg = ExportPage(thumb_cache=win.thumb_cache, all_matched=all_matched)
+    dlg.set_tray(entries)
     assert {str(m.base.image_path) for m in dlg.selected()} == {
         str(m.base.image_path) for m in entries
     }
@@ -94,40 +95,47 @@ def test_export_tray_dialog_remove_and_add_all(win, app):
 def test_export_tray_group_persists_across_reopen(win, app):
     """'전체 추가'로 묶은 태그가 확인 후 트레이에 저장했다가 다시 열어도 유지돼야 한다.
 
-    회귀: 예전엔 ExportTrayDialog.selected() 가 태그를 버린 평탄화 목록만 반환하고
-    main_window._export_tray 에 그대로 저장해, 다이얼로그를 다시 열면 묶음(요약 카드)이
-    개별 사진 카드 여러 장으로 풀어졌다.
+    회귀: 예전엔 selected() 가 태그를 버린 평탄화 목록만 반환하고 main_window._export_tray
+    에 그대로 저장해, 명세를 다시 열면 묶음(요약 행)이 개별 사진 여러 줄로 풀어졌다.
     """
-    from app.ui.export_dialog import ExportTrayDialog
+    from app.ui.pages.export import ExportPage
 
     all_matched = [m for m in win.matches if win._match_status(m) != "none"]
     if len(all_matched) < 2:
         return
-    dlg = ExportTrayDialog(
-        [], win.thumb_cache, all_matched=all_matched, all_matched_label="테스트 묶음"
+    dlg = ExportPage(
+        thumb_cache=win.thumb_cache, all_matched=all_matched, all_matched_label="테스트 묶음"
     )
     dlg._add_all_matched()
     tagged = dlg.tagged_selected()
     assert tagged and all(tag == "테스트 묶음" for _m, tag in tagged)
 
-    # main_window._export() 가 트레이에 저장하는 것과 동일한 경로.
+    # main_window._export() 가 트레이에 저장하고 다시 여는 것과 동일한 경로.
     win._export_tray = tagged
-    dlg2 = ExportTrayDialog(list(win._export_tray), win.thumb_cache)
-    assert dlg2.tagged_selected() == tagged
-    tag_values = {tag for _m, tag in dlg2._tagged}
+    page2 = ExportPage(thumb_cache=win.thumb_cache)
+    page2.set_tray(list(win._export_tray))
+    assert page2.tagged_selected() == tagged
+    tag_values = {tag for _m, tag in page2._tagged}
     assert tag_values == {"테스트 묶음"}  # 개별(None)로 풀리지 않았다
 
 
-def test_export_tray_dialog_ok_vs_export(win, app):
-    """확인(저장만)과 Excel 출력을 구분한다(wants_export)."""
-    from app.ui.export_dialog import ExportTrayDialog
+def test_export_page_export_intent_is_explicit(win, app):
+    """라우트에는 '확인' 이 없다. Excel 출력을 눌렀을 때만 출력 의사가 선다.
+
+    명세를 열어 두고 판독으로 돌아갈 수 있게 되면서 '저장만 하고 닫기' 라는 행동 자체가
+    없어졌다. 목록은 늘 저장돼 있고, 남은 구분은 출력을 눌렀는지 하나다.
+    """
+    from app.ui.pages.export import ExportPage
+
     entries = [win.matches[0]]
-    dlg = ExportTrayDialog(entries, win.thumb_cache)
-    dlg._on_ok()
-    assert dlg.wants_export() is False  # 확인 = 저장만
-    dlg2 = ExportTrayDialog(entries, win.thumb_cache)
-    dlg2._on_export()
-    assert dlg2.wants_export() is True  # Excel 출력
+    page = ExportPage(thumb_cache=win.thumb_cache)
+    page.set_tray(entries)
+    assert page.wants_export() is False  # 열어 두기만 한 상태
+    page._on_export_clicked()
+    assert page.wants_export() is True
+    # 목록을 건드리면 방금의 '출력하겠다' 는 이 목록에 대한 뜻이 아니다.
+    page._clear_all()
+    assert page.wants_export() is False
 
 
 def test_export_all_layers_button_unions_matches(win, app):
@@ -138,7 +146,7 @@ def test_export_all_layers_button_unions_matches(win, app):
     추가된 항목은 사진 카드 대신 하나의 요약 태그로 묶인다.
     """
     from PySide6.QtCore import QThreadPool
-    from app.ui.export_dialog import ExportTrayDialog, _ALL_LAYERS_TAG
+    from app.ui.pages.export import ALL_LAYERS_TAG as _ALL_LAYERS_TAG, ExportPage
 
     results: dict = {}
     win._provide_all_layers_matched(
@@ -151,8 +159,8 @@ def test_export_all_layers_button_unions_matches(win, app):
     if not expected:
         return
 
-    dlg = ExportTrayDialog(
-        [], win.thumb_cache, all_layers_provider=win._provide_all_layers_matched
+    dlg = ExportPage(
+        thumb_cache=win.thumb_cache, all_layers_provider=win._provide_all_layers_matched
     )
     assert hasattr(dlg, "btn_add_all_layers")
     dlg._add_all_layers()
@@ -739,18 +747,21 @@ def test_folder_picker_tree_lazy_expand_and_click(app, tmp_path):
     assert dlg._cur == (tmp_path / "root")
 
 
-def test_export_dialog_has_visible_confirm_button(app):
-    from app.ui.export_dialog import ExportTrayDialog
-    dlg = ExportTrayDialog([], None, None)
-    assert hasattr(dlg, "btn_export")
-    assert dlg.btn_export.text() == "Excel 출력"
-    assert dlg.btn_export.isEnabled() is False  # 빈 트레이 → 비활성(존재는 함)
+def test_export_page_has_one_primary_action(app):
+    """주요 액션은 Excel 출력 하나다(03-screens §4). 빈 명세에서는 비활성."""
+    from app.ui.pages.export import ExportPage
+
+    page = ExportPage()
+    assert page.btn_export.text() == "Excel 출력"
+    assert page.btn_export.isEnabled() is False  # 빈 명세 -> 비활성(존재는 함)
 
 
-def test_help_dialog_has_sections_and_features(app):
-    from app.ui.help_dialog import ShortcutsDialog, _FEATURES, _SHORTCUT_GROUPS
-    dlg = ShortcutsDialog()
-    assert dlg.windowTitle() == "도움말"
+def test_help_page_has_sections_and_features(app):
+    from app.ui.pages.help import FEATURES as _FEATURES, SHORTCUT_GROUPS as _SHORTCUT_GROUPS
+    from app.ui.pages.help import HelpPage
+
+    page = HelpPage()
+    assert page.objectName() == "helpInterface"
     assert len(_SHORTCUT_GROUPS) >= 3
     names = [n for n, _ in _FEATURES]
     assert any("히트맵" in n for n in names)
@@ -914,7 +925,7 @@ def test_busy_overlay_start_stop(app):
 def test_busy_overlay_event_filter_survives_missing_host(app):
     """_host 가 없는(재래핑된) 인스턴스로 eventFilter 가 불려도 죽지 않아야 한다.
 
-    회귀: ExportTrayDialog 처럼 매번 새로 만들어지는 다이얼로그의 BusyOverlay 가
+    회귀: 매번 새로 만들어지는 다이얼로그의 BusyOverlay 가
     orphan 으로 남으면, shiboken 이 __init__ 없이 재래핑한 인스턴스로 eventFilter 를
     호출해 AttributeError: 'BusyOverlay' object has no attribute '_host' 가 났다.
     """

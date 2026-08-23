@@ -282,19 +282,17 @@ def test_show_update_notice_has_single_button(app, monkeypatch):
     assert box.cancelButton.isHidden()
 
 
-# ---- 옛 다이얼로그 계약 ----------------------------------------------------
+# ---- 창이 쓰는 계약 --------------------------------------------------------
 
-def test_dialog_keeps_window_contract(app, tmp_path):
-    """MainWindow._open_settings 가 쓰는 계약(생성자/exec/updated_settings/wants_update)."""
-    from app.ui.settings_dialog import SettingsDialog
-
+def test_page_keeps_window_contract(app, tmp_path):
+    """MainWindow 가 쓰는 계약(생성자 / updated_settings / wants_update / update_requested)."""
     settings = AppSettings(workspace=str(tmp_path / "ws"))
-    dlg = SettingsDialog(settings, str(tmp_path / "lot"), None, update_available=True)
+    page = SettingsPage(settings, str(tmp_path / "lot"), None, update_available=True)
 
-    assert dlg.wants_update() is False
-    assert dlg.updated_settings() is settings
+    assert page.wants_update() is False
+    assert page.updated_settings() is settings
     fired = []
-    dlg.update_requested.connect(lambda: fired.append(1))
-    dlg._on_update_clicked()
-    assert dlg.wants_update() is True
+    page.update_requested.connect(lambda: fired.append(1))
+    page._on_update_clicked()
+    assert page.wants_update() is True
     assert fired == [1]

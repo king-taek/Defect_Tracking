@@ -108,12 +108,14 @@ def test_rows_carry_original_shortcuts(page):
     assert "현재 기준 사진을 출력 명세에 담기" in descs
 
 
-def test_dialog_reexports_data(app):
-    """옛 이름(`_SHORTCUT_GROUPS`/`_FEATURES`)으로 읽던 호출부가 그대로 동작한다."""
-    from app.ui.help_dialog import _FEATURES, _SHORTCUT_GROUPS, ShortcutsDialog
+def test_help_is_a_route_not_a_dialog(app):
+    """도움말은 nav 라우트다. 단축키를 보려고 보던 화면을 덮지 않는다.
 
-    assert _SHORTCUT_GROUPS is SHORTCUT_GROUPS
-    assert _FEATURES is FEATURES
-    dlg = ShortcutsDialog()
-    assert dlg.windowTitle() == "도움말"
-    assert dlg.page.objectName() == "helpInterface"
+    부모 없이 만들면 Qt 는 어떤 위젯이든 창으로 친다(`isWindow()`). 그래서 창인지가 아니라
+    모달을 띄우는 종류(QDialog)가 아닌지를 본다.
+    """
+    from PySide6.QtWidgets import QDialog
+
+    page = HelpPage()
+    assert page.objectName() == "helpInterface"
+    assert not isinstance(page, QDialog)
