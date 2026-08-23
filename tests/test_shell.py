@@ -97,12 +97,17 @@ def test_nav_badge_appears_and_clears(win):
     assert "exportInterface" not in win._nav_badges
 
 
-def test_launcher_pages_keep_features_reachable(win):
-    """단계 4~8 전까지 각 라우트가 기존 화면을 열 수 있어야 한다."""
+def test_every_route_is_reachable(win):
+    """라우트는 진짜 페이지이거나, 아직 안 옮겼다면 기존 화면을 여는 임시 페이지다.
+
+    단계 4~8 이 하나씩 진짜 페이지로 갈아끼우는 중이라 두 가지가 섞여 있다. 어느 쪽이든
+    라우트 키(objectName)가 있고 사용자가 그 화면에 도달할 수 있어야 한다.
+    """
     for page in (win.nomatch_page, win.heatmap_page, win.export_page,
                  win.help_page, win.settings_page):
-        assert isinstance(page, LauncherPage)
-        assert page.button.text()
+        assert page.objectName()
+        if isinstance(page, LauncherPage):
+            assert page.button.text()
 
 
 def test_review_page_can_be_built_standalone(app):

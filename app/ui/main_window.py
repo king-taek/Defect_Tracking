@@ -31,13 +31,13 @@ from app.models import BaseDefectMatches, DefectRecord, ParseStatus
 from app.safety import conflicting_source
 from app.scanner import LotIndex
 from app.thumbnails import ThumbnailCache
-from app.ui.export_dialog import ExportTrayDialog
 from app.ui.heatmap_dialog import HeatmapDialog
 from app.ui.help_dialog import ShortcutsDialog
 from app.ui.image_loader import ImageLoader
 from app.ui.image_viewer import ImageViewerDialog
 from app.ui import theme
 from app.ui.notifications import NotificationBanner
+from app.ui.pages.export import ExportPage
 from app.ui.pages.launcher import LauncherPage
 from app.ui.pages.review import ReviewPage
 from app.ui.settings_dialog import SettingsDialog
@@ -76,7 +76,7 @@ class MainWindow(FluentWindow):
         # 보기 필터는 '매칭만' 고정(드롭다운 제거) — 매칭 0인 후보는 항상 후보에서 제외.
         self._filter = "matched"
         # 출력 담기 트레이: (BaseDefectMatches, 태그) 튜플 목록(base image_path 로 중복 제거).
-        # 태그는 ExportTrayDialog 의 '전체 추가' 묶음 표시용(None=개별) — 그대로 저장해야
+        # 태그는 출력 명세 페이지의 '전체 담기' 묶음 표시용(None=개별). 그대로 저장해야
         # 다이얼로그를 다시 열어도 묶음이 유지된다. 스냅샷이라 기준 layer·자재(LOT)를
         # 바꿔도 담은 것이 그대로 유지된다.
         self._export_tray: list = []
@@ -209,13 +209,14 @@ class MainWindow(FluentWindow):
         self.heatmap_page.triggered.connect(self._open_heatmap)
         self.heatmap_page.set_enabled(False)
 
-        self.export_page = LauncherPage(
-            "exportInterface",
-            "출력 명세",
-            "Excel 로 내보낼 사진 목록을 확인하고 개별로 제거합니다.",
-            "출력 명세 열기",
+        self.export_page = ExportPage(
+            thumb_cache=self.thumb_cache,
+            all_layers_provider=self._provide_all_layers_matched,
+            size_key=getattr(self.settings, "ui_font_size", "normal"),
+            parent=self,
         )
-        self.export_page.triggered.connect(self._export)
+        self.export_page.tray_changed.connect(self._on_export_tray_changed)
+        self.export_page.export_requested.connect(self._run_export)
 
         self.help_page = LauncherPage(
             "helpInterface",
@@ -959,8 +960,8 @@ class MainWindow(FluentWindow):
     def _add_indices_to_export(self, indices: list[int]) -> None:
         """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시).
 
-        개별로 담는 항목은 태그 없음(개별 카드) — 묶음(태그)은 ExportTrayDialog 의
-        '전체 추가' 버튼에서만 생기고, tagged_selected() 로 트레이에 그대로 저장된다.
+        개별로 담는 항목은 태그 없음(개별 행). 묶음(태그)은 출력 명세 페이지의 '전체 담기'
+        버튼에서만 생기고, tagged_selected() 로 트레이에 그대로 저장된다.
         """
         keys = self._tray_keys()
         added = 0
@@ -972,7 +973,7 @@ class MainWindow(FluentWindow):
                     self._export_tray.append((m, None))
                     keys.add(k)
                     added += 1
-        self._update_add_export_button()
+        self._sync_export_page()
         if added:
             self.banner.show_message(
                 f"출력 목록에 {added}장 담았습니다. (현재 {len(self._export_tray)}장)",
@@ -983,13 +984,21 @@ class MainWindow(FluentWindow):
 
     def _clear_export_tray(self) -> None:
         self._export_tray = []
+        self._sync_export_page()
+
+    def _sync_export_page(self) -> None:
+        """창 -> 페이지 방향 동기화. 페이지 -> 창은 tray_changed 가 맡는다."""
         self._update_add_export_button()
+        page = getattr(self, "export_page", None)
+        if page is not None:
+            page.set_tray(self._export_tray)
 
     def _update_add_export_button(self) -> None:
         n = len(self._export_tray)
         self.btn_add_export.setText(f"＋ 출력에 담기 ({n})" if n else "＋ 출력에 담기")
         self.btn_add_export.setEnabled(bool(self.matches))
         self.btn_heatmap.setEnabled(bool(self.matches))
+        self._set_nav_badge("exportInterface", n)
 
     # ------------------------------------------------------------ 탐색
     def _goto(self, index: int) -> None:
@@ -1466,41 +1475,38 @@ class MainWindow(FluentWindow):
         self.pool.start(worker)
 
     def _export(self) -> None:
+        """출력 명세 라우트로 간다.
+
+        예전에는 모달이었다. 명세를 보면서 판독으로 돌아가 한 장 더 담는 것이 자연스러운
+        흐름인데 모달은 그것을 막았다.
+        """
         if not self.matches:
             self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
             return
-        # 이번 LOT 에서 매칭 있는 기준 사진(스냅샷) — 다이얼로그의 '전체 추가' 버튼용.
-        all_matched = [
-            m for m in self.matches if self._match_status(m) != "none"
-        ]
-        # 트레이가 비어 있어도 다이얼로그를 열어(전체 추가 버튼 사용) 담을 수 있게 한다.
-        dlg = ExportTrayDialog(
-            list(self._export_tray), self.thumb_cache,
-            all_matched=all_matched,
-            all_matched_label=f"기준 '{self.top.base_layer()}' 매치 전체",
-            all_layers_provider=self._provide_all_layers_matched,
-            parent=self,
+        self.export_page.set_tray(self._export_tray)
+        self.export_page.set_all_matched(
+            [m for m in self.matches if self._match_status(m) != "none"],
+            f"기준 '{self.top.base_layer()}' 매치 전체",
         )
-        accepted = dlg.exec()
-        # 이벤트 루프로 돌아가는 즉시 실제로 파괴되게 한다(BusyOverlay 등 자식이 orphan
-        # 으로 남아 이벤트 필터가 죽은 wrapper 를 호출하는 것을 방지). deleteLater() 는
-        # 지연 삭제라 아래에서 dlg 를 계속 읽는 것은 안전하다.
-        dlg.deleteLater()
-        if not accepted:
-            return
-        selected = dlg.selected()  # list[BaseDefectMatches]
-        # 다이얼로그에서 편집한 결과를 트레이에 반영(다음 출력에도 유지) — 태그 포함으로
-        # 저장해야 다음에 다시 열어도 '전체 추가'로 묶은 요약 카드가 풀리지 않는다.
-        self._export_tray = dlg.tagged_selected()
+        self.switchTo(self.export_page)
+
+    def _on_export_tray_changed(self, _count: int = 0) -> None:
+        """명세 페이지에서 담거나 뺀 것을 창의 트레이에 되돌려 받는다.
+
+        태그까지 함께 보관해야 다음에 열어도 '전체 매치' 로 묶은 요약 행이 풀리지 않는다.
+        """
+        self._export_tray = self.export_page.tagged_selected()
         self._update_add_export_button()
-        # '확인'(저장만) → 트레이 상태만 저장하고 닫는다. Excel 출력은 나중에.
-        if not dlg.wants_export():
-            self.banner.show_message(
-                f"출력 목록을 저장했습니다 ({len(selected)}장).", "success"
-            )
-            return
+        self._set_nav_badge("exportInterface", len(self._export_tray))
+
+    def _run_export(self) -> None:
+        """Excel 출력 실행. 200블록 확인은 페이지가 이미 끝냈으므로 다시 묻지 않는다."""
+        selected = self.export_page.selected()
         if not selected:
             self.banner.show_message("출력할 사진이 없습니다.", "info")
+            return
+        if self.lot_index is None:
+            self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
             return
 
         # 컬럼(compare layer)은 담긴 스냅샷들에 등장하는 비교 layer 의 합집합(등장 순서).

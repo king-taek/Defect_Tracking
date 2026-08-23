@@ -573,6 +573,8 @@ MOTION: dict[str, tuple[int, str]] = {
     "photoSwap": (220, "OutQuint"),
     "rowExpand": (250, "OutQuint"),
     "rowCollapse": (150, "InQuart"),
+    # 명세 행 제거. 목록에서 사라지는 것을 눈으로 좇을 수 있어야 해서 일반 exit 보다 길다.
+    "rowRemove": (240, "InQuart"),
     "spinner": (900, "Linear"),
     "zoom": (250, "OutQuint"),
     "themeSwap": (280, "Linear"),
