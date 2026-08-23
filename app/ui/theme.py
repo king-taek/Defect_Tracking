@@ -535,6 +535,13 @@ HEIGHTS: dict[str, dict[str, int]] = {
 # 판독대 한 칸의 최소 높이(게이트 4: layer 12개를 켜도 사진이 읽혀야 한다).
 WELL_MIN_PX = 224
 
+# 히트맵 선택 링(REVIEW-03 A22). die 사각 안쪽 2px, 두 겹으로 그린다.
+#   바깥 1px accentFill : 연한 채움 구간에서 대비를 담당
+#   안쪽 1px onAccent   : 진한 채움 구간에서 대비를 담당
+# 단색 링은 램프 최고 채움(=accentFill)과 같은 색이라 최고 밀도 die 에서 보이지 않는다.
+# 러버밴드(드래그 사각)도 같은 이중선 + Qt.DashLine 을 쓴다. 램프 상한은 1.0 을 유지한다.
+SELECTION_RING = {"width_px": 2, "outer": "accentFill", "inner": "onAccent", "inset": True}
+
 # ---- 모션 (02 §3) ----
 # (지속시간 ms, Qt easing curve 이름). CSS cubic-bezier 대응은 02 §3 번역표를 따른다.
 MOTION: dict[str, tuple[int, str]] = {
@@ -562,10 +569,14 @@ TOOLTIP_DELAY_MS = 300
 
 # 대비 게이트(게이트 1). 텍스트/배경 전 조합이 이 값 이상이어야 한다.
 CONTRAST_GATE = 5.0
-# 비텍스트 하위 기준(REVIEW-02 A17). 포커스 링·선택 링처럼 조작에 필요한 요소에 적용한다.
+# 비텍스트 하위 기준(REVIEW-02 A17 + REVIEW-03 A21).
+# 대상은 포커스 링과 히트맵 선택 링뿐이다. 카드·컨트롤 경계선은 대비로 식별을 만들지 않고
+# 형태의 윤곽만 암시하므로(측정 1.13~1.69) 게이트·하위 기준 모두에서 제외한다.
+# 대신 hover·disabled 를 경계선 단독으로 표현하지 않는다는 조건이 붙는다(게이트).
 SUBGATE_CONTRAST = 3.0
-# accent 채움을 자동 조정할 때 목표로 삼는 대비. 게이트와 같은 값에서 멈춘다.
-ACCENT_CLAMP_TARGET = CONTRAST_GATE
+# accent 채움을 자동 조정할 때 겨냥하는 목표(REVIEW-03 A19). 판정 합격선(CONTRAST_GATE)과 같은
+# 값을 쓰면 생성 결과가 늘 경계에 얹히므로 여유를 두고 생성한다. 목표 > 합격선은 게이트.
+ACCENT_CLAMP_TARGET = 5.4
 
 
 # ---- 색 계산 (Qt 없이 동작) ----
@@ -681,61 +692,67 @@ def _clamp_accent_fill(base: str, dark: bool, target: float) -> tuple[str, str, 
 
     라이트는 어둡게, 다크는 밝게 옮긴다. 다크에서 명도가 이미 최대인 고채도 색은 더 밝힐 수
     없으므로 채도를 낮춰 이어간다(문서화된 다크 accent #4CC2FF 가 채도 낮은 파랑인 것과 같은 원리).
-    이 확장이 없으면 고채도 accent 는 반복만 소진하고 게이트 미달로 빠져나온다.
+    목표에 도달하지 못하면 조용히 넘어가지 않고 예외로 드러낸다(REVIEW-03 A18 게이트).
     """
     fill = to_hex(parse_rgba(base)[:3])
     on, ratio = _best_on_accent(fill)
-    for _ in range(60):
+    for _ in range(64):
         if ratio >= target:
-            break
+            return fill, on, ratio
         h, sat, val = _hsv(fill)
         if dark:
             if val < 0.999:
                 val = min(1.0, max(val * 1.06, 0.04))
-            elif sat > 0.0:
-                sat = sat * 0.94
             else:
-                break
+                sat = sat * 0.90
         else:
-            if val > 0.0:
+            if val > 0.094:
                 val = val / 1.06
             else:
-                break
+                sat = sat * 0.90
         fill = _from_hsv(h, sat, val)
         on, ratio = _best_on_accent(fill)
-    return fill, on, ratio
+    if ratio >= target:
+        return fill, on, ratio
+    raise ValueError(f"accent 채움 조정 실패: {base!r} (최종 {ratio:.2f}, 목표 {target})")
 
 
 def _clamp_accent_text(fill: str, dark: bool, target: float) -> str:
     """글자로 쓰는 accent 를 페이지 면 대비 게이트까지 옮긴다.
 
-    라이트는 어둡게, 다크는 밝게. 채움과 같은 색을 글자에 그대로 쓰면 밝은 accent(청록 등)에서
-    본문 대비가 무너진다(게이트 2의 3역할 분리가 필요한 이유).
+    카드 하나가 아니라 card·layer·win 세 면 중 가장 불리한 쪽을 기준으로 삼는다. 카드만 보면
+    나머지 두 면에서 미달하는 색이 통과한다(무작위 색 검증에서 실제로 다수 발생).
     """
-    page = FLUENT_DARK["card"] if dark else FLUENT_LIGHT["card"]
+    surfaces = [
+        (FLUENT_DARK if dark else FLUENT_LIGHT)[key] for key in ("card", "layer", "win")
+    ]
+
+    def worst(color: str) -> float:
+        return min(contrast(color, surface) for surface in surfaces)
+
     text = fill
-    for _ in range(60):
-        if contrast(text, page) >= target:
-            break
+    for _ in range(64):
+        if worst(text) >= target:
+            return text
         h, sat, val = _hsv(text)
         if dark:
             if val < 0.999:
                 val = min(1.0, max(val * 1.06, 0.04))
-            elif sat > 0.0:
-                sat = sat * 0.94
             else:
-                break
+                sat = sat * 0.90
         else:
-            if val > 0.0:
+            if val > 0.094:
                 val = val / 1.06
             else:
-                break
+                sat = sat * 0.90
         text = _from_hsv(h, sat, val)
-    return text
+    if worst(text) >= target:
+        return text
+    raise ValueError(f"accent 글자색 조정 실패: {fill!r} (최종 {worst(text):.2f}, 목표 {target})")
 
 
 def resolve_accent(base: str, dark: bool, target: float | None = None) -> dict[str, str]:
-    """어떤 accent 를 받아도 게이트를 지키는 3역할을 돌려준다(REVIEW-02 A15).
+    """어떤 accent 를 받아도 게이트를 지키는 3역할을 돌려준다(REVIEW-02 A15, REVIEW-03 A18/A19).
 
     hover·pressed 는 onAccent 선택을 따라 방향을 정한다. 흰 글자를 쓰는 어두운 채움은 더 어둡게,
     near-black 글자를 쓰는 밝은 채움은 더 밝게 옮겨야 상태 변화에서도 대비가 유지된다.
@@ -762,30 +779,24 @@ def resolve_accent(base: str, dark: bool, target: float | None = None) -> dict[s
     }
 
 
-# 프로토타입이 제공하는 accent 프리셋의 확정값(REVIEW-02 A15 표).
-# 키는 사용자가 고르는 원래 색, 값은 게이트를 통과하는 확정 3역할.
-ACCENT_PRESETS: dict[str, dict[bool, dict[str, str]]] = {
-    "#0078D4": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},
-    "#0067B8": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},
-    "#009FAA": {
+# 프로토타입이 제공하는 accent 프리셋의 확정값(REVIEW-02 A15 표 + REVIEW-03 A20).
+# 표 값은 손으로 고른 표준색이라 clamp 루프를 타지 않는다. None 은 규칙에 위임한다는 뜻이고,
+# 표에 없는 색도 규칙이 받는다. 표 값도 게이트 검증은 거친다(표가 틀리면 드러나도록).
+ACCENT_PRESETS: dict[str, dict[bool, dict[str, str] | None]] = {
+    "#0078D4": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},   # Windows
+    "#0067B8": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},   # 라이트 기본값 자체
+    "#009FAA": {                                                        # QFluent
         False: {
             "fill": "#009FAA",
             "hover": "#00B3BF",   # 밝은 채움 + near-black 글자라 hover 는 밝은 쪽으로
             "pressed": "#00C8D6",
             "onAccent": ONACCENT_DARK,
-            "text": "#00676E",    # 글자용은 카드 대비 게이트까지 어둡게
+            "text": "#00676E",    # 글자용은 세 면 대비 게이트까지 어둡게
             "tint": "rgba(0,159,170,.09)",
         },
-        True: {
-            "fill": "#4FD3DC",
-            "hover": "#4FD3DC",
-            "pressed": "#3FB8C0",
-            "onAccent": ONACCENT_DARK,
-            "text": "#4FD3DC",
-            "tint": "rgba(79,211,220,.13)",
-        },
+        True: None,
     },
-    "#8B5CF6": {
+    "#8B5CF6": {                                                        # Violet
         False: {
             "fill": "#7B3FE4",
             "hover": "#6E39CB",
@@ -794,14 +805,7 @@ ACCENT_PRESETS: dict[str, dict[bool, dict[str, str]]] = {
             "text": "#6231B5",
             "tint": "rgba(123,63,228,.09)",
         },
-        True: {
-            "fill": "#C4A8FF",
-            "hover": "#C4A8FF",
-            "pressed": "#AB8FE6",
-            "onAccent": ONACCENT_DARK,
-            "text": "#C4A8FF",
-            "tint": "rgba(196,168,255,.13)",
-        },
+        True: None,
     },
 }
 
@@ -813,9 +817,9 @@ def accent_roles(dark: bool = False, base: str = ACCENT_BASE) -> dict[str, str]:
     게이트를 넘는다.
     """
     key = to_hex(parse_rgba(base)[:3]).upper()
-    preset = ACCENT_PRESETS.get(key)
+    preset = ACCENT_PRESETS.get(key, {}).get(bool(dark))
     if preset is not None:
-        return dict(preset[bool(dark)])
+        return dict(preset)
     return resolve_accent(base, bool(dark))
 
 
