@@ -1105,10 +1105,13 @@ def test_image_viewer_info_compact_format(app):
     assert "좌표: Camtek: (27314,35565) / KLA:" in txt
     assert "Defect: Over Sized Bump" in txt
     assert f"Path: {rec.image_path}" in txt
-    # 사진을 열면 같은 정보가 텍스트로(작은 글씨) 그대로 표시된다.
-    assert d._meta.text() == txt
-    assert d._meta.objectName() == "meta"
-    assert d._meta.textFormat() == _Qt.PlainText
+    # 머리는 한 줄 요약이고 전체 경로는 '정보 복사' 에만 있다(03-screens §8).
+    # 원본은 경로까지 4줄을 머리에 깔아 사진 높이를 그만큼 잡아먹었다.
+    assert d.lbl_meta.text() == d._meta_text()
+    assert "\n" not in d.lbl_meta.text()
+    assert str(rec.image_path) not in d.lbl_meta.text()
+    assert d.lbl_meta.objectName() == "viewerMeta"
+    assert d.lbl_meta.textFormat() == _Qt.PlainText
 
     # KLA scan → 저장된 실제 DiePitchY 로 KLA 좌표를 정확히 계산한다.
     kla_rec = DefectRecord(

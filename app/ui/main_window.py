@@ -38,6 +38,7 @@ from app.ui.image_viewer import ImageViewerDialog
 from app.ui import theme
 from app.ui.notifications import NotificationBanner
 from app.ui.pages.export import ExportPage
+from app.ui.pages.nomatch import NoMatchPage, fully_unmatched_indices, next_unmatched_index
 from app.ui.pages.launcher import LauncherPage
 from app.ui.pages.review import ReviewPage
 from app.ui.settings_dialog import SettingsDialog
@@ -192,13 +193,8 @@ class MainWindow(FluentWindow):
         self._alias_review_widgets()
         self._wire_review_page()
 
-        self.nomatch_page = LauncherPage(
-            "nomatchInterface",
-            "미매칭",
-            "어떤 비교 layer 와도 매칭되지 않아 후보에서 제외된 기준 사진을 사유별로 봅니다.",
-            "다음 미매칭으로 점프",
-        )
-        self.nomatch_page.triggered.connect(self._jump_unmatched)
+        self.nomatch_page = NoMatchPage(self)
+        self.nomatch_page.record_activated.connect(self._goto_from_nomatch)
 
         self.heatmap_page = LauncherPage(
             "heatmapInterface",
@@ -1096,22 +1092,33 @@ class MainWindow(FluentWindow):
             self._goto(view[-1] if last else view[0])
 
     def _jump_unmatched(self) -> None:
-        """현재 다음에 위치한 '미매칭 포함' 기준으로 점프(트리아지).
+        """다음 '미매칭 포함' 기준으로 점프(A11).
 
-        현재 보기(필터)에 포함된 후보 중에서만 점프한다(제외된 후보는 건너뜀).
+        판정은 `pages.nomatch` 의 순수 함수가 한다. 미매칭의 정의가 창·페이지·배지 세 곳에
+        따로 있으면 세 곳이 조용히 어긋난다.
         """
         if not self.matches:
             return
-        view = self._view_indices()
-        targets = [i for i in view if self._match_status(self.matches[i]) == "none"]
-        if not targets:
-            self.banner.show_message("미매칭이 있는 기준 사진이 없습니다.", "success")
+        target = next_unmatched_index(self.matches, self.current, self._view_indices())
+        if target is None:
+            self.banner.show_message(
+                "표시 후보 전부가 하나 이상 매치되었습니다.", "success", title="미매칭 없음"
+            )
             return
-        for i in targets:
-            if i > self.current:
-                self._goto(i)
-                return
-        self._goto(targets[0])  # 끝까지 없으면 처음으로 순환
+        self._goto(target)
+
+    def _goto_from_nomatch(self, index: int) -> None:
+        """미매칭 페이지에서 고른 사진을 판독 라우트에서 연다."""
+        self.switchTo(self.review_page)
+        self._goto(index)
+
+    def _refresh_nomatch_page(self) -> None:
+        """미매칭 페이지와 nav 배지에 현재 매칭 결과를 공급한다."""
+        self.nomatch_page.set_data(
+            self.matches, self.thumb_cache,
+            self.top.base_layer(), self.top.compare_layers(),
+        )
+        self._set_nav_badge("nomatchInterface", len(fully_unmatched_indices(self.matches)))
 
     def _refresh_view_count(self) -> None:
         if self._filter == "all" or not self.matches:
@@ -1132,6 +1139,7 @@ class MainWindow(FluentWindow):
         # 매칭 0인 기준 사진은 후보(썸네일)에서도 제외해 보이도록 반영
         self.strip.set_visible_set(self._view_indices())
         self._refresh_view_count()
+        self._refresh_nomatch_page()
 
     def _open_viewer(self, record: object) -> None:
         if isinstance(record, DefectRecord):
@@ -1144,8 +1152,19 @@ class MainWindow(FluentWindow):
             return
         from app.ui.cluster_view import ClusterMembersPopup
         ClusterMembersPopup(
-            members, self.top.base_layer(), self.thumb_cache, self._open_viewer, self
+            members, self.top.base_layer(), self.thumb_cache, self._open_viewer, self,
+            add_to_export=self._add_records_to_export,
         ).exec()
+
+    def _add_records_to_export(self, records: list) -> None:
+        """클러스터 시트가 넘긴 record 들을 출력 명세에 담는다.
+
+        시트는 record 를 들고 있고 트레이는 기준 index 로 담는다. 사진 경로로 되짚는다.
+        """
+        by_path = {str(m.base.image_path): i for i, m in enumerate(self.matches)}
+        self._add_indices_to_export([
+            by_path[str(r.image_path)] for r in records if str(r.image_path) in by_path
+        ])
 
     def _open_help(self) -> None:
         ShortcutsDialog(self).exec()
