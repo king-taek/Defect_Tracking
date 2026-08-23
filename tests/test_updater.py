@@ -1,4 +1,4 @@
-"""자동 업데이트 로직 테스트 (네트워크 없음 — opener 주입/로컬 zip)."""
+"""자동 업데이트 로직 테스트 (네트워크 없음 - opener 주입/로컬 zip)."""
 
 from __future__ import annotations
 
@@ -70,6 +70,8 @@ def test_extract_over_ships_only_runtime_essentials(tmp_path):
         "build_exe.py": "dev-build",
         "CLAUDE.md": "dev-doc",
         ".gitignore": "gitcfg",
+        "design_handoff_fluent_redesign/README.md": "design-doc",
+        "design_handoff_fluent_redesign/img/def01.jpg": "mockup",
         # 실행 필수 → 배포
         "app/keep.py": "keep",
         "main.py": "entry",
@@ -78,7 +80,8 @@ def test_extract_over_ships_only_runtime_essentials(tmp_path):
     })
     updater.extract_over(zp, target)
     for gone in (".claude", "tests", "tools", ".github",
-                 "build_exe.py", "CLAUDE.md", ".gitignore"):
+                 "build_exe.py", "CLAUDE.md", ".gitignore",
+                 "design_handoff_fluent_redesign"):
         assert not (target / gone).exists(), f"{gone} 는 배포본에 없어야 함"
     for kept, content in (("app/keep.py", "keep"), ("main.py", "entry"),
                           ("bootstrap.py", "boot"), ("requirements.txt", "PySide6>=6.6")):

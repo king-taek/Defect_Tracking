@@ -1,4 +1,4 @@
-"""로딩(작업 중) 오버레이 — 부모 위 반투명 막 + 중앙 카드(부드러운 스피너·메시지·진행바).
+"""로딩(작업 중) 오버레이 - 부모 위 반투명 막 + 중앙 카드(부드러운 스피너·메시지·진행바).
 
 무거운 작업이 진행되는 동안 '멈춘 것'처럼 보이지 않도록, 부드럽게 회전하는 네온 링과
 (가능하면) 진행도를 표시한다. 부모의 크기에 맞춰 자동으로 덮는다.
@@ -19,7 +19,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qfluentwidgets import isDarkTheme, qconfig
+
 from app.ui import theme
+
+
+def _is_dark() -> bool:
+    return bool(isDarkTheme())
+
+
+def _scrim_color() -> QColor:
+    """시트 뒤를 덮는 스크림. 두 테마 모두 검정 계열이되 다크에서 조금 더 진하게."""
+    return QColor(0, 0, 0, 140 if _is_dark() else 82)
 
 
 class _SpinnerRing(QWidget):
@@ -39,14 +50,15 @@ class _SpinnerRing(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         m = 7
         rect = QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m)
-        # 바탕 트랙(희미한 전체 원)
-        track = QPen(QColor(theme.NEON_SOFT))
+        # 색은 그릴 때마다 토큰에서 읽는다. 생성 시점에 굳히면 테마 전환을 따라가지 못한다.
+        tokens = theme.fluent_tokens(_is_dark())
+        track = QPen(QColor(theme.flatten(tokens["divider"], tokens["card"])))
         track.setWidth(5)
         track.setCapStyle(Qt.RoundCap)
         p.setPen(track)
         p.drawArc(rect, 0, 360 * 16)
         # 밝은 회전 호(약 110°)
-        arc = QPen(QColor(theme.NEON))
+        arc = QPen(QColor(tokens["accentFill"]))
         arc.setWidth(5)
         arc.setCapStyle(Qt.RoundCap)
         p.setPen(arc)
@@ -68,13 +80,7 @@ class BusyOverlay(QWidget):
         card = QFrame()
         card.setObjectName("busyCard")
         card.setFixedWidth(320)
-        # 은은한 네온 테두리 + 살짝 밝은 배경으로 카드를 또렷하게.
-        card.setStyleSheet(
-            "QFrame#busyCard {"
-            f" background:{theme.BG_ELEV};"
-            f" border:1px solid {theme.NEON_SOFT};"
-            " border-radius:14px; }"
-        )
+        self._card = card
         cl = QVBoxLayout(card)
         cl.setContentsMargins(26, 24, 26, 22)
         cl.setSpacing(14)
@@ -87,16 +93,10 @@ class BusyOverlay(QWidget):
         self._msg = QLabel(self._base_msg)
         self._msg.setAlignment(Qt.AlignCenter)
         self._msg.setWordWrap(True)
-        self._msg.setStyleSheet(
-            f"color:{theme.TEXT}; font-weight:700; font-size:14px; border:none;"
-        )
         cl.addWidget(self._msg)
 
         self._sub = QLabel("잠시만 기다려 주세요")
         self._sub.setAlignment(Qt.AlignCenter)
-        self._sub.setStyleSheet(
-            f"color:{theme.TEXT_DIM}; font-size:11px; border:none;"
-        )
         cl.addWidget(self._sub)
 
         self._bar = QProgressBar()
@@ -114,6 +114,32 @@ class BusyOverlay(QWidget):
         self._timer.timeout.connect(self._tick)
 
         self._host.installEventFilter(self)
+        self._apply_tokens()
+        qconfig.themeChanged.connect(self._apply_tokens)
+
+    def _apply_tokens(self, *_args) -> None:
+        """카드·문구 색을 현재 테마 토큰으로 다시 칠한다.
+
+        여기 위젯은 순수 Qt(QFrame/QLabel)라 setStyleSheet 를 써도 된다. Fluent 위젯에
+        직접 거는 것만 금지다.
+        """
+        tokens = theme.fluent_tokens(_is_dark())
+        border = theme.flatten(tokens["cardBorder"], tokens["layer"])
+        self._card.setStyleSheet(
+            "QFrame#busyCard {"
+            f" background:{tokens['card']};"
+            f" border:1px solid {border};"
+            f" border-radius:{theme.RADIUS['card']}px; }}"
+        )
+        self._msg.setStyleSheet(
+            f"color:{theme.flatten(tokens['txt1'], tokens['card'])};"
+            " font-weight:600; font-size:14px; border:none;"
+        )
+        self._sub.setStyleSheet(
+            f"color:{theme.flatten(tokens['txt2'], tokens['card'])};"
+            " font-size:12px; border:none;"
+        )
+        self.update()
 
     # ---- 표시 제어 ---------------------------------------------------
     def start(self, message: str = "처리 중", determinate: bool = False) -> None:
@@ -169,7 +195,7 @@ class BusyOverlay(QWidget):
 
     def eventFilter(self, obj, event):  # noqa: N802
         # 호스트가 파괴된 뒤에도 필터 등록이 남아 shiboken 이 __init__ 없이 재래핑한
-        # 인스턴스로 호출될 수 있다(_host 없음) — 그런 경우 조용히 무시한다.
+        # 인스턴스로 호출될 수 있다(_host 없음) - 그런 경우 조용히 무시한다.
         host = getattr(self, "_host", None)
         if host is not None and obj is host and event.type() == QEvent.Resize and self.isVisible():
             self._reposition()
@@ -177,5 +203,5 @@ class BusyOverlay(QWidget):
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(8, 11, 16, 120))  # 반투명 막(과하게 어둡지 않게)
+        painter.fillRect(self.rect(), _scrim_color())  # 반투명 막(과하게 어둡지 않게)
         painter.end()

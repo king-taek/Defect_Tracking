@@ -43,10 +43,10 @@ def test_sparse_observed_centered_within_shape():
         (c, r) for c in range(11) for r in range(11)
         if (c - cx) ** 2 + (r - cy) ** 2 <= 25
     )
-    # 관측은 그 모양의 정확한 부분집합(가운데 근처 3개) — 동일 좌표계(shift 0).
+    # 관측은 그 모양의 정확한 부분집합(가운데 근처 3개) - 동일 좌표계(shift 0).
     observed = {(5, 5), (5, 4), (6, 5)}
     al = wafermap_align.align_observed_to_diemap(observed, die_map)
-    # 올바른 정합은 이동 0 — 관측이 이미 die_map 부분집합이므로.
+    # 올바른 정합은 이동 0 - 관측이 이미 die_map 부분집합이므로.
     assert (al.dcol, al.drow) == (0, 0)
     assert al.overlap == 1.0
     # 옮긴 die_map 이 관측을 모두 포함(윤곽 안에 defect 이 놓임).

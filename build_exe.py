@@ -35,6 +35,13 @@ def main() -> int:
         "Defect Tracker",
         "--add-data",
         f"data{os.sep}AOIDeviceDB.xlsx{sep}data",
+        # qfluentwidgets 는 스타일시트·아이콘·폰트를 Qt 리소스가 아니라 패키지 안의 데이터
+        # 파일로 들고 있다. 자동 분석은 그것들을 못 찾아서, 빌드는 되고 실행하면 스타일이
+        # 전부 빠진 채 뜬다. 프레임리스 창 껍데기(qframelesswindow)도 같은 이유다.
+        "--collect-all",
+        "qfluentwidgets",
+        "--collect-all",
+        "qframelesswindow",
         "main.py",
     ]
     print("실행:", " ".join(cmd))

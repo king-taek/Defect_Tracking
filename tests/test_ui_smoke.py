@@ -1,4 +1,4 @@
-"""오프스크린 UI 회귀 테스트 (Round 3 — 연결성/사용성).
+"""오프스크린 UI 회귀 테스트 (Round 3 - 연결성/사용성).
 
 Qt 가 없으면 skip. 모달(QFileDialog/QMessageBox)을 띄우지 않는 내부 메서드만 호출한다.
 합성 데이터를 _on_scan_finished 로 직접 주입하여 스캔 워커/모달을 우회한다.
@@ -87,7 +87,7 @@ def test_cluster_radius_refresh_strip_rebuilds_thumbnail_items(win):
     """
     win._goto(0)
     before_count = len(win.strip._thumbs)
-    # 클러스터 길이가 바뀌어 그룹 하나가 합쳐졌다고 가정 — self.matches 를 한 칸 줄인다.
+    # 클러스터 길이가 바뀌어 그룹 하나가 합쳐졌다고 가정 - self.matches 를 한 칸 줄인다.
     if len(win.matches) < 2:
         return
     win.matches = win.matches[:-1]
@@ -100,7 +100,7 @@ def test_cluster_radius_refresh_strip_rebuilds_thumbnail_items(win):
 def test_tolerance_rematch_does_not_rebuild_strip_items(win):
     """허용오차 변경(refresh_strip=False, 기본값)은 스트립 아이템을 다시 만들지 않는다.
 
-    클러스터링 자체가 안 바뀌므로 기존 위젯 재사용이 맞다 — 위 회귀 수정이 이 경로까지
+    클러스터링 자체가 안 바뀌므로 기존 위젯 재사용이 맞다 - 위 회귀 수정이 이 경로까지
     건드리지 않았는지 확인.
     """
     win._goto(0)
@@ -342,7 +342,7 @@ def test_base_change_keeps_exclusion(win):
             QCoreApplication.processEvents()
     none_idx = {i for i, m in enumerate(win.matches) if win._match_status(m) == "none"}
     # 기본 '매칭만' 필터에서 none 후보는 보기(탐색 후보)에 포함되지 않는다
-    # (단, 전부 none 이면 혼란 방지 폴백으로 전체 표시 — 그 경우는 제외 검사를 건너뜀)
+    # (단, 전부 none 이면 혼란 방지 폴백으로 전체 표시 - 그 경우는 제외 검사를 건너뜀)
     view = set(win._view_indices())
     if len(none_idx) < len(win.matches):
         assert none_idx.isdisjoint(view)
@@ -357,16 +357,23 @@ def test_recent_folders_push(win, tmp_path):
     assert len(win.settings.recent_folders) <= 5
 
 
-def test_wafer_map_updates(win):
+def test_nav_die_label_follows_the_current_photo(win):
+    """웨이퍼 맵 위젯은 히트맵 페이지가 흡수했다(A12). 판독 화면에 남는 것은 SLOT·die 링크다."""
     item = win.matches[0]
-    win._update_wafer_map(item)
-    assert win.wafer_map._cols >= 1 and win.wafer_map._rows >= 1
-    # 미매칭은 무시하고 매칭만 히트맵 색으로 표시한다.
-    key = (item.base.col, item.base.row)
-    if win._match_status(item) == "matched":
-        assert key in win.wafer_map._states
-    else:
-        assert key not in win.wafer_map._states
+    win._goto(0)
+    text = win.nav.lbl_die.text()
+    assert item.base.wafer_id in text
+    assert f"die ({item.base.col}, {item.base.row})" in text
+    assert win.nav.lbl_die.isVisible() or text
+
+
+def test_heatmap_page_draws_the_current_lot(win):
+    """지도는 layer 별 record 에서 밀도를 만든다."""
+    win._open_heatmap()
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    wm = win.heatmap_page.map
+    assert wm._cols >= 1 and wm._rows >= 1
 
 
 def test_wafer_map_paints_observed_die_outside_device_shape(win):
@@ -374,7 +381,7 @@ def test_wafer_map_paints_observed_die_outside_device_shape(win):
 
     device_db 기반 제품의 die_map 이 실제 관측 die 범위를 다 담지 못하면(예:
     zeroX/zeroY 실측 계산으로 col/row 범위가 넓어진 경우), 정합은 성공하되
-    관측 die 하나가 die_map 밖에 남을 수 있다 — 이 die 도 지워지지 않고 그려져야 한다.
+    관측 die 하나가 die_map 밖에 남을 수 있다 - 이 die 도 지워지지 않고 그려져야 한다.
     """
     from app import config
 
@@ -399,32 +406,25 @@ def test_wafer_map_paints_observed_die_outside_device_shape(win):
     )
     try:
         config.set_active_product("TESTDEV_PARTIAL")
-        win._align_cache.clear()
-        win._update_wafer_map(item)
+        win.heatmap_page._align_cache.clear()
+        win._open_heatmap()
+        for _ in range(5):
+            QCoreApplication.processEvents()
+        wm = win.heatmap_page.map
         # 정합이 성공해 die_map 클리핑이 실제로 적용되는 시나리오인지 확인.
-        assert win.wafer_map._valid is not None
-        # 수정 전에는 missing die 가 valid 밖이라 그려지지 않았을 것 — 이제는 포함돼야 한다.
-        assert missing in win.wafer_map._valid
-        # 색칠(states)은 매칭된 die 만 — missing 이 매칭이면 색칠도, 아니면 빈칸이어야 한다.
-        missing_match = next(
-            m for m in win.matches
-            if m.base.wafer_id == wafer and (m.base.col, m.base.row) == missing
-        )
-        if win._match_status(missing_match) == "matched":
-            assert missing in win.wafer_map._states
-        else:
-            assert missing not in win.wafer_map._states
+        assert wm._valid is not None
+        # 수정 전에는 missing die 가 valid 밖이라 그려지지 않았을 것. 이제는 포함돼야 한다.
+        assert missing in wm._valid
     finally:
         config.set_active_product(prod.key)
         config.PRODUCTS.pop("TESTDEV_PARTIAL", None)
-        win._align_cache.clear()
+        win.heatmap_page._align_cache.clear()
 
 
 def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
     """설정에서 제품을 바꾸면 다음 네비게이션을 기다리지 않고 바로 다시 그려야 한다."""
     from app import config
     from app.config import ProductConfig
-    from app.ui.settings_dialog import SettingsDialog
 
     prod = config.active_product()
     other_key = "TESTDEV_SWITCH"
@@ -435,19 +435,24 @@ def test_wafer_map_refreshes_immediately_on_product_switch(win, monkeypatch):
         kla_package_y_count=prod.kla_package_y_count + 3,
     )
     try:
-        before_cols = win.wafer_map._cols
-        # 다이얼로그가 새 제품으로 초기화되도록 미리 설정한 뒤, 모달을 띄우지 않고
-        # 바로 accept 된 것처럼 흉내 낸다(exec() monkeypatch — 실제 _open_settings() 호출).
+        win._open_heatmap()
+        for _ in range(5):
+            QCoreApplication.processEvents()
+        before_cols = win.heatmap_page.map._cols
+        # 설정은 모달이 아니라 라우트다. 카드가 값을 바꾸면 페이지가 창에 알리고, 창이
+        # 그 자리에서 적용한다. 그 신호를 그대로 흉내 낸다.
         win.settings.product = other_key
-        monkeypatch.setattr(SettingsDialog, "exec", lambda self: True)
-        win._open_settings()
+        win._apply_settings(win.settings)
         assert config.active_product().key == other_key
         # 더 큰 package 크기를 쓰는 제품으로 바꿨으니 격자가 즉시(다음 네비게이션 전에) 커져야 한다.
-        assert win.wafer_map._cols >= before_cols + 3
+        win._open_heatmap()
+        for _ in range(5):
+            QCoreApplication.processEvents()
+        assert win.heatmap_page.map._cols >= before_cols + 3
     finally:
         config.set_active_product(prod.key)
         config.PRODUCTS.pop(other_key, None)
-        win._align_cache.clear()
+        win.heatmap_page._align_cache.clear()
         win._goto(win.current)
 
 
@@ -464,11 +469,11 @@ def test_jump_to_die(win):
     assert (got.col, got.row) == (tb.col, tb.row)
 
 
-def test_help_dialog_constructs(app):
-    from app.ui.help_dialog import ShortcutsDialog
+def test_help_page_constructs(app):
+    from app.ui.pages.help import HelpPage
 
-    dlg = ShortcutsDialog()
-    assert dlg.windowTitle() == "도움말"
+    page = HelpPage()
+    assert page.objectName() == "helpInterface"
 
 
 def test_open_folder_classifies(win, tmp_path, monkeypatch):
@@ -497,28 +502,33 @@ def test_safe_filename():
     assert MainWindow._safe_filename("") == "compare"
 
 
-def test_sidebar_settings_button_shows_update_mark(win):
-    assert win.top.btn_settings is not None
-    # 업데이트는 설정 다이얼로그로 이동 → 사이드바엔 업데이트 버튼 없음
+def test_update_marker_moves_to_the_nav_badge(win):
+    """업데이트 표식은 nav 설정 항목의 배지 하나다(A10). 컨트롤 행에는 버튼이 없다."""
+    assert win.top.btn_settings is None
     assert win.top.btn_update is None
-    # 가용 시 설정 버튼에 표식(•)이 붙고, 해제 시 사라진다
-    win.top.set_update_available(True)
-    assert "•" in win.top.btn_settings.text()
-    win.top.set_update_available(False)
-    assert win.top.btn_settings.text() == "⚙ 설정"
+    win._set_update_marker(True)
+    assert win.top.update_available() is True
+    assert "settingsInterface" in win._nav_badges
+    win._set_update_marker(False)
+    assert win.top.update_available() is False
+    assert "settingsInterface" not in win._nav_badges
 
 
 def test_update_check_available_sets_flag(win, monkeypatch):
-    """업데이트 확인이 available 이면 설정 버튼 표식 + 사용자가 'Yes' 시 적용 호출(모달 우회)."""
-    from PySide6.QtWidgets import QMessageBox
+    """available 이면 nav 배지 + 사용자가 '지금 업데이트' 를 고르면 적용 호출(모달 우회).
+
+    확인 대화는 순수 Qt QMessageBox 가 아니라 Fluent MessageBox 다. 창이 부르는 이름을
+    막아야 하므로 모듈 함수 `ask_update` 를 갈아끼운다.
+    """
     from app import updater
+    from app.ui import main_window as mw
 
     st = updater.UpdateStatus(available=True, local="a", remote="b", method="zip")
     called = {}
     monkeypatch.setattr(win, "_do_update", lambda s: called.setdefault("do", s))
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr(mw, "ask_update", lambda parent, status=None: True)
     win._on_update_checked(st, manual=True)
-    assert "•" in win.top.btn_settings.text()
+    assert "settingsInterface" in win._nav_badges
     assert called.get("do") is st
 
 
@@ -533,7 +543,7 @@ def test_update_check_uptodate_manual_banner(win):
     win.nav.set_status("업데이트 확인 중...")
     st = updater.UpdateStatus(available=False, local="a", remote="a", method="zip")
     win._on_update_checked(st, manual=True)  # 모달 없음(available=False)
-    assert win.top.btn_settings.text() == "⚙ 설정"
+    assert "settingsInterface" not in win._nav_badges
     assert win.nav.lbl_status.text() == "최신 버전입니다"
 
 
@@ -553,73 +563,67 @@ def test_update_finished_message_shows_new_version(win, monkeypatch):
     디스크에서 새로 읽은 updater.read_installed_version() 값을 써야 한다.
     """
     from app import updater
-    from PySide6.QtWidgets import QMessageBox
+    from app.ui import main_window as mw
 
     monkeypatch.setattr(updater, "read_installed_version", lambda: "1.99.0")
     shown = {}
 
-    def fake_info(self, title, text):
-        shown["text"] = text
+    def fake_notice(parent, title, content):
+        shown["text"] = content
 
-    monkeypatch.setattr(QMessageBox, "information", fake_info)
+    monkeypatch.setattr(mw, "show_update_notice", fake_notice)
     monkeypatch.setattr(win, "close", lambda: None)
     win._on_update_finished(True, "72개 파일을 갱신했습니다.")
     assert "최신 버전(1.99.0)으로 업데이트 되었습니다." in shown["text"]
     assert "72개 파일" not in shown["text"]
 
 
-def test_settings_dialog_update_button_requests(app, tmp_path):
-    """설정 다이얼로그의 업데이트 버튼이 update_requested 를 emit 하고 wants_update 설정."""
+def test_settings_update_button_requests(app, tmp_path):
+    """설정의 업데이트 버튼이 update_requested 를 emit 하고 wants_update 를 세운다."""
     from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.pages.settings import SettingsPage
 
     s = AppSettings(workspace=str(tmp_path / "ws"))
-    dlg = SettingsDialog(s, current_lot=None, update_available=True)
+    page = SettingsPage(s, None, update_available=True)
     fired = []
-    dlg.update_requested.connect(lambda: fired.append(1))
-    dlg._on_update_clicked()
-    assert dlg.wants_update() is True
+    page.update_requested.connect(lambda: fired.append(1))
+    page._on_update_clicked()
+    assert page.wants_update() is True
     assert fired == [1]
 
 
-def test_settings_dialog_constructs(app, tmp_path):
+def test_settings_cards_write_through(app, tmp_path):
+    """카드가 값을 바꾸면 곧바로 설정 객체에 반영된다(라우트라 확인 버튼이 없다)."""
     from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.pages.settings import SettingsPage
 
     s = AppSettings(workspace=str(tmp_path / "ws"))
-    dlg = SettingsDialog(s, current_lot=None)
-    dlg.ed_workspace.setText(str(tmp_path / "ws2"))
-    dlg.chk_update.setChecked(False)
-    out = dlg.updated_settings()
-    # 기준 오차는 설정에서 제거됨(사이드바에서만 조절).
-    assert not hasattr(dlg, "spn_tol")
+    page = SettingsPage(s, None)
+    page.card_workspace.set_path(str(tmp_path / "ws2"))
+    page.card_update.setChecked(False)
+    out = page.updated_settings()
+    # 허용오차는 판독 화면의 컨트롤 행에서만 조절한다.
+    assert not hasattr(page, "spn_tol")
     assert out.auto_update_check is False
     assert out.workspace == str(tmp_path / "ws2")
 
 
-def test_settings_dialog_dev_mode_toggle(app, tmp_path):
-    """개발자 모드 토글(작은 버튼)이 dev 섹션을 표시/숨기고 설정에 저장된다."""
+def test_settings_dev_mode_toggle(app, tmp_path):
+    """개발자 모드 스위치가 설정에 저장된다(로그 경로는 펼침 카드 안에 있다)."""
     from app import config
     from app.config import AppSettings
-    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.pages.settings import SettingsPage
 
     s = AppSettings(workspace=str(tmp_path / "ws"), dev_mode=False)
-    dlg = SettingsDialog(s, current_lot=None)
-    # 기본 꺼짐: 버튼 라벨 '꺼짐', dev 섹션(로그 경로·로그 폴더) 숨김.
-    assert dlg.btn_dev.text() == "꺼짐"
-    assert dlg.btn_dev.isChecked() is False
-    assert dlg._dev_box.isHidden()
-    # 켜면 섹션이 보이고 라벨이 '켜짐'.
-    dlg.btn_dev.setChecked(True)
-    assert dlg.btn_dev.text() == "켜짐"
-    assert not dlg._dev_box.isHidden()
-    # 저장 시 settings.dev_mode 반영 → config.dev_mode 가 True.
-    out = dlg.updated_settings()
+    page = SettingsPage(s, None)
+    assert page.sw_dev.isChecked() is False
+    page.sw_dev.setChecked(True)
+    out = page.updated_settings()
     assert out.dev_mode is True
     assert config.dev_mode(out) is True
     # 다시 끄면 False 로 저장.
-    dlg.btn_dev.setChecked(False)
-    assert dlg.updated_settings().dev_mode is False
+    page.sw_dev.setChecked(False)
+    assert page.updated_settings().dev_mode is False
 
 
 def test_sidebar_cluster_radius(app):

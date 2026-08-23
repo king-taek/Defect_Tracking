@@ -77,7 +77,7 @@ def test_parallel_scan_is_deterministic(tmp_path):
 
 
 def test_classify_selection_levels(tmp_path):
-    # DEVICE/MAT/LAYER/WAFER/a.jpg  — 각 레벨 선택 시 분류
+    # DEVICE/MAT/LAYER/WAFER/a.jpg  - 각 레벨 선택 시 분류
     img = tmp_path / "DEVICE" / "MAT" / "LAYER" / "WAFER" / "a.jpg"
     img.parent.mkdir(parents=True)
     img.write_bytes(b"\xff\xd8\xff\xd9")
@@ -167,3 +167,30 @@ def test_default_log_dir_empty_on_non_windows():
 
     if config.os.name != "nt":
         assert config.default_log_dir() == ""
+
+
+def test_dependency_lists_cover_fluent_widgets():
+    """자동 업데이트는 코드만 배포하고 pip 를 돌리지 않는다.
+
+    세 곳(requirements / main.py / bootstrap.py)에 모두 등록돼 있어야 기존 설치본이
+    원시 트레이스백 대신 안내를 본다(REVIEW-01 A2 게이트).
+    """
+    import bootstrap
+    import main
+
+    root = Path(__file__).resolve().parents[1]
+    req = (root / "requirements.txt").read_text(encoding="utf-8")
+    assert "PySide6-Fluent-Widgets==1.11.3" in req
+    assert "qfluentwidgets" in main._REQUIRED
+    assert "qfluentwidgets" in bootstrap.REQUIRED
+    assert bootstrap.REQUIRED["qfluentwidgets"] == "PySide6-Fluent-Widgets==1.11.3"
+
+
+def test_setup_notice_text_is_actionable_and_hides_traceback():
+    """안내는 조치 가능한 한 문장이어야 하고 트레이스백을 노출하지 않는다."""
+    import main
+
+    assert main._SETUP_TITLE == "추가 구성이 필요합니다"
+    assert "bootstrap.py" in main._SETUP_BODY
+    assert "Traceback" not in main._SETUP_BODY
+    assert "bootstrap.py" in main._SETUP_HOWTO

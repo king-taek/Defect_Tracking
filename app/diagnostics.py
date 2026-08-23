@@ -1,4 +1,4 @@
-"""좌표 추출 실패 진단 리포트(개발용) — 단일 markdown 파일로 관리.
+"""좌표 추출 실패 진단 리포트(개발용) - 단일 markdown 파일로 관리.
 
 스캔에서 좌표를 뽑지 못한 record 의 '왜'를 모아 한 파일로 남긴다. 매 스캔마다
 **누적 추가(append)** 하여 이력을 보존한다. 원본이 아닌 워크스페이스에만 쓴다.
@@ -24,22 +24,22 @@ _STATUS_LABEL = {
 
 # 서명(시도 트레일)에 특정 신호가 있으면 처방 힌트를 붙인다.
 _HINTS = [
-    ("KLA 원본", "파일명이 KLA 원본형 — 자재(material) 폴더가 아니라 KLA 원본 폴더를 "
+    ("KLA 원본", "파일명이 KLA 원본형 - 자재(material) 폴더가 아니라 KLA 원본 폴더를 "
                  "선택했을 가능성. 폴더 레벨을 확인하세요."),
-    ("ColorImageGrabingInfo.ini 없음", "Camtek INI 가 없는 layer — KLA info(.001)로만 "
+    ("ColorImageGrabingInfo.ini 없음", "Camtek INI 가 없는 layer - KLA info(.001)로만 "
                                        "좌표가 나옵니다. info 파일 존재를 확인하세요."),
-    ("TiffFileName", "KLA info 의 TiffFileName 목록과 이미지 파일명이 어긋남 — 확장자/명명 "
+    ("TiffFileName", "KLA info 의 TiffFileName 목록과 이미지 파일명이 어긋남 - 확장자/명명 "
                      "규칙 불일치 가능."),
-    ("DiePitchY 없음", "KLA info header 가 비표준 — DiePitchY 라인을 확인하세요."),
-    ("die 위치 음수", "XINDEX/YINDEX 또는 제품 zero offset 이 맞지 않음 — 제품 프로파일을 "
+    ("DiePitchY 없음", "KLA info header 가 비표준 - DiePitchY 라인을 확인하세요."),
+    ("die 위치 음수", "XINDEX/YINDEX 또는 제품 zero offset 이 맞지 않음 - 제품 프로파일을 "
                      "확인하세요."),
-    ("필드 누락", "INI section 에 x/y/col/row 키가 부족 — INI 생성 설정을 확인하세요."),
+    ("필드 누락", "INI section 에 x/y/col/row 키가 부족 - INI 생성 설정을 확인하세요."),
     ("미분류(class 0) 후보 이미지", "KLA 가 찍었지만 정식 결함으로 분류/등록하지 않은 후보 "
-                                   "이미지 — 실제 결함이 아니면 정상이며 무시해도 됩니다."),
+                                   "이미지 - 실제 결함이 아니면 정상이며 무시해도 됩니다."),
 ]
 
 
-# 미분류(class 0) 후보 — 원본 info(DefectList)에 정식 결함으로 등록되지 않아 좌표가 없는,
+# 미분류(class 0) 후보 - 원본 info(DefectList)에 정식 결함으로 등록되지 않아 좌표가 없는,
 # '정상적으로 제외되는' 이미지. 진짜 실패(info 없음·불일치 등)와 구분해 따로 표기한다.
 _UNCLASSIFIED_MARK = "미분류(class 0)"
 
@@ -70,7 +70,7 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
     real_failed = [r for r in failed if not _is_unclassified(r)]
 
     lines: list[str] = []
-    lines.append(f"# 좌표 추출 진단 — {lot_name}")
+    lines.append(f"# 좌표 추출 진단 - {lot_name}")
     lines.append("")
     lines.append(f"- 전체 이미지: **{total}개**")
     lines.append(f"- 좌표 OK: **{total - len(failed)}개**")
@@ -90,15 +90,15 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
                 lines.append(f"- {e}")
         return "\n".join(lines) + "\n"
 
-    # 미분류(class 0) 후보 — 무시 가능(간단 요약만, KLA info 덤프 없음)
+    # 미분류(class 0) 후보 - 무시 가능(간단 요약만, KLA info 덤프 없음)
     if unclassified:
         lines.extend(_unclassified_section(unclassified))
 
-    # 확인 필요 실패 — 상태별 카운트 + 원인 클러스터(상세)
+    # 확인 필요 실패 - 상태별 카운트 + 원인 클러스터(상세)
     if real_failed:
         lines.extend(_failure_clusters(real_failed))
     else:
-        lines.append("확인이 필요한 실패는 없습니다 — 위 미분류(class 0) 후보만 있으며 정상입니다. ✅")
+        lines.append("확인이 필요한 실패는 없습니다 - 위 미분류(class 0) 후보만 있으며 정상입니다. ✅")
         lines.append("")
 
     if scan_errors:
@@ -110,9 +110,9 @@ def build_failure_report(lot_name: str, records: list[DefectRecord],
 
 
 def _unclassified_section(recs: list[DefectRecord]) -> list[str]:
-    """미분류(class 0) 후보 요약 — layer/wafer 분포 + 예시(무거운 info 덤프 없음)."""
+    """미분류(class 0) 후보 요약 - layer/wafer 분포 + 예시(무거운 info 덤프 없음)."""
     lines: list[str] = []
-    lines.append(f"## 미분류(class 0) 후보 — 무시 가능 ({len(recs)}개)")
+    lines.append(f"## 미분류(class 0) 후보 - 무시 가능 ({len(recs)}개)")
     lines.append("")
     lines.append(
         "> KLA 가 캡처했지만 정식 결함으로 분류/등록하지 않은 후보 이미지입니다. 원본 "

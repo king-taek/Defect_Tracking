@@ -9,9 +9,9 @@
   y   = Round(DiePitchY - YREL, 0)   # Y 방향은 DiePitchY 기준으로 반전
 
 zeroX/zeroY 는 info 파일의 `SampleTestPlan` 블록(그 lot/step 에서 실제 관측된
-XINDEX/YINDEX 최소값)에서 우선 계산한다 — 제품 설정(PackageX/Y÷2)은 이 블록이
+XINDEX/YINDEX 최소값)에서 우선 계산한다 - 제품 설정(PackageX/Y÷2)은 이 블록이
 없을 때만 쓰는 폴백이다. 제품 설정값은 디바이스 DB 시트를 잘못 참조하는 등으로
-실측과 어긋날 수 있어(정답 VBA 도구/AOIDeviceDB.xlsx 로 확인한 DEVA 사례 —
+실측과 어긋날 수 있어(정답 VBA 도구/AOIDeviceDB.xlsx 로 확인한 DEVA 사례 -
 "DEVA"과 "DEVA Live" 두 시트가 있는데 후자가 실제 운영 값(PackageY=6, zeroY=3)),
 info 파일 자신의 실측값이 더 신뢰할 수 있다.
 
@@ -242,13 +242,13 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
                 break
     if fields is None:
         # class(그룹 3)==0(Unclassified) 파일명은 KLARF 에 정식 결함으로 등록된 적
-        # 없는 미분류 후보 이미지일 가능성이 높다(정상) — 파일명을 사유에 넣지 않는
+        # 없는 미분류 후보 이미지일 가능성이 높다(정상) - 파일명을 사유에 넣지 않는
         # 고정 문구로 반환해 진단 리포트에서 파일마다 따로 클러스터링되지 않게 한다.
         if fname_match and fname_match.group(3) == "0":
             return KlaResult(
                 ParseStatus.NOT_FOUND,
                 reason=(
-                    "KLA: 미분류(class 0) 후보 이미지 — info DefectList 에 정식 결함으로 "
+                    "KLA: 미분류(class 0) 후보 이미지 - info DefectList 에 정식 결함으로 "
                     "등록되지 않음(정상, 무시 가능)"
                 ),
             )
@@ -274,14 +274,14 @@ def convert_from_parsed(parsed: _ParsedInfo, jpg_filename: str) -> KlaResult:
     zero_x, zero_y = parsed.sample_zero or (config.kla_zero_x(), config.kla_zero_y())
     col = xindex + zero_x
     row = yindex + zero_y
-    # 음수 die 위치는 비정상(잘못된 XINDEX/YINDEX) — 잘못 매칭되지 않도록 실패 처리.
+    # 음수 die 위치는 비정상(잘못된 XINDEX/YINDEX) - 잘못 매칭되지 않도록 실패 처리.
     if col < 0 or row < 0:
         _log.warning(
-            "KLA die 위치가 음수입니다(col=%s,row=%s) — %s", col, row, jpg_filename
+            "KLA die 위치가 음수입니다(col=%s,row=%s) - %s", col, row, jpg_filename
         )
         return KlaResult(
             ParseStatus.INVALID_INFO,
-            reason=f"die 위치 음수(col={col},row={row}) — XINDEX/YINDEX 비정상",
+            reason=f"die 위치 음수(col={col},row={row}) - XINDEX/YINDEX 비정상",
         )
     x = round(xrel)
     y = round(parsed.die_pitch_y - yrel)

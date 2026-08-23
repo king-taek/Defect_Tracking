@@ -1,4 +1,4 @@
-"""자동 업데이트 — 메인 브랜치를 가져와 적용.
+"""자동 업데이트 - 메인 브랜치를 가져와 적용.
 
 설치 형태에 따라 자동 감지:
   - git 체크아웃(.git 존재 + git 설치) → git fetch + reset --hard origin/main
@@ -28,17 +28,18 @@ from app import config
 ProgressCb = Optional[Callable[[str], None]]
 
 # ZIP(멀티파일 app/) 자동 업데이트로 설치 폴더에 쓰지 않을 폴더(경로 상 이름 일치 시 제외). 부류:
-#   (1) 로컬 전용/재생성 폴더(.git·캐시·가상환경) — 원격본으로 덮어쓰면 안 됨.
-#   (2) 개발 전용 리소스(.claude 스킬·tests·tools·.github CI) — app/ 실행에 불필요.
+#   (1) 로컬 전용/재생성 폴더(.git·캐시·가상환경) - 원격본으로 덮어쓰면 안 됨.
+#   (2) 개발 전용 리소스(.claude 스킬·tests·tools·.github CI) - app/ 실행에 불필요.
 # 배포본에는 실행 필수(app/·main.py·bootstrap.py·requirements.txt)만 남는다.
-# git 체크아웃(=개발자 클론)에는 (2)가 그대로 남는다 — 이 목록은 ZIP 경로에만 적용된다.
+# git 체크아웃(=개발자 클론)에는 (2)가 그대로 남는다 - 이 목록은 ZIP 경로에만 적용된다.
 _SKIP_DIRS = {
     ".git", "__pycache__", ".pytest_cache", ".venv", "venv",  # (1) 로컬 전용/재생성
     ".claude", "tests", "tools", ".github",                    # (2) 개발 전용
+    "design_handoff_fluent_redesign",                          # (2) 디자인 핸드오프 문서
 }
-# 자동 업데이트로 받아오지 않을(로컬 유지/미배포) 파일 이름 — 앱 실행에 불필요:
+# 자동 업데이트로 받아오지 않을(로컬 유지/미배포) 파일 이름 - 앱 실행에 불필요:
 #   개발 문서(CLAUDE.md·README.md), 개발용 빌드 스크립트(build_exe.py), git 설정(.gitignore).
-# (requirements.txt 는 bootstrap.py 가 의존성 설치에 쓰므로 반드시 배포본에 포함 — 여기 넣지 않는다.)
+# (requirements.txt 는 bootstrap.py 가 의존성 설치에 쓰므로 반드시 배포본에 포함 - 여기 넣지 않는다.)
 _SKIP_FILES = {"CLAUDE.md", "README.md", "build_exe.py", ".gitignore"}
 
 _API = "https://api.github.com/repos/{owner}/{repo}/commits/{branch}"

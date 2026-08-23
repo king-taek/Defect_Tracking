@@ -3,7 +3,10 @@
 기준 Layer 사진들의 (중앙 10% 확대) 썸네일을 가로로 나열한다.
 클릭 시 해당 사진을 기준 defect 로 설정하고, 현재 선택 썸네일을 강조한다.
 
-가로 휠을 쓰지 않도록 **세로 휠 → 가로 스크롤** 로 매핑한다(사용성).
+가로 휠을 쓰지 않도록 **세로 휠 -> 가로 스크롤** 로 매핑한다(사용성).
+
+사진은 화면에 들어온 카드만 읽는다. 599장짜리 LOT 에서 전부 미리 읽으면 스크롤이 시작되기도
+전에 메모리와 시간이 다 나간다.
 """
 
 from __future__ import annotations
@@ -14,6 +17,11 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QScrollArea, QWidget
 
 from app.ui.widgets import ClickableThumb
+
+# 프로토타입 필름스트립 96 에서 아래 여백 12 를 뺀 값(카드 80 + 상하 여백 4).
+_STRIP_H = 84
+# 화면 밖으로 이만큼까지는 미리 읽어 둔다. 스크롤을 시작하자마자 빈 칸이 보이지 않게.
+_PRELOAD_PX = 320
 
 
 class ThumbnailStrip(QScrollArea):
@@ -26,7 +34,7 @@ class ThumbnailStrip(QScrollArea):
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setFixedHeight(120)
+        self.setFixedHeight(_STRIP_H)
         self.setToolTip("세로 휠로 좌우 스크롤 · 클릭하면 기준 사진 변경")
         # viewport 기본 흰색 제거 → 뒤의 패널(BG_PANEL)이 비치게
         self.setFrameShape(QScrollArea.NoFrame)
@@ -37,7 +45,7 @@ class ThumbnailStrip(QScrollArea):
         self._container.setAutoFillBackground(False)
         self._container.setStyleSheet("#stripHost { background: transparent; }")
         self._layout = QHBoxLayout(self._container)
-        self._layout.setContentsMargins(8, 8, 8, 8)
+        self._layout.setContentsMargins(0, 2, 0, 2)
         self._layout.setSpacing(8)
         self._layout.addStretch()
         self.setWidget(self._container)
@@ -47,6 +55,8 @@ class ThumbnailStrip(QScrollArea):
         self._scroll_anim = QPropertyAnimation(self.horizontalScrollBar(), b"value", self)
         self._scroll_anim.setDuration(220)
         self._scroll_anim.setEasingCurve(QEasingCurve.OutCubic)
+        # 스크롤이 멈출 때가 아니라 움직이는 동안 계속 채운다(빈 칸이 스쳐 지나가지 않게).
+        self.horizontalScrollBar().valueChanged.connect(lambda _=0: self.load_visible())
 
     def _animate_scroll_to(self, target: int) -> None:
         """수평 스크롤바를 target 값으로 부드럽게 이동."""
@@ -92,8 +102,39 @@ class ThumbnailStrip(QScrollArea):
                 on_progress()
 
     def set_thumbnail(self, index: int, path: str) -> None:
+        """사진 경로를 등록한다. 화면에 보이는 카드만 실제로 읽는다."""
         if 0 <= index < len(self._thumbs):
-            self._thumbs[index].set_image(path)
+            self._thumbs[index].set_source(path)
+            self.load_visible()
+
+    def load_visible(self) -> int:
+        """보이는 범위(+여유)의 카드를 읽는다. 실제로 읽은 장수를 돌려준다.
+
+        위치는 위젯 geometry 가 아니라 카드 폭으로 계산한다. 목록을 막 채운 직후에는
+        레이아웃이 아직 돌지 않아 모든 카드가 x=0 으로 보이고, 그러면 599장을 한꺼번에
+        읽어 버린다.
+        """
+        if not self._thumbs:
+            return 0
+        left = self.horizontalScrollBar().value() - _PRELOAD_PX
+        right = left + max(self.viewport().width(), 0) + 2 * _PRELOAD_PX
+        margins = self._layout.contentsMargins()
+        x = margins.left()
+        step = ClickableThumb.CARD_W + self._layout.spacing()
+        loaded = 0
+        for thumb in self._thumbs:
+            # isVisible 이 아니라 isHidden 이다. 창을 보이기 전에도 채워야 첫 화면이 빈 칸으로
+            # 뜨지 않는다. 후보에서 제외돼 명시적으로 숨긴 카드만 자리를 차지하지 않는다.
+            if thumb.isHidden():
+                continue
+            if x <= right and x + ClickableThumb.CARD_W >= left and thumb.ensure_loaded():
+                loaded += 1
+            x += step
+        return loaded
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self.load_visible()
 
     def set_status_marks(self, statuses: list[str]) -> None:
         """각 썸네일에 매칭 상태 점을 표시(matched/none)."""
@@ -109,10 +150,12 @@ class ThumbnailStrip(QScrollArea):
         if indices is None:
             for t in self._thumbs:
                 t.setVisible(True)
+            self.load_visible()
             return
         sel = set(indices)
         for i, t in enumerate(self._thumbs):
             t.setVisible(i in sel)
+        self.load_visible()
 
     def set_current(self, index: int) -> None:
         if not (0 <= index < len(self._thumbs)):
@@ -121,6 +164,7 @@ class ThumbnailStrip(QScrollArea):
             t.set_selected(i == index)
         self._current = index
         self._ensure_visible(index)
+        self.load_visible()
 
     def _ensure_visible(self, index: int) -> None:
         """선택 썸네일이 보이도록 부드럽게 가로 스크롤."""

@@ -1,11 +1,13 @@
-"""좌측 사이드바 컨트롤 및 하단 탐색 바 (문서 Section 8.1, 8.3, 8.5).
+"""판독 화면의 컨트롤 행과 탐색 바.
 
-사이드바(세로): 자재 폴더 선택 / 자재명 / 기준 Layer / 허용 오차 / DEFECT 클러스터 길이 /
-비교 Layer(체크, 세로 스크롤) / 설정·업데이트·결과 출력하기
-탐색 바: 이전 / 현재 index·전체 / 다음
+원본은 좌측 240px 사이드바에 폼 아홉 줄을 세워 두고 판독 내내 시야를 차지했다. 판독 중에 조건은
+비켜나 있어야 하므로 한 줄(높이 40)로 접고, 후보가 많은 비교 layer 선택은 필요할 때만 여는
+Flyout 으로 옮겼다(03-screens §1, REVIEW-01 A14).
 
-비교 Layer 선택부는 세로 스크롤 영역에 한 줄에 하나씩 쌓는다.
-layer 목록 설정 시 시그널을 차단해 재계산 폭주를 막는다.
+클래스 이름과 공개 API(시그널·메서드·속성)는 유지한다. 배선과 테스트가 이 계약에 기대고 있고,
+레이아웃 교체와 계약 변경을 한 커밋에 섞으면 회귀 원인을 분리할 수 없다.
+
+휠로 값이 바뀌지 않는 입력(NoScroll*)은 계승 필수 항목이다.
 """
 
 from __future__ import annotations
@@ -15,27 +17,61 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
+)
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CheckBox,
+    ComboBox,
+    DoubleSpinBox,
+    Flyout,
+    FlyoutAnimationManager,
+    FlyoutAnimationType,
+    FlyoutViewBase,
+    FluentIcon,
+    PrimaryPushButton,
+    PushButton,
+    SmoothScrollArea,
+    StrongBodyLabel,
+    TransparentPushButton,
+    isDarkTheme,
+    qconfig,
+    setCustomStyleSheet,
 )
 
 from app import config
 from app.ui import theme
 
+# 표시 이름 뒤에 붙는 재리뷰 깊이. 긴 것부터 봐야 "재재리뷰" 가 "재리뷰" 로 잘리지 않는다.
+_DEPTH_SUFFIXES = ("_재재리뷰", "_재리뷰")
 
-class NoScrollDoubleSpinBox(QDoubleSpinBox):
+# A14 고정값: 컨트롤 행 높이 40, 항목 간 gap 6, 구분선 1px x 20.
+_ROW_H = 40
+
+
+def split_depth(display: str) -> tuple[str, str]:
+    """표시 이름을 (canonical, 깊이 라벨) 로 나눈다.
+
+    scanner 는 canonical 이 겹칠 때만 "LYA4_재리뷰" 같은 표시 이름을 만든다. 목록에서는
+    canonical 을 이름으로 세우고 깊이는 칩으로 떼어 놓아야 후보 24개가 흩어지지 않는다.
+    """
+    for suffix in _DEPTH_SUFFIXES:
+        if display.endswith(suffix):
+            return display[: -len(suffix)], suffix[1:]
+    return display, ""
+
+
+class NoScrollDoubleSpinBox(DoubleSpinBox):
     """마우스 휠로 값이 바뀌지 않는 스핀박스.
 
-    사이드바를 세로 스크롤하다 허용오차가 실수로 바뀌는 것을 막는다. 포커스가 있을 때
-    키보드/직접 입력은 정상 동작한다.
+    판독대를 스크롤하다 허용오차가 실수로 바뀌는 것을 막는다. 포커스가 있을 때 키보드·직접
+    입력은 정상 동작한다. 계승 필수 항목이다.
     """
 
     def __init__(self, *args, **kwargs):
@@ -46,7 +82,7 @@ class NoScrollDoubleSpinBox(QDoubleSpinBox):
         event.ignore()  # 휠은 항상 무시(부모 스크롤로 전달)
 
 
-class NoScrollComboBox(QComboBox):
+class NoScrollComboBox(ComboBox):
     """마우스 휠로 항목이 바뀌지 않는 콤보박스(실수 변경 방지)."""
 
     def __init__(self, *args, **kwargs):
@@ -57,10 +93,177 @@ class NoScrollComboBox(QComboBox):
         event.ignore()
 
 
-class SideBar(QFrame):
-    """좌측 세로 컨트롤 사이드바.
+class _LayerCheck(CheckBox):
+    """비교 layer 한 줄의 체크박스.
 
-    상단 컨트롤 바를 대체하지만 공개 API(시그널/메서드/속성)는 동일하게 유지한다.
+    화면에는 canonical 만 쓰고 깊이는 옆 칩으로 보이지만, `text()` 는 계속 **layer 이름**
+    (표시 이름)을 준다. 배선과 테스트가 `cb.text()` 로 layer 를 읽기 때문이다.
+    """
+
+    def __init__(self, layer: str, label: str, parent: Optional[QWidget] = None):
+        # 텍스트를 생성자로 넘기면 qfluentwidgets 오버로드가 self.__init__(parent) 로 되돌아와
+        # 이 서명과 어긋난다. 부모만 넘기고 라벨은 뒤에 세운다.
+        super().__init__(parent)
+        self._layer = layer
+        self.setText(label)
+
+    def text(self) -> str:  # noqa: D102  (계약: 표시 라벨이 아니라 layer 이름)
+        return self._layer
+
+
+class _DepthChip(QLabel):
+    """재리뷰 깊이 칩. 순수 Qt 위젯이라 setStyleSheet 를 직접 쓴다."""
+
+    def __init__(self, text: str, parent: Optional[QWidget] = None):
+        super().__init__(text, parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedHeight(18)
+        self.setContentsMargins(0, 0, 0, 0)
+        self._apply_tokens()
+        qconfig.themeChanged.connect(self._apply_tokens)
+
+    def _apply_tokens(self) -> None:
+        tok = theme.fluent_tokens(isDarkTheme())
+        self.setStyleSheet(
+            f"QLabel {{ color: {tok['txt2']}; background: {tok['subtle']};"
+            f" border: 1px solid {tok['ctrlBd']}; border-radius: {theme.RADIUS['chip']}px;"
+            f" padding: 0 7px; font-size: {theme.fluent_font_px('captionSm')}px; }}"
+        )
+
+
+def _divider(parent: Optional[QWidget] = None) -> QFrame:
+    """컨트롤 행의 1px 세로 구분선(A14: 높이 20, 좌우 마진 4)."""
+    line = QFrame(parent)
+    line.setObjectName("ctrlDivider")
+    line.setFixedSize(1, 20)
+    line.setContentsMargins(0, 0, 0, 0)
+
+    def paint() -> None:
+        tok = theme.fluent_tokens(isDarkTheme())
+        line.setStyleSheet(f"QFrame#ctrlDivider {{ background: {tok['divider']}; border: none; }}")
+
+    paint()
+    qconfig.themeChanged.connect(paint)
+    return line
+
+
+class CompareLayerView(FlyoutViewBase):
+    """비교 layer 선택 Flyout 의 내용.
+
+    canonical 한 줄씩 세우고 재리뷰 깊이는 칩으로 붙인다. 클러스터 길이도 여기 둔다 - 판독
+    중에 만지는 값이 아니라 비교 조건을 정할 때 한 번 정하는 값이기 때문이다.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("compareLayerView")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(4, 2, 4, 4)
+        outer.setSpacing(theme.SPACING["gapS"])
+
+        head = QHBoxLayout()
+        head.setSpacing(theme.SPACING["gapXs"])
+        head.addWidget(StrongBodyLabel("비교 layer", self))
+        head.addStretch(1)
+        self.btn_rereview = TransparentPushButton("재리뷰", self)
+        self.btn_rereview.setToolTip(
+            "재리뷰 layer 만 선택(같은 layer 에 재재리뷰가 있으면 재재리뷰 우선)"
+        )
+        self.btn_all = TransparentPushButton("전체", self)
+        self.btn_all.setToolTip("선택 가능한 비교 layer 를 모두 선택 (Ctrl+A)")
+        self.btn_none = TransparentPushButton("해제", self)
+        self.btn_none.setToolTip("비교 layer 선택 모두 해제 (Ctrl+D)")
+        for btn in (self.btn_rereview, self.btn_all, self.btn_none):
+            btn.setFixedHeight(theme.fluent_height("control"))
+            head.addWidget(btn)
+        outer.addLayout(head)
+
+        self.scroll = SmoothScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Fluent 위젯이라 setStyleSheet 로 덮으면 스크롤바 스타일까지 같이 날아간다.
+        _TRANSPARENT = "SmoothScrollArea { background: transparent; border: none; }"
+        setCustomStyleSheet(self.scroll, _TRANSPARENT, _TRANSPARENT)
+        self.scroll.viewport().setStyleSheet("background: transparent;")
+        self.host = QWidget(self.scroll)
+        self.host.setStyleSheet("background: transparent;")
+        self.rows = QVBoxLayout(self.host)
+        self.rows.setContentsMargins(0, 0, 0, 0)
+        self.rows.setSpacing(2)
+        self.rows.addStretch(1)
+        self.scroll.setWidget(self.host)
+        # 12행이 한 번에 보이고 그 이상은 스크롤. 폭은 표시 이름이 길어도 잘리지 않게 여유를 준다.
+        self.scroll.setFixedSize(272, 12 * 30)
+        outer.addWidget(self.scroll)
+
+        outer.addWidget(_divider_h(self))
+
+        cluster = QHBoxLayout()
+        cluster.setSpacing(theme.SPACING["gapXs"])
+        label = BodyLabel("클러스터 길이", self)
+        label.setToolTip(
+            "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어"
+            " 대표 1장 + ＋n 근접 으로 봅니다."
+        )
+        cluster.addWidget(label)
+        cluster.addStretch(1)
+        self.spn_cluster = NoScrollDoubleSpinBox(self)
+        self.spn_cluster.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spn_cluster.setSymbolVisible(False)
+        self.spn_cluster.setRange(0.0, 100000.0)
+        self.spn_cluster.setDecimals(0)  # 자연수만
+        self.spn_cluster.setSingleStep(5.0)
+        self.spn_cluster.setValue(config.DEFAULT_CLUSTER_RADIUS)
+        self.spn_cluster.setFixedSize(96, theme.fluent_height("control"))
+        self.spn_cluster.setToolTip(label.toolTip())
+        cluster.addWidget(self.spn_cluster)
+        outer.addLayout(cluster)
+
+    def clear_rows(self) -> None:
+        """layer 행을 모두 비운다(마지막 stretch 는 남긴다)."""
+        while self.rows.count() > 1:
+            item = self.rows.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def add_row(self, check: _LayerCheck, depth: str) -> QWidget:
+        """canonical 체크박스 한 줄 + 깊이 칩."""
+        row = QWidget(self.host)
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(theme.SPACING["gapXs"])
+        check.setParent(row)
+        lay.addWidget(check)
+        if depth:
+            lay.addWidget(_DepthChip(depth, row))
+        lay.addStretch(1)
+        self.rows.insertWidget(self.rows.count() - 1, row)
+        return row
+
+
+def _divider_h(parent: Optional[QWidget] = None) -> QFrame:
+    """Flyout 안의 1px 가로 구분선."""
+    line = QFrame(parent)
+    line.setObjectName("flyoutDivider")
+    line.setFixedHeight(1)
+
+    def paint() -> None:
+        tok = theme.fluent_tokens(isDarkTheme())
+        line.setStyleSheet(f"QFrame#flyoutDivider {{ background: {tok['divider']}; border: none; }}")
+
+    paint()
+    qconfig.themeChanged.connect(paint)
+    return line
+
+
+class SideBar(QFrame):
+    """판독 화면 상단 컨트롤 행.
+
+    이름은 원본 그대로다(배선·테스트 계약). 세로 사이드바가 아니라 높이 40 의 한 줄이며
+    좌측은 조건, 우측은 행동이다(A14).
     """
 
     open_folder = Signal()
@@ -71,158 +274,140 @@ class SideBar(QFrame):
     export_requested = Signal()
     settings_requested = Signal()
     update_requested = Signal()
+    nomatch_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setObjectName("sidebar")
-        self.setMinimumWidth(200)
-        self.setMaximumWidth(360)
-        self._compare_checks: list[QCheckBox] = []
+        self.setObjectName("controlRow")
+        self.setFixedHeight(_ROW_H)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._compare_checks: list[_LayerCheck] = []
         self._rereview_set: set = set()  # '재리뷰' 버튼이 선택할 선호 재리뷰 집합
+        self._flyout: Optional[Flyout] = None
         self._build()
 
-    @staticmethod
-    def _section_label(text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setObjectName("section")
-        return lbl
-
     def _build(self) -> None:
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 10)
-        outer.setSpacing(8)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACING["gapXs"])
+        height = theme.fluent_height("control")
 
-        # ── 헤더: LOT 폴더 선택 + LOT명
-        self.btn_open = QPushButton("📁  LOT 폴더 선택")
+        self.btn_open = PushButton(FluentIcon.FOLDER, "LOT 폴더", self)
+        self.btn_open.setFixedHeight(height)
         self.btn_open.setToolTip("리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O)")
         self.btn_open.clicked.connect(self.open_folder)
-        self.lbl_lot = QLabel("선택된 LOT 없음")
+        row.addWidget(self.btn_open)
+
+        self.lbl_lot = BodyLabel("선택된 LOT 없음", self)
         self.lbl_lot.setObjectName("lotName")
-        self.lbl_lot.setWordWrap(True)
-        outer.addWidget(self.btn_open)
-        outer.addWidget(self.lbl_lot)
+        row.addWidget(self.lbl_lot)
 
-        # ── 기준 Layer
-        outer.addWidget(self._section_label("기준 LAYER"))
-        self.cmb_base = NoScrollComboBox()
-        self.cmb_base.setMinimumWidth(150)
+        row.addSpacing(4)
+        row.addWidget(_divider(self))
+        row.addSpacing(4)
+
+        row.addWidget(CaptionLabel("기준", self))
+        self.cmb_base = NoScrollComboBox(self)
+        self.cmb_base.setFixedHeight(height)
+        self.cmb_base.setMinimumWidth(132)
+        self.cmb_base.setPlaceholderText("기준 layer 선택")
+        self.cmb_base.setToolTip("이 layer 의 defect 을 기준으로 다른 layer 에서 같은 위치를 찾습니다.")
         self.cmb_base.currentTextChanged.connect(self._on_base_changed)
-        outer.addWidget(self.cmb_base)
+        row.addWidget(self.cmb_base)
 
-        # ── 허용 오차
-        outer.addWidget(self._section_label("허용 오차"))
-        self.spn_tol = NoScrollDoubleSpinBox()
+        row.addWidget(CaptionLabel("오차", self))
+        self.spn_tol = NoScrollDoubleSpinBox(self)
         self.spn_tol.setObjectName("tol")
-        self.spn_tol.setButtonSymbols(QAbstractSpinBox.NoButtons)  # ↑↓ 버튼 제거(깔끔한 입력)
+        # ↑↓ 버튼 제거(깔끔한 입력). Fluent 는 자체 심볼을 그리므로 둘 다 꺼야 한다.
+        self.spn_tol.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spn_tol.setSymbolVisible(False)
         self.spn_tol.setRange(0.0, 100000.0)
-        self.spn_tol.setDecimals(0)  # 자연수만 — "300.0" 대신 "300"
+        self.spn_tol.setDecimals(0)  # 자연수만 - "300.0" 대신 "300"
         self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
         self.spn_tol.setSingleStep(10.0)
         self.spn_tol.setSuffix(" µm")
+        self.spn_tol.setFixedSize(120, height)
         self.spn_tol.setToolTip(
             "기준과 비교 defect 의 die 내 local 좌표 거리(µm) 허용값.\n"
             "작을수록 엄격, 클수록 느슨하게 매칭됩니다."
         )
         self.spn_tol.valueChanged.connect(self.tolerance_changed)
-        outer.addWidget(self.spn_tol)
+        row.addWidget(self.spn_tol)
 
-        # ── DEFECT 클러스터 길이 (허용 오차 바로 아래)
-        outer.addWidget(self._section_label("DEFECT 클러스터 길이"))
-        self.spn_cluster = NoScrollDoubleSpinBox()
-        self.spn_cluster.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.spn_cluster.setRange(0.0, 100000.0)
-        self.spn_cluster.setDecimals(0)  # 자연수만
-        self.spn_cluster.setSingleStep(5.0)
-        self.spn_cluster.setValue(config.DEFAULT_CLUSTER_RADIUS)
-        self.spn_cluster.setToolTip(
-            "같은 die 안에서 이 거리(좌표 단위) 미만인 defect 을 하나로 묶어"
-            " 대표 1장+'+n' 으로 봅니다."
-        )
-        self.spn_cluster.valueChanged.connect(self.cluster_radius_changed)
-        outer.addWidget(self.spn_cluster)
+        self.compare_view = CompareLayerView(self)
+        # Flyout 이 가져가기 전까지는 컨트롤 행 위에 겹쳐 그려진다. 숨겨 둔다.
+        self.compare_view.hide()
+        self.compare_view.btn_rereview.clicked.connect(self._set_rereview_compares)
+        self.compare_view.btn_all.clicked.connect(lambda: self._set_all_compares(True))
+        self.compare_view.btn_none.clicked.connect(lambda: self._set_all_compares(False))
+        self.compare_view.spn_cluster.valueChanged.connect(self.cluster_radius_changed)
+        # 호환 별칭: 배선과 테스트가 사이드바에서 직접 찾는다.
+        self.btn_rereview = self.compare_view.btn_rereview
+        self.btn_all = self.compare_view.btn_all
+        self.btn_none = self.compare_view.btn_none
+        self.spn_cluster = self.compare_view.spn_cluster
 
-        # 실시간 매칭 요약(허용오차 튜닝 피드백)
-        self.lbl_match = QLabel("")
+        self.btn_compare = PushButton("비교 layer", self)
+        self.btn_compare.setFixedHeight(height)
+        self.btn_compare.clicked.connect(self._open_compare_flyout)
+        row.addWidget(self.btn_compare)
+
+        self.lbl_match = CaptionLabel("", self)
         self.lbl_match.setObjectName("dim")
-        self.lbl_match.setWordWrap(True)
-        outer.addWidget(self.lbl_match)
+        row.addWidget(self.lbl_match)
 
-        # ── 비교 Layer: 라벨 + (아래 줄) 재리뷰/전체/해제 — 좁은 폭에서 라벨이 잘리지 않도록 분리
-        outer.addWidget(self._section_label("비교 LAYER"))
-        cmp_btns = QHBoxLayout()
-        cmp_btns.setSpacing(6)
-        self.btn_rereview = QPushButton("재리뷰")
-        self.btn_rereview.setObjectName("mini")
-        self.btn_rereview.setToolTip(
-            "재리뷰 layer 만 선택(같은 layer 에 재재리뷰가 있으면 재재리뷰 우선)"
+        row.addStretch(1)
+
+        self.btn_nomatch = PushButton("미매칭 점프", self)
+        self.btn_nomatch.setFixedHeight(height)
+        self.btn_nomatch.setToolTip("다음 미매칭 기준 사진으로 점프 (U)")
+        self.btn_nomatch.clicked.connect(self.nomatch_requested)
+        row.addWidget(self.btn_nomatch)
+
+        self.btn_add_export = PrimaryPushButton("＋ 출력에 담기", self)
+        self.btn_add_export.setFixedHeight(height)
+        self.btn_add_export.setToolTip(
+            "현재 기준 사진을 출력 명세에 담습니다. (A)\n담은 것들은 Excel 출력 시 함께 나옵니다."
         )
-        self.btn_rereview.clicked.connect(self._set_rereview_compares)
-        self.btn_all = QPushButton("전체")
-        self.btn_all.setObjectName("mini")
-        self.btn_all.setToolTip("선택 가능한 비교 layer 를 모두 선택")
-        self.btn_all.clicked.connect(lambda: self._set_all_compares(True))
-        self.btn_none = QPushButton("해제")
-        self.btn_none.setObjectName("mini")
-        self.btn_none.setToolTip("비교 layer 선택 모두 해제")
-        self.btn_none.clicked.connect(lambda: self._set_all_compares(False))
-        cmp_btns.addWidget(self.btn_rereview)
-        cmp_btns.addWidget(self.btn_all)
-        cmp_btns.addWidget(self.btn_none)
-        outer.addLayout(cmp_btns)
+        self.btn_add_export.setEnabled(False)
+        row.addWidget(self.btn_add_export)
 
-        # 비교 Layer 체크박스 (세로 스크롤 영역에 한 줄씩)
-        self._compare_scroll = QScrollArea()
-        self._compare_scroll.setWidgetResizable(True)
-        self._compare_scroll.setFrameShape(QFrame.NoFrame)
-        self._compare_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # viewport 기본 흰색 제거 → 사이드바 패널이 비쳐 글자가 보이게
-        self._compare_scroll.setStyleSheet("background: transparent;")
-        self._compare_scroll.viewport().setAutoFillBackground(False)
-        self._compare_host = QWidget()
-        self._compare_host.setAutoFillBackground(False)
-        self._compare_host.setStyleSheet("background: transparent;")
-        self._compare_box = QVBoxLayout(self._compare_host)
-        self._compare_box.setContentsMargins(0, 0, 0, 0)
-        self._compare_box.setSpacing(4)
-        self._compare_box.addStretch()
-        self._compare_scroll.setWidget(self._compare_host)
-        outer.addWidget(self._compare_scroll, 1)
-
-        # ── 푸터: 설정(작게) + 결과 출력  — 업데이트는 설정 안으로 이동
-        self.btn_settings = QPushButton("⚙ 설정")
-        self.btn_settings.setObjectName("mini")
-        self.btn_settings.setToolTip("작업공간·출력 폴더·기본값·업데이트")
-        self.btn_settings.clicked.connect(self.settings_requested)
-        self.btn_settings.setMaximumHeight(30)
-
-        self.btn_export = QPushButton("결과 출력")
-        self.btn_export.setObjectName("primary")
-        self.btn_export.setToolTip("선택한 기준 사진의 비교 결과를 Excel 로 출력 (Ctrl+E)")
-        self.btn_export.clicked.connect(self.export_requested)
-        self.btn_export.setEnabled(False)
-        self.btn_export.setMaximumHeight(30)
-
-        footer = QHBoxLayout()
-        footer.setSpacing(6)
-        footer.addWidget(self.btn_settings)
-        footer.addWidget(self.btn_export, 1)
-        outer.addLayout(footer)
-
-        # 제작 크레딧(항상 보이는 사이드바 하단) — 두 줄로 표기.
-        credit = QLabel(config.CREDITS.replace(", ", "\n"))
-        credit.setObjectName("dim")
-        credit.setWordWrap(True)
-        credit.setStyleSheet(f"font-size:{theme.fpx(11)}px;")  # 만든이 문구 +20%(9→11)
-        credit.setAlignment(Qt.AlignHCenter)
-        outer.addWidget(credit)
-
-        # 업데이트 버튼은 사이드바에서 제거(설정 다이얼로그로 이동). 호환용 더미 참조.
-        self.btn_update = None
         self._update_available = False
+        # 업데이트/설정은 nav 로 옮겼다. 옛 이름을 참조하는 코드가 남아도 죽지 않게 둔다.
+        self.btn_update = None
+        self.btn_settings = None
+        self.btn_export = None
+        self._refresh_compare_button()
+
+    # ---- Flyout -------------------------------------------------------
+    def _open_compare_flyout(self) -> None:
+        """비교 layer Flyout 을 버튼 아래로 연다.
+
+        뷰는 한 번만 만들어 재사용한다. 체크박스 객체가 곧 선택 상태이기 때문에 열 때마다
+        새로 만들면 상태가 사라진다.
+        """
+        if self._flyout is None:
+            self._flyout = Flyout(self.compare_view, self.window(), isDeleteOnClose=False)
+        flyout = self._flyout
+        flyout.show()  # 크기를 먼저 확정해야 위치 계산이 맞는다
+        manager = FlyoutAnimationManager.make(FlyoutAnimationType.DROP_DOWN, flyout)
+        flyout.exec(manager.position(self.btn_compare), FlyoutAnimationType.DROP_DOWN)
+
+    def _refresh_compare_button(self) -> None:
+        """버튼에 현재 선택 수를 적는다. Flyout 을 열지 않고도 몇 개인지 보이게."""
+        total = len(self._compare_checks)
+        chosen = len(self.compare_layers())
+        self.btn_compare.setText(f"비교 layer {chosen}" if total else "비교 layer")
+        self.btn_compare.setToolTip(
+            f"비교 layer 선택 - 후보 {total}개, 선택 {chosen}개" if total
+            else "비교 layer 선택 - LOT 을 열면 후보가 채워집니다"
+        )
+        self.btn_compare.setEnabled(bool(total))
 
     # ---- API ----------------------------------------------------------
     def set_lot_name(self, name: str) -> None:
-        self.lbl_lot.setText(f"LOT: {name}")
+        self.lbl_lot.setText(name)
+        self.lbl_lot.setToolTip(f"LOT: {name}")
 
     def set_layers(
         self,
@@ -244,17 +429,15 @@ class SideBar(QFrame):
         self.cmb_base.addItems(layers)
         self.cmb_base.setPlaceholderText("기준 layer 선택")
 
-        # 비교 체크박스 재구성 (세로 스택: 끝의 stretch 앞에 삽입)
-        for cb in self._compare_checks:
-            self._compare_box.removeWidget(cb)
-            cb.setParent(None)
-            cb.deleteLater()
+        # 비교 체크박스 재구성: canonical 한 줄 + 깊이 칩
+        self.compare_view.clear_rows()
         self._compare_checks.clear()
         for lyr in layers:
-            cb = QCheckBox(lyr)
+            canonical, depth = split_depth(lyr)
+            cb = _LayerCheck(lyr, canonical)
             cb.blockSignals(True)
-            cb.stateChanged.connect(lambda _=0: self.compare_layers_changed.emit())
-            self._compare_box.insertWidget(self._compare_box.count() - 1, cb)
+            cb.stateChanged.connect(self._on_compare_toggled)
+            self.compare_view.add_row(cb, depth)
             self._compare_checks.append(cb)
 
         # 기준 선택: base 가 주어지면 적용, 없으면 빈칸(-1)으로 두어 사용자 선택을 유도.
@@ -286,10 +469,10 @@ class SideBar(QFrame):
         self.cmb_base.blockSignals(False)
         for cb in self._compare_checks:
             cb.blockSignals(False)
-        self.btn_export.setEnabled(bool(layers))
         self.btn_all.setEnabled(bool(layers))
         self.btn_none.setEnabled(bool(layers))
         self.btn_rereview.setEnabled(bool(self._rereview_set))
+        self._refresh_compare_button()
 
     def set_match_summary(self, text: str) -> None:
         self.lbl_match.setText(text)
@@ -300,20 +483,17 @@ class SideBar(QFrame):
         self.spn_tol.blockSignals(False)
 
     def set_update_available(self, available: bool) -> None:
-        """업데이트 가용 시 설정 버튼에 표식(•)을 단다(업데이트는 설정 안에 있음)."""
+        """업데이트 가용 여부를 기억한다. 표식은 nav 설정 항목의 배지가 보여 준다(A10)."""
         self._update_available = available
-        self.btn_settings.setText("⚙ 설정 •" if available else "⚙ 설정")
-        self.btn_settings.setToolTip(
-            "업데이트 있음 — 설정에서 적용" if available
-            else "작업공간·출력 폴더·기본값·업데이트"
-        )
+
+    def update_available(self) -> bool:
+        return self._update_available
 
     def set_update_busy(self, busy: bool) -> None:
-        self.btn_settings.setEnabled(not busy)
         self.btn_open.setEnabled(not busy)
 
     def _set_all_compares(self, checked: bool) -> None:
-        """비교 layer 전체 선택/해제 — 한 번의 신호로 처리."""
+        """비교 layer 전체 선택/해제 - 한 번의 신호로 처리."""
         changed = False
         for cb in self._compare_checks:
             if cb.isEnabled() and cb.isChecked() != checked:
@@ -322,10 +502,11 @@ class SideBar(QFrame):
                 cb.blockSignals(False)
                 changed = True
         if changed:
+            self._refresh_compare_button()
             self.compare_layers_changed.emit()
 
     def _set_rereview_compares(self) -> None:
-        """선호 재리뷰 집합만 체크(같은 layer 재재리뷰 우선). 그 외는 해제 — 한 번의 신호."""
+        """선호 재리뷰 집합만 체크(같은 layer 재재리뷰 우선). 그 외는 해제 - 한 번의 신호."""
         if not self._rereview_set:
             return
         changed = False
@@ -337,10 +518,16 @@ class SideBar(QFrame):
                 cb.blockSignals(False)
                 changed = True
         if changed:
+            self._refresh_compare_button()
             self.compare_layers_changed.emit()
+
+    def _on_compare_toggled(self, _state: int = 0) -> None:
+        self._refresh_compare_button()
+        self.compare_layers_changed.emit()
 
     def _on_base_changed(self, base: str) -> None:
         self._sync_compare_enabled(base)
+        self._refresh_compare_button()
         self.base_layer_changed.emit(base)
 
     def _sync_compare_enabled(self, base: str) -> None:
@@ -376,44 +563,64 @@ class SideBar(QFrame):
 
 
 class NavBar(QFrame):
-    """하단 탐색 바: 이전 / index·전체 / 다음 (문서 Section 8.5)."""
+    """판독대 아래 탐색 바: 이전 / index·전체 / SLOT·die / 힌트 / 다음.
+
+    SLOT·die 는 눌리는 링크다. 히트맵에서 die 로 오갈 때 지금 자리를 잃지 않게 하는
+    되돌아가기 지점이다(A12).
+    """
 
     prev_clicked = Signal()
     next_clicked = Signal()
+    die_clicked = Signal()
+
+    _HINT = "사진 클릭 = 원본 뷰어 · 휠 = 필름스트립 좌우"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setObjectName("panel")
+        self.setObjectName("navBar")
+        self.setFixedHeight(44)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setContentsMargins(0, 6, 0, 6)
+        lay.setSpacing(theme.SPACING["gapXs"])
 
-        self.btn_prev = QPushButton("◀  이전")
+        size = theme.fluent_height("control")
+        self.btn_prev = PushButton("‹", self)
+        self.btn_prev.setFixedSize(size, size)
         self.btn_prev.setToolTip("이전 기준 사진 (← / PageUp)")
         self.btn_prev.clicked.connect(self.prev_clicked)
-        self.btn_next = QPushButton("다음  ▶")
+        self.btn_next = PushButton("›", self)
+        self.btn_next.setFixedSize(size, size)
         self.btn_next.setToolTip("다음 기준 사진 (→ / PageDown)")
         self.btn_next.clicked.connect(self.next_clicked)
 
-        self.lbl_index = QLabel("0 / 0")
-        self.lbl_index.setAlignment(Qt.AlignCenter)
-        self.lbl_index.setStyleSheet(f"font-size:{theme.fpx(13)}px; font-weight:600;")
-        self.lbl_index.setMinimumWidth(90)
+        self.lbl_index = StrongBodyLabel("0 / 0", self)
+        self.lbl_index.setMinimumWidth(72)
 
-        self.lbl_status = QLabel("")
+        self.lbl_die = TransparentPushButton("", self)
+        self.lbl_die.setFixedHeight(size)
+        self.lbl_die.setToolTip("이 defect 의 wafer 와 die. 눌러 히트맵에서 위치를 봅니다.")
+        self.lbl_die.clicked.connect(self.die_clicked)
+        self.lbl_die.hide()  # 내용이 있을 때만 보인다
+
+        self.lbl_status = CaptionLabel("", self)
         self.lbl_status.setObjectName("dim")
 
+        self.lbl_hint = CaptionLabel(self._HINT, self)
+        self.lbl_hint.setObjectName("dim")
+
         lay.addWidget(self.btn_prev)
-        lay.addStretch()
-        lay.addWidget(self.lbl_index)
-        lay.addStretch()
-        lay.addWidget(self.lbl_status)
-        lay.addStretch()
         lay.addWidget(self.btn_next)
+        lay.addWidget(self.lbl_index)
+        lay.addWidget(_divider(self))
+        lay.addWidget(self.lbl_die)
+        lay.addWidget(self.lbl_status)
+        lay.addStretch(1)
+        lay.addWidget(self.lbl_hint)
         self._lay = lay
         self.set_enabled(False)
 
     def add_widget(self, widget: QWidget) -> None:
-        """탐색 바 오른쪽(다음 버튼 앞)에 보조 위젯을 추가한다."""
+        """탐색 바 오른쪽(힌트 앞)에 보조 위젯을 추가한다."""
         self._lay.insertWidget(self._lay.count() - 1, widget)
 
     def set_index(self, current: int, total: int) -> None:
@@ -424,6 +631,11 @@ class NavBar(QFrame):
 
     def set_status_tooltip(self, text: str) -> None:
         self.lbl_status.setToolTip(text)
+
+    def set_die(self, text: str) -> None:
+        """SLOT·die 표기. 빈 문자열이면 구분선처럼 사라진다."""
+        self.lbl_die.setText(text)
+        self.lbl_die.setVisible(bool(text))
 
     def set_enabled(self, enabled: bool) -> None:
         self.btn_prev.setEnabled(enabled)

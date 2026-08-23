@@ -1,4 +1,4 @@
-"""Defect Tracker — 진입점.
+"""Defect Tracker - 진입점.
 
 원본 데이터를 절대 훼손하지 않는(read-only) defect 이미지 비교 뷰어.
 실행: python main.py
@@ -15,9 +15,47 @@ import sys
 # import 이름 -> 안내용 표기
 _REQUIRED = {
     "PySide6": "PySide6",
+    # Fluent 화면 구성요소(PySide6-Fluent-Widgets). 자동 업데이트는 코드만 덮어쓰고 pip 를
+    # 돌리지 않으므로, 여기 없으면 기존 설치본이 원시 트레이스백으로 죽는다.
+    "qfluentwidgets": "PySide6-Fluent-Widgets",
     "PIL": "Pillow",
     "openpyxl": "openpyxl",
 }
+
+# Qt 는 있는데 Fluent 구성요소만 없는 경우(=자동 업데이트 직후)에 띄우는 안내.
+# qfluentwidgets 를 못 불러오는 상황이므로 순수 Qt QMessageBox 를 쓴다.
+_SETUP_TITLE = "추가 구성이 필요합니다"
+_SETUP_BODY = (
+    "이 버전은 새 화면 구성요소를 사용합니다.\n"
+    "bootstrap.py 를 한 번 실행하면 설치가 끝납니다."
+)
+_SETUP_HOWTO = (
+    "설치 방법\n\n"
+    "    python bootstrap.py\n\n"
+    "또는\n\n"
+    "    pip install -r requirements.txt"
+)
+
+
+def _show_setup_notice(missing: list[str]) -> bool:
+    """Fluent 구성요소 누락을 GUI 로 안내한다. Qt 조차 없으면 False.
+
+    트레이스백을 그대로 보여주면 사용자가 할 수 있는 일이 없다(게이트).
+    """
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+    except ImportError:
+        return False
+    app = QApplication.instance() or QApplication(sys.argv)
+    box = QMessageBox()
+    box.setIcon(QMessageBox.Information)
+    box.setWindowTitle(_SETUP_TITLE)
+    box.setText(_SETUP_BODY)
+    box.setDetailedText(_SETUP_HOWTO + "\n\n누락: " + ", ".join(missing))
+    box.setStandardButtons(QMessageBox.Ok)
+    box.exec()
+    del app
+    return True
 
 
 def _check_dependencies() -> list[str]:
@@ -55,6 +93,9 @@ def main() -> int:
     missing = _check_dependencies()
     if missing:
         names = ", ".join(_REQUIRED[m] for m in missing)
+        # Qt 는 있는데 Fluent 만 빠진 경우(자동 업데이트 직후)에는 GUI 로 안내한다.
+        if missing == ["qfluentwidgets"]:
+            _show_setup_notice([_REQUIRED[m] for m in missing])
         print(
             "필요한 라이브러리가 설치되어 있지 않습니다: " + names + "\n"
             "다음 명령으로 설치하세요:\n"
@@ -92,12 +133,22 @@ def main() -> int:
     app.setApplicationName("Defect Tracker")
     # 설정을 먼저 읽어 글자 크기(보통/크게)를 테마에 반영한 뒤 스플래시를 띄운다.
     settings = AppSettings.load()
-    theme.apply_theme(app, theme.scale_for(settings.ui_font_size))
+    # setTheme 은 위젯 생성 전에 부른다. 나중에 부르면 첫 프레임이 반대 테마로 그려졌다가
+    # 다시 칠해진다(qfluentwidgets 필수 규칙).
+    dark = (settings.theme_mode or "light").lower() == "dark"
+    from qfluentwidgets import Theme, setTheme, setThemeColor
 
-    # Qt 준비 직후 즉시 스플래시 표시 → 무거운 구성 동안 "로딩 중" 피드백을 보여준다.
+    setTheme(Theme.DARK if dark else Theme.LIGHT)
+    setThemeColor(theme.ACCENT_BASE)
+    # 다크 네온 전역 QSS 는 여기서 끊는다. Fluent 위젯을 덮어써 테마가 반만 적용되기 때문이다.
+    # 아직 옮기지 않은 화면(단계 4~8)은 토큰으로 만든 브리지 QSS 로 읽히게 한다.
+    theme.FONT_SCALE = theme.scale_for(settings.ui_font_size)
+    app.setStyleSheet(theme.build_bridge_qss(dark))
+
+    # Qt 준비 직후 즉시 스플래시 표시. 무거운 구성 동안 "로딩 중" 피드백을 보여준다.
     from app.ui.splash import make_splash, show_status
 
-    splash = make_splash()
+    splash = make_splash(dark)
     splash.show()
     show_status(splash, "로딩 중...")
     app.processEvents()

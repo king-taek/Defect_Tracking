@@ -7,7 +7,7 @@ from app.models import ParseStatus
 from app.parsers import camtek_ini
 
 # 아래 CASES 의 기대값은 문서 Section 13.3.9~13.3.13 이 쓴 pitch/offset 기준으로
-# 계산돼 있다 — 실제 DEVA 기본 제품값(AOIDeviceDB "DEVA Live" 실측)과는 별개이므로,
+# 계산돼 있다 - 실제 DEVA 기본 제품값(AOIDeviceDB "DEVA Live" 실측)과는 별개이므로,
 # 이 문서 예시 상수로 고정한 임시 제품을 활성화해 기본값 변경에 영향받지 않게 한다.
 _DOC_PRODUCT_KEY = "_DOC_EXAMPLE_DEVA"
 
