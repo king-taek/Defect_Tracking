@@ -1266,7 +1266,7 @@ def test_folder_picker_scan_root_input(app, tmp_path):
     assert dlg.ed_scan_root.text().endswith("ScanData")
     # 명시 경로가 최상위 📌 로 고정된다.
     top0 = dlg.sidebar.topLevelItem(0).text(0)
-    assert "📌" in top0 and "ScanData" in top0
+    assert "스캔" in top0 and "ScanData" in top0
     # 새 경로 지정 시 저장·재고정.
     (tmp_path / "Other").mkdir()
     dlg.ed_scan_root.setText(str(tmp_path / "Other"))
