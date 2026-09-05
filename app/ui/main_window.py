@@ -16,14 +16,21 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QMenu,
     QMessageBox,
 )
-from qfluentwidgets import FluentIcon, InfoBadge, InfoBadgePosition, NavigationItemPosition
-from qfluentwidgets import FluentWindow
+from qfluentwidgets import (
+    FluentIcon,
+    FluentWindow,
+    InfoBadge,
+    InfoBadgePosition,
+    NavigationItemPosition,
+    qconfig,
+    setCustomStyleSheet,
+)
 
 from app import __version__, config, layout, matcher, scanner, updater
 from app.config import AppSettings
@@ -195,6 +202,7 @@ class MainWindow(FluentWindow):
         self.review_page = ReviewPage(self.image_loader, self.settings.sidebar_width, self)
         self._alias_review_widgets()
         self._wire_review_page()
+        self._refresh_recents()
 
         self.nomatch_page = NoMatchPage(self)
         self.nomatch_page.record_activated.connect(self._goto_from_nomatch)
@@ -234,10 +242,32 @@ class MainWindow(FluentWindow):
             self.settings_page, FluentIcon.SETTING, "설정", NavigationItemPosition.BOTTOM
         )
         self._nav_badges: dict[str, InfoBadge] = {}
-        # 프로토타입 기본은 200px 펼침. 창이 좁아지면 자동으로 접힌다.
+        # 시안(docs/adr/0001): nav 는 48px 아이콘 레일이다. 라벨은 툴팁으로만 보인다.
+        # 펼침 임계를 창이 절대 넘지 못하는 값으로 두면 qfluentwidgets 가 늘 접힌 채로 그리고,
+        # ☰ 을 누르면 200px 메뉴가 페이지 위에 겹쳐 떠서(MENU 모드) 라벨을 확인할 수 있다.
         self.navigationInterface.setExpandWidth(200)
-        self.navigationInterface.setMinimumExpandWidth(1100)
-        self.navigationInterface.expand(useAni=False)
+        self.navigationInterface.setMinimumExpandWidth(10**6)
+        self._paint_shell()
+        qconfig.themeChanged.connect(self._paint_shell)
+
+    def _paint_shell(self, *_args) -> None:
+        """창 바탕(win)과 페이지 면(layer)을 토큰으로 칠한다.
+
+        FluentWindow 는 바탕을 paintEvent 로, 페이지 면(StackedWidget)은 자기 QSS 로 칠하므로
+        둘 다 qfluentwidgets 가 제공하는 후크(setCustomBackgroundColor / setCustomStyleSheet)로
+        바꾼다. setStyleSheet 를 직접 부르면 Fluent 시트가 통째로 사라진다.
+        """
+        light, dark = theme.fluent_tokens(False), theme.fluent_tokens(True)
+        self.setCustomBackgroundColor(QColor(light["win"]), QColor(dark["win"]))
+        sheet = (
+            "StackedWidget {{ background-color: {layer}; border: 1px solid {border};"
+            " border-right: none; border-bottom: none; border-top-left-radius: 8px; }}"
+        )
+        setCustomStyleSheet(
+            self.stackedWidget,
+            sheet.format(layer=light["layer"], border=theme.flatten(light["cardBorder"], light["win"])),
+            sheet.format(layer=dark["layer"], border=theme.flatten(dark["cardBorder"], dark["win"])),
+        )
 
     def _alias_review_widgets(self) -> None:
         """판독 페이지 위젯을 창에서도 같은 이름으로 쓸 수 있게 별칭을 건다.
@@ -262,7 +292,7 @@ class MainWindow(FluentWindow):
     def _wire_review_page(self) -> None:
         page = self.review_page
         page.empty_state.open_requested.connect(self._choose_folder)
-        page.empty_state.recent_requested.connect(self._show_recent_menu)
+        page.empty_state.recent_chosen.connect(self._open_folder)
 
         self.top.open_folder.connect(self._choose_folder)
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
@@ -283,7 +313,7 @@ class MainWindow(FluentWindow):
         self.nav.prev_clicked.connect(self._prev)
         self.nav.next_clicked.connect(self._next)
         # 탐색 바의 SLOT·die 를 누르면 히트맵으로 간다. 판독↔히트맵 왕복 경로(A12).
-        self.nav.die_clicked.connect(self._open_heatmap_at_current)
+        self.grid.die_clicked.connect(self._open_heatmap_at_current)
         self.btn_add_export.clicked.connect(self._add_current_to_export)
         self.btn_stop.clicked.connect(self._stop_scan)
         self.grid.image_clicked.connect(self._open_viewer)
@@ -432,6 +462,13 @@ class MainWindow(FluentWindow):
         recents = [f for f in self.settings.recent_folders if f != folder]
         recents.insert(0, folder)
         self.settings.recent_folders = recents[:5]
+        self._refresh_recents()
+
+    def _refresh_recents(self) -> None:
+        """빈 상태의 최근 LOT 목록을 설정값과 맞춘다(존재하는 폴더만)."""
+        self.review_page.empty_state.set_recents(
+            [f for f in self.settings.recent_folders if Path(f).exists()]
+        )
 
     def _auto_select_product(self, folder: str) -> None:
         """자재 경로에서 디바이스(제품)를 자동 인식해 활성화한다(스캔 전 호출).
@@ -482,7 +519,7 @@ class MainWindow(FluentWindow):
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(True)
         self.progress.setFormat("스캔 준비 중...")
-        self.nav.set_status("스캔 중...")
+        self.top.set_status("스캔 중...")
         self.top.set_lot_name(Path(folder).name)
         self.setWindowTitle(f"{self._base_title}  -  {Path(folder).name}")
 
@@ -508,7 +545,7 @@ class MainWindow(FluentWindow):
         self._scan_token += 1  # 늦게 도착하는 finished/progress 결과를 무시
         self.progress.setVisible(False)
         self.btn_stop.setVisible(False)
-        self.nav.set_status("스캔 중단됨")
+        self.top.set_status("스캔 중단됨")
         self.banner.show_message("스캔을 중단했습니다.", "info")
 
     def _verify_workspace_outside(self, folder: str) -> bool:
@@ -540,7 +577,7 @@ class MainWindow(FluentWindow):
             self.banner.show_message("작업공간을 변경했습니다.", "success")
 
     def _on_scan_progress(self, msg: str, cur: int, total: int) -> None:
-        self.nav.set_status(msg)
+        self.top.set_status(msg)
         if total > 0:
             # layer 단위 진행을 0~100%로 환산해 진행바에 표시
             pct = int(round(min(cur, total) / total * 100))
@@ -554,7 +591,7 @@ class MainWindow(FluentWindow):
         self.progress.setVisible(False)
         self.btn_stop.setVisible(False)
         self._scan_worker = None
-        self.nav.set_status("스캔 오류")
+        self.top.set_status("스캔 오류")
         self.banner.show_message(f"폴더 스캔 중 오류: {message}", "error", timeout_ms=0)
 
     def _on_scan_finished(self, index: LotIndex, token: int = -1) -> None:
@@ -573,7 +610,7 @@ class MainWindow(FluentWindow):
                 "선택한 폴더에서 layer 를 찾지 못했습니다. LOT 폴더를 확인하세요.",
                 "warn", timeout_ms=0,
             )
-            self.nav.set_status("layer 없음")
+            self.top.set_status("layer 없음")
             self._empty_label.setVisible(True)
             self.grid.build_layout([], "")
             self.nav.set_enabled(False)
@@ -582,7 +619,8 @@ class MainWindow(FluentWindow):
         # 기준 layer 는 빈칸으로 시작(사용자가 직접 선택), 비교 기본값은 선호 재리뷰 집합만.
         # (자재 폴더를 바꿀 때마다 재리뷰만 선택되도록 저장값을 자동 복원하지 않는다.)
         rereview = self._preferred_rereview(index)
-        self.top.set_layers(layers, base=None, compares=None, rereview=rereview)
+        counts = {lyr: len(index.records_for_layer(lyr)) for lyr in layers}
+        self.top.set_layers(layers, base=None, compares=None, rereview=rereview, counts=counts)
         self.settings.save()
 
         ok = sum(1 for r in index.records if r.ok)
@@ -594,8 +632,8 @@ class MainWindow(FluentWindow):
         if failed:
             status += f", 실패 {len(failed)}개"
         status += ")"
-        self.nav.set_status(status)
-        self.nav.set_status_tooltip(self._failure_summary(failed))
+        self.top.set_status(status)
+        self.top.set_status_tooltip(self._failure_summary(failed))
         # 좌표 추출 실패 진단 리포트는 개발자 모드(환경변수 또는 설정)에서만 파일로 남긴다.
         report_path = self._write_diag_report(index) if config.dev_mode(self.settings) else None
         if failed:
@@ -617,7 +655,7 @@ class MainWindow(FluentWindow):
                 "warn",
                 timeout_ms=0,
             )
-            self.nav.set_status_tooltip(
+            self.top.set_status_tooltip(
                 self._failure_summary(failed) + "\n\n[접근 실패 경로]\n" + preview
             )
         self._rebuild_all()
@@ -677,7 +715,7 @@ class MainWindow(FluentWindow):
         self._view_cache = None
         self.current = -1
         self.strip.set_items([], [])
-        self.nav.set_die("")
+        self.grid.set_die("")
         self.nav.set_enabled(False)
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
@@ -761,7 +799,7 @@ class MainWindow(FluentWindow):
         else:
             self.nav.set_index(0, 0)
             self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
-            self.nav.set_die("")
+            self.grid.set_die("")
         self._refresh_strip_marks()
         self._update_add_export_button()
 
@@ -972,15 +1010,29 @@ class MainWindow(FluentWindow):
     def _sync_export_page(self) -> None:
         """창 -> 페이지 방향 동기화. 페이지 -> 창은 tray_changed 가 맡는다."""
         self._update_add_export_button()
+        self._set_nav_badge("exportInterface", len(self._export_tray))
         page = getattr(self, "export_page", None)
         if page is not None:
             page.set_tray(self._export_tray)
 
     def _update_add_export_button(self) -> None:
         n = len(self._export_tray)
-        self.btn_add_export.setText(f"＋ 출력에 담기 ({n})" if n else "＋ 출력에 담기")
+        in_tray = self._tray_indices()
+        # 지금 보는 사진이 이미 담겨 있으면 버튼이 그 사실을 말한다(시안: "✓ 담김 (n)").
+        current_in = 0 <= self.current < len(self.matches) and self.current in in_tray
+        if current_in:
+            self.btn_add_export.setText(f"✓ 담김 ({n})")
+        else:
+            self.btn_add_export.setText(f"＋ 출력에 담기 ({n})" if n else "＋ 출력에 담기")
         self.btn_add_export.setEnabled(bool(self.matches))
-        self._set_nav_badge("exportInterface", n)
+        self.strip.set_tray_marks(in_tray)
+
+    def _tray_indices(self) -> set[int]:
+        """출력 명세에 담긴 기준의 index 집합(필름스트립 '담김' 표식용)."""
+        if not self.matches:
+            return set()
+        paths = self._tray_keys()
+        return {i for i, m in enumerate(self.matches) if str(m.base.image_path) in paths}
 
     # ------------------------------------------------------------ 탐색
     def _goto(self, index: int) -> None:
@@ -996,6 +1048,7 @@ class MainWindow(FluentWindow):
             self.nav.set_index(view.index(index) + 1, len(view))
         else:
             self.nav.set_index(index + 1, len(self.matches))
+        self._update_add_export_button()  # 이 사진이 담겨 있는지 버튼 문구가 따라간다
         self._prefetch_neighbors(index)
         self._update_die_label(item)
 
@@ -1163,7 +1216,7 @@ class MainWindow(FluentWindow):
         """
         base = item.base
         die = f"die ({base.col}, {base.row})" if base.col is not None else "die 좌표 없음"
-        self.nav.set_die(f"SLOT {base.wafer_id} · {die}")
+        self.grid.set_die(f"SLOT {base.wafer_id} · {die}")
 
     def _open_heatmap_at_current(self) -> None:
         """탐색 바의 SLOT·die 를 누르면 지도에서 그 die 를 고른 채로 연다."""
@@ -1318,7 +1371,7 @@ class MainWindow(FluentWindow):
     def _manual_update(self) -> None:
         if self._updating:
             return
-        self.nav.set_status("업데이트 확인 중...")
+        self.top.set_status("업데이트 확인 중...")
         self._start_update_check(manual=True)
 
     def _start_update_check(self, manual: bool) -> None:
@@ -1335,7 +1388,7 @@ class MainWindow(FluentWindow):
                 self._do_update(status)
             else:
                 if manual:
-                    self.nav.set_status("")
+                    self.top.set_status("")
                 else:
                     self.banner.show_message(
                         "설정에서 언제든 업데이트할 수 있습니다.", "info"
@@ -1344,12 +1397,12 @@ class MainWindow(FluentWindow):
             self._set_update_marker(False)
             if manual:
                 if status.error:
-                    self.nav.set_status("업데이트 확인 실패")
+                    self.top.set_status("업데이트 확인 실패")
                     self.banner.show_message(
                         f"업데이트 확인 실패: {status.error}", "warn", timeout_ms=6000
                     )
                 else:
-                    self.nav.set_status("최신 버전입니다")
+                    self.top.set_status("최신 버전입니다")
                     self.banner.show_message("이미 최신 버전입니다.", "success")
 
     def _set_update_marker(self, available: bool) -> None:
@@ -1363,10 +1416,10 @@ class MainWindow(FluentWindow):
         self.top.set_update_busy(True)
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)
-        self.nav.set_status("업데이트 준비 중...")
+        self.top.set_status("업데이트 준비 중...")
 
         worker = updater.UpdateApplyWorker(status, token=self.settings.update_token)
-        worker.signals.progress.connect(self.nav.set_status)
+        worker.signals.progress.connect(self.top.set_status)
         worker.signals.finished.connect(self._on_update_finished)
         self._track_worker(worker, worker.signals.finished)
         self.pool.start(worker)
@@ -1389,7 +1442,7 @@ class MainWindow(FluentWindow):
             )
             self.close()
         else:
-            self.nav.set_status("업데이트 실패")
+            self.top.set_status("업데이트 실패")
             self.banner.show_message(f"업데이트 실패: {message}", "error", timeout_ms=0)
 
     @staticmethod

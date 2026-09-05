@@ -83,16 +83,18 @@ def test_parse_rgba_formats() -> None:
 
 
 def test_accent_three_roles_exact_values() -> None:
-    """게이트 2 + REVIEW-02 A15 확정값. 채움과 글자에 같은 색을 쓰지 않는다."""
+    """게이트 2 + Datum 시안 확정값(docs/adr/0001). 채움과 글자에 같은 색을 쓰지 않는다."""
     light = theme.accent_roles(dark=False)
     dark = theme.accent_roles(dark=True)
 
-    # 구 #0078D4 는 흰 글자와 4.53 이라 게이트 미달이었다
-    assert light["fill"] == "#0067B8"
-    assert light["hover"] == "#005A9E"
-    assert light["pressed"] == "#004C85"
-    assert light["onAccent"] == "#FFFFFF"
-    assert light["text"] == "#005A9E"
+    assert light["fill"] == "#2C5A86"
+    assert light["hover"] == "#356B9C"
+    assert light["pressed"] == "#244B70"
+    # 채움 위 글자는 시안의 종이색. 순백보다 덜 부시고 6.5:1 로 게이트를 넘는다.
+    assert light["onAccent"] == "#F5F3ED"
+    assert light["text"] == "#28527A"
+    # 이전 기본값(Windows 파랑)은 프리셋으로 남아 있다
+    assert theme.accent_roles(False, "#0067B8")["fill"] == "#0067B8"
 
     assert dark["fill"] == "#4CC2FF"
     # 다크에서 채움 위 흰 글자는 2.01:1 이라 near-black 을 쓴다
@@ -163,11 +165,12 @@ def test_accent_rule_holds_the_gate_for_any_color(base: str, dark: bool) -> None
 
 
 def test_status_colors_match_review_02() -> None:
-    """REVIEW-02 A16. 라이트 글자만 여유값으로 교체하고 배경·다크는 유지."""
+    """Datum 시안의 상태색(docs/adr/0001). 다크는 REVIEW-02 A16 값을 유지."""
     light = theme.STATUS_LIGHT
-    assert (light["pass"], light["warn"], light["danger"]) == ("#0B6A0B", "#8A5200", "#B02218")
+    assert (light["pass"], light["warn"], light["danger"]) == ("#3B6438", "#8C4A0F", "#A5271E")
+    # 배경은 시안의 알파 틴트를 카드 면 위에 합성한 불투명 값이다
     assert (light["passBg"], light["warnBg"], light["dangerBg"]) == (
-        "#DFF6DD", "#FFF4CE", "#FDE7E9",
+        "#E7ECE5", "#F3ECE4", "#F2E5E2",
     )
     dark = theme.STATUS_DARK
     assert (dark["pass"], dark["warn"], dark["danger"]) == ("#6CCB70", "#FFD68A", "#FF99A4")
@@ -206,7 +209,8 @@ def test_shape_tokens_do_not_scale_with_font_size() -> None:
     before = (dict(theme.RADIUS), dict(theme.SPACING))
     assert theme.fluent_font_px("body", "large") == pytest.approx(13.0 * 1.3)
     assert (dict(theme.RADIUS), dict(theme.SPACING)) == before
-    assert theme.RADIUS == {"control": 5, "card": 7, "sheet": 8, "chip": 13}
+    # Datum 시안: 컨트롤 6 · 카드 9(docs/adr/0001)
+    assert theme.RADIUS == {"control": 6, "card": 9, "sheet": 8, "chip": 13}
 
 
 def test_font_scale_applies_to_typography_roles() -> None:

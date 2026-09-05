@@ -38,7 +38,9 @@ _VERSION_RE = re.compile(r'^__version__\s*=\s*["\'][^"\']*["\']', re.MULTILINE)
 def _git(*args: str) -> str:
     out = subprocess.run(
         ["git", "-C", str(_REPO), *args],
-        capture_output=True, text=True, check=True, timeout=20,
+        # 한글이 든 파일을 읽으므로 콘솔 코드페이지(cp949)가 아니라 UTF-8 로 고정한다.
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=True, timeout=20,
     )
     return out.stdout
 

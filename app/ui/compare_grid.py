@@ -1,23 +1,26 @@
-"""판독대. 기준 사진과 비교 layer 사진을 나란히 놓는다.
+"""판독대. 기준 사진을 크게, 비교 layer 사진을 그 오른쪽 2열에 놓는다.
 
-원본은 매칭 없는 layer 셀을 숨기고 남은 셀을 2열로 압축했다. 왜 없는지가 화면에서 사라져
-사용자가 "이 layer 는 원래 없나, 매칭에 실패했나"를 알 수 없었다. 재설계는 칸을 고정하고
-빈 판에 사유를 남긴다(03-screens §1).
+시안(DefectTracker-Redesign.dc.html, docs/adr/0001)은 판독대를 좌우로 나눈다.
+  왼쪽  기준 카드 하나가 남는 높이를 다 쓴다(1.15 : 1). 머리에 layer · [기준] · SLOT·die · 결함명.
+  오른쪽 비교 카드가 2열로 흐르고 넘치면 오른쪽만 세로 스크롤한다(칸 최소 224px, 게이트 4).
+이전 재설계는 기준까지 한 격자에 2/3/4열로 섞어 기준 사진이 비교 사진과 같은 크기로 작아졌다.
+판독은 "기준을 보고 나머지를 대조" 하는 일이라 기준이 커야 한다.
 
-열 수는 칸 수에 따라 2/3/4 로 늘리고 한 칸의 최소 높이를 보장한다. layer 12개를 켜도 사진이
-읽혀야 한다(게이트 4).
+원본은 매칭 없는 layer 셀을 숨기고 남은 셀을 압축했다. 왜 없는지가 화면에서 사라져 사용자가
+"이 layer 는 원래 없나, 매칭에 실패했나"를 알 수 없었다. 칸을 고정하고 빈 판에 사유를 남긴다.
 
 미매칭 표기 범위: 여기(앱 화면)는 사유를 남긴다. 회색 한 단어로 줄이는 것은 Excel 리포트에만
 적용되는 규칙이다(REVIEW-01 AD1).
+
+SLOT·die 링크(A12, 히트맵으로 가는 입구)는 기준 카드 머리에 있다. 옛 탐색 바에서 옮겨 왔다.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -30,25 +33,33 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import isDarkTheme, qconfig
+from qfluentwidgets import (
+    SmoothScrollArea,
+    TransparentPushButton,
+    isDarkTheme,
+    qconfig,
+    setCustomStyleSheet,
+)
 
 from app.models import BaseDefectMatches, DefectRecord, NoMatchReason
 from app.ui import theme
+from app.ui.controls import DepthChip, split_depth
 from app.ui.image_loader import ImageLoader
-from app.ui.widgets import FadeImageLabel
+from app.ui.widgets import FadeImageLabel, mono_font
 
-_HEADER_H = 34          # 카드 머리(레이어명 + 배지 + 수치)
-_PHOTO_INSET = 8        # 사진 영역 좌우/아래 여백
+_BASE_HEADER_H = 38     # 기준 카드 머리
+_HEADER_H = 32          # 비교 카드 머리(레이어명 + 칩 + 수치)
+_BASE_INSET = 8         # 기준 사진 영역 좌우/아래 여백
+_INSET = 6              # 비교 사진 영역 여백
+_COLUMNS = 2            # 비교 카드 열 수(시안 고정)
+# 기준 : 비교 폭 비율(시안 1.15fr : 1fr).
+_BASE_STRETCH, _COMPARE_STRETCH = 115, 100
 _NO_MATCH_TITLE = "매치 없음"
 
 
 def columns_for(cell_count: int) -> int:
-    """칸 수에 따른 열 수. 4칸 이하 2열, 9칸 이하 3열, 그 이상 4열(03-screens §1)."""
-    if cell_count <= 4:
-        return 2
-    if cell_count <= 9:
-        return 3
-    return 4
+    """비교 카드 열 수. 시안은 칸 수와 무관하게 2열이다(기준이 왼쪽 절반을 쓰므로)."""
+    return _COLUMNS
 
 
 class LayerCell(QFrame):
@@ -60,6 +71,7 @@ class LayerCell(QFrame):
 
     record_clicked = Signal(object)   # DefectRecord
     cluster_clicked = Signal(object)  # 근접 묶음 members(list[DefectRecord])
+    die_clicked = Signal()            # 기준 칸의 SLOT·die 링크(A12)
 
     def __init__(
         self,
@@ -82,29 +94,50 @@ class LayerCell(QFrame):
 
     # ------------------------------------------------------------ 구성
     def _build(self, loader: Optional[ImageLoader]) -> None:
+        inset = _BASE_INSET if self.is_base else _INSET
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
         head = QWidget(self)
-        head.setFixedHeight(_HEADER_H)
+        head.setFixedHeight(_BASE_HEADER_H if self.is_base else _HEADER_H)
         head_row = QHBoxLayout(head)
-        head_row.setContentsMargins(12, 0, 12, 0)
+        head_row.setContentsMargins(14 if self.is_base else 10, 0, 14 if self.is_base else 10, 0)
         head_row.setSpacing(theme.SPACING["gapS"])
 
         self.title = QLabel(self.layer, head)
         self.title.setObjectName("cardLayerName")
         head_row.addWidget(self.title)
 
+        # 재리뷰 깊이 칩(비교 카드). 이름은 canonical 만 쓴다.
+        canonical, depth = split_depth(self.layer)
+        self.depth_chip: Optional[DepthChip] = None
+        if depth and not self.is_base:
+            self.title.setText(canonical)
+            self.depth_chip = DepthChip(depth, head)
+            head_row.addWidget(self.depth_chip)
+
         self.tag = QLabel("", head)
         self.tag.setObjectName("cardTag")
         self.tag.hide()
         head_row.addWidget(self.tag)
+
+        # 기준 칸: SLOT·die 링크. 누르면 히트맵에서 그 die 를 고른 채로 연다(A12).
+        self.die_link = TransparentPushButton("", head)
+        self.die_link.setFixedHeight(_BASE_HEADER_H - 10)
+        self.die_link.setFont(mono_font(12))
+        self.die_link.setToolTip("이 defect 의 wafer 와 die. 눌러 히트맵에서 위치를 봅니다.")
+        self.die_link.clicked.connect(self.die_clicked)
+        self.die_link.setVisible(False)
+        head_row.addWidget(self.die_link)
+
         head_row.addStretch(1)
 
-        # 수치는 등폭 + 단위. 거리는 판독 근거라 카드 머리에 남긴다.
+        # 수치는 등폭 + 단위. 거리는 판독 근거라 카드 머리에 남긴다. 기준 칸에서는 결함명.
         self.chip = QLabel("", head)
         self.chip.setObjectName("cardChip")
+        if not self.is_base:
+            self.chip.setFont(mono_font(12, bold=True))
         head_row.addWidget(self.chip)
         outer.addWidget(head)
 
@@ -122,16 +155,7 @@ class LayerCell(QFrame):
         stage_layout.addWidget(self.image)
         outer.addWidget(stage, 1)
         self._stage = stage
-
-        wrap = QWidget(self)
-        wrap.setFixedHeight(0)
-        wrap.hide()
-
-        # 기준 칸 좌하단: die 좌표. µm 스케일바는 픽셀 대 µm 실비율 근거가 코드에 없어
-        # 만들지 않는다(REVIEW-01 P1). 비율 획득 경로가 생기면 그때 넣는다.
-        self.die_label = QLabel("", stage)
-        self.die_label.setObjectName("stageDie")
-        self.die_label.hide()
+        self._inset = inset
 
         # 우하단 근접 묶음 버튼.
         self.more_badge = QPushButton("", stage)
@@ -144,13 +168,14 @@ class LayerCell(QFrame):
     def _apply_tokens(self, *_args) -> None:
         """카드·머리·무대 색을 현재 테마 토큰으로 칠한다.
 
-        순수 Qt 위젯이라 setStyleSheet 를 쓴다. Fluent 위젯에 직접 거는 것만 금지다.
+        순수 Qt 위젯이라 setStyleSheet 를 쓴다. Fluent 위젯(die_link)은 setCustomStyleSheet 다.
         """
         t = theme.fluent_tokens(isDarkTheme())
         card = t["card"]
         border = theme.flatten(t["cardBorder"], t["layer"])
         border_hover = theme.flatten(t["cardBorderH"], t["layer"])
         radius = theme.RADIUS["card"]
+        inset = self._inset
         self.setStyleSheet(
             f"QFrame#readingCard {{ background:{card}; border:1px solid {border};"
             f" border-radius:{radius}px; }}"
@@ -158,25 +183,26 @@ class LayerCell(QFrame):
         )
         self._stage.setStyleSheet(
             f"QFrame#photoStage {{ background:{theme.PHOTO_BG};"
-            f" border-radius:4px; margin:0 {_PHOTO_INSET}px {_PHOTO_INSET}px"
-            f" {_PHOTO_INSET}px; }}"
+            f" border-radius:4px; margin:0 {inset}px {inset}px {inset}px; }}"
         )
         self.title.setStyleSheet(
-            f"color:{theme.flatten(t['txt1'], card)}; font-size:13px; font-weight:600;"
+            f"color:{theme.flatten(t['txt1'], card)};"
+            f" font-size:{13 if self.is_base else 12.5:g}px; font-weight:600;"
         )
-        self.chip.setStyleSheet(
-            f"color:{t['pass']}; font-size:12px; font-weight:600;"
-            " font-family:'Cascadia Mono','Consolas',monospace;"
-        )
-        self.die_label.setStyleSheet(
-            "color:rgba(255,255,255,0.62); font-size:11px;"
-            " font-family:'Cascadia Mono','Consolas',monospace; background:transparent;"
+        chip_color = theme.flatten(t["txt2"], card) if self.is_base else t["pass"]
+        self.chip.setStyleSheet(f"color:{chip_color}; font-size:12px;")
+        die_rule = "TransparentPushButton {{ color: {0}; padding: 0 6px; }}"
+        setCustomStyleSheet(
+            self.die_link,
+            die_rule.format(theme.flatten(theme.fluent_tokens(False)["txt2"], card)),
+            die_rule.format(theme.flatten(theme.fluent_tokens(True)["txt2"],
+                                          theme.fluent_tokens(True)["card"])),
         )
         self.more_badge.setStyleSheet(
             "QPushButton#stageMore { color:rgba(255,255,255,0.90);"
             " background:rgba(255,255,255,0.08);"
             " border:1px solid rgba(255,255,255,0.30); border-radius:4px;"
-            " padding:2px 9px; font-size:11px; }"
+            " padding:3px 9px; font-size:11px; }"
             "QPushButton#stageMore:hover { background:rgba(255,255,255,0.18); }"
         )
         self._style_tag()
@@ -193,16 +219,24 @@ class LayerCell(QFrame):
         )
 
     # ------------------------------------------------------------ 내용
+    def set_layer(self, layer: str) -> None:
+        """기준 칸은 하나를 계속 쓰므로 기준 layer 가 바뀌면 이름만 바꾼다."""
+        self.layer = layer
+        self.title.setText(layer)
+
+    def set_die(self, text: str) -> None:
+        """SLOT·die 표기. 빈 문자열이면 사라진다."""
+        self.die_link.setText(text)
+        self.die_link.setVisible(bool(text))
+
     def show_base(self, rec: DefectRecord, extra: int = 0, members: Optional[list] = None) -> None:
-        """기준 칸. 배지와 die 좌표, 근접 묶음 버튼을 함께 보인다."""
+        """기준 칸. 배지와 결함명, 근접 묶음 버튼을 함께 보인다."""
         self._set_record(rec)
         self.tag.setText("기준")
         self.tag.show()
         self._style_tag()
-        self.chip.setText("")
+        self.chip.setText(getattr(rec, "defect_name", "") or "" if rec else "")
         self.image.show_path(rec.image_path if rec else None)
-        self.die_label.setText(f"die ({rec.col}, {rec.row})" if rec else "")
-        self.die_label.setVisible(rec is not None)
         self._cluster_members = list(members or [])
         if extra > 0:
             self.more_badge.setText(f"＋{extra} 근접")
@@ -216,12 +250,11 @@ class LayerCell(QFrame):
         self._set_record(rec)
         self.chip.setText(f"Δ {distance:.1f} µm")
         if ambiguous:
-            self.tag.setText("동률 후보")
+            self.tag.setText("동률")
             self.tag.show()
         else:
             self.tag.hide()
         self._style_tag()
-        self.die_label.hide()
         self.more_badge.hide()
         self.image.show_path(rec.image_path if rec else None)
 
@@ -230,10 +263,9 @@ class LayerCell(QFrame):
         self._set_record(None)
         self.chip.setText("")
         self.tag.hide()
-        self.die_label.hide()
         self.more_badge.hide()
         body = (
-            f"<div style='color:rgba(255,255,255,0.62); font-size:13px;"
+            f"<div style='color:rgba(255,255,255,0.62); font-size:12.5px;"
             f" font-weight:600'>{_NO_MATCH_TITLE}</div>"
         )
         if reason:
@@ -252,7 +284,7 @@ class LayerCell(QFrame):
             self.chip.setText(info)
             self.tag.setVisible(bool(warn))
             if warn:
-                self.tag.setText("동률 후보")
+                self.tag.setText("동률")
             self.image.show_path(rec.image_path)
         else:
             self.show_no_match(info)
@@ -282,17 +314,13 @@ class LayerCell(QFrame):
         self._reposition_overlays()
 
     def _reposition_overlays(self) -> None:
-        """무대 위 좌하단 die 라벨과 우하단 근접 버튼 위치."""
+        """무대 위 우하단 근접 버튼 위치."""
         stage = self._stage
         margin = 9
-        if self.die_label.isVisible():
-            self.die_label.adjustSize()
-            self.die_label.move(margin + _PHOTO_INSET,
-                                stage.height() - self.die_label.height() - margin)
         if self.more_badge.isVisible():
             self.more_badge.adjustSize()
             self.more_badge.move(
-                stage.width() - self.more_badge.width() - margin - _PHOTO_INSET,
+                stage.width() - self.more_badge.width() - margin - self._inset,
                 stage.height() - self.more_badge.height() - margin,
             )
             self.more_badge.raise_()
@@ -322,10 +350,15 @@ class LayerCell(QFrame):
 
 
 class CompareGrid(QWidget):
-    """판독 카드 격자."""
+    """판독대: 왼쪽 기준 카드 + 오른쪽 비교 카드 2열(세로 스크롤).
+
+    기준 칸은 하나를 만들어 계속 쓴다. 기준 layer 가 바뀌면 이름만 바꾼다. 그래서 SLOT·die 링크
+    같은 기준 칸 위젯이 build_layout 뒤에도 같은 객체로 남는다(배선이 한 번만 연결하면 된다).
+    """
 
     image_clicked = Signal(object)
     base_cluster_clicked = Signal(object)
+    die_clicked = Signal()
 
     def __init__(self, loader: Optional[ImageLoader] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -333,14 +366,40 @@ class CompareGrid(QWidget):
         self._cells: dict[str, LayerCell] = {}
         self._layer_order: list[str] = []
         self._base_layer = ""
-        self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setSpacing(theme.SPACING["gapM"])
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACING["gapM"])
+
+        self.base_cell = LayerCell("", True, loader, self)
+        self.base_cell.record_clicked.connect(self.image_clicked)
+        self.base_cell.cluster_clicked.connect(self.base_cluster_clicked)
+        self.base_cell.die_clicked.connect(self.die_clicked)
+        row.addWidget(self.base_cell, _BASE_STRETCH)
+
+        self.scroll = SmoothScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Fluent 위젯이라 setStyleSheet 로 덮으면 스크롤바 스타일까지 같이 날아간다.
+        transparent = "SmoothScrollArea { background: transparent; border: none; }"
+        setCustomStyleSheet(self.scroll, transparent, transparent)
+        self.scroll.viewport().setStyleSheet("background: transparent;")
+        host = QWidget(self.scroll)
+        host.setStyleSheet("background: transparent;")
+        self._grid = QGridLayout(host)
+        # 오른쪽 여백은 겹쳐 그려지는 스크롤바 자리. 없으면 마지막 열이 가려진다.
+        self._grid.setContentsMargins(0, 0, 4, 0)
+        self._grid.setSpacing(10)
+        self.scroll.setWidget(host)
+        row.addWidget(self.scroll, _COMPARE_STRETCH)
 
     # ------------------------------------------------------------ 구성
     def build_layout(self, grid: list[list[str]], base_layer: str) -> None:
         """layer 목록으로 카드를 새로 만든다. grid 는 행 단위 layer 이름."""
-        for cell in self._cells.values():
+        for layer, cell in list(self._cells.items()):
+            if cell is self.base_cell:
+                continue
             cell.setParent(None)
             cell.deleteLater()
         self._cells.clear()
@@ -353,24 +412,30 @@ class CompareGrid(QWidget):
                     order.append(layer)
         self._layer_order = order
 
+        self.base_cell.set_layer(base_layer)
+        self.base_cell.setVisible(bool(base_layer))
+        if base_layer:
+            self._cells[base_layer] = self.base_cell
         for layer in order:
-            cell = LayerCell(layer, layer == base_layer, self._loader, self)
+            if layer == base_layer:
+                continue
+            cell = LayerCell(layer, False, self._loader, self.scroll.widget())
             cell.record_clicked.connect(self.image_clicked)
-            cell.cluster_clicked.connect(self.base_cluster_clicked)
             self._cells[layer] = cell
-        self._repack(order)
+        self._repack([l for l in order if l != base_layer])
 
     def _repack(self, visible_layers: list[str]) -> None:
-        """보이는 칸을 칸 수에 맞는 열 수로 배치한다.
+        """보이는 비교 칸을 2열로 배치한다.
 
         위젯은 지우지 않고 자리만 옮긴다. 탐색 중 깜빡임이 적다.
         """
         while self._grid.count():
             self._grid.takeAt(0)
-        visible = [l for l in visible_layers if l in self._cells]
+        visible = [l for l in visible_layers if l in self._cells and l != self._base_layer]
         visible_set = set(visible)
         for layer, cell in self._cells.items():
-            cell.setVisible(layer in visible_set)
+            if cell is not self.base_cell:
+                cell.setVisible(layer in visible_set)
 
         cols = columns_for(len(visible))
         for index, layer in enumerate(visible):
@@ -383,6 +448,10 @@ class CompareGrid(QWidget):
             self._grid.setRowMinimumHeight(row, theme.WELL_MIN_PX)
 
     # ------------------------------------------------------------ 내용
+    def set_die(self, text: str) -> None:
+        """기준 카드 머리의 SLOT·die 링크(A12)."""
+        self.base_cell.set_die(text)
+
     def update_for_base(self, item: BaseDefectMatches, compare_layers: list[str]) -> None:
         """기준 defect 이 바뀔 때 카드를 갱신한다.
 
@@ -395,8 +464,7 @@ class CompareGrid(QWidget):
             cluster = getattr(item, "base_cluster", None)
             extra = getattr(cluster, "extra_count", 0) or 0
             members = list(getattr(cluster, "members", []) or [])
-            self._cells[self._base_layer].show_base(base, extra=extra, members=members)
-            visible.append(self._base_layer)
+            self.base_cell.show_base(base, extra=extra, members=members)
 
         for layer in self._layer_order:
             if layer == self._base_layer or layer not in compare_layers:
@@ -426,6 +494,6 @@ class CompareGrid(QWidget):
         return "이 layer 에 같은 die 사진 없음", False
 
     def show_empty(self, message: str) -> None:
-        self._repack(list(self._layer_order))
+        self._repack([l for l in self._layer_order if l != self._base_layer])
         for cell in self._cells.values():
             cell.show_no_match(message)

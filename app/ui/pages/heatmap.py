@@ -65,6 +65,7 @@ from app import config, heatmap, wafermap_align
 from app.clustering import Cluster, cluster_records, cross_layer_groups
 from app.heatmap import HeatKey
 from app.ui import theme
+from app.ui.widgets import PageHeader
 from app.ui.sheets.cluster_view import ClusteredThumb
 from app.ui.flow_layout import FlowLayout
 from app.ui.notifications import NotificationBanner
@@ -728,11 +729,8 @@ class HeatmapPage(QWidget):
         self.stack.addWidget(self.content)
 
         main = QVBoxLayout(self.content)
-        main.setContentsMargins(
-            theme.SPACING["pageH"], theme.SPACING["pageV"], theme.SPACING["pageH"], 0
-        )
-        main.setSpacing(theme.SPACING["gapM"])
-        main.addLayout(self._build_header())
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
         main.addWidget(self._build_control_row())
         main.addLayout(self._build_body(), 1)
         self.show_empty_state(True)
@@ -759,64 +757,45 @@ class HeatmapPage(QWidget):
         outer.addWidget(box)
         return host
 
-    def _build_header(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.SPACING["gapS"])
-        row.addWidget(TitleLabel(_PAGE_TITLE, self.content))
-        row.addStretch(1)
-        col.addLayout(row)
-        self.lbl_sub = CaptionLabel(_PAGE_SUB, self.content)
-        self.lbl_sub.setObjectName("dim")
-        col.addWidget(self.lbl_sub)
-        return col
-
     def _build_control_row(self) -> QWidget:
-        row = QWidget(self.content)
-        row.setFixedHeight(_ROW_H)
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(theme.SPACING["gapXs"])
+        """머리 행 44(시안): 제목 · 슬롯 레일 | 조사 layer 칩 … 총계. 지도가 높이를 더 가진다."""
+        row = PageHeader(_PAGE_TITLE, self.content)
+        row.title.setToolTip(_PAGE_SUB)
 
         # 슬롯 레일. 원본은 wafer 드롭다운이라 지금 무엇을 보는 중인지 접혀 있었다.
         self.slots = SegmentedWidget(row)
         self.slots.addItem(_ALL_SLOTS, _ALL_SLOTS, lambda: self._on_slot(_ALL_SLOTS))
         self.slots.setCurrentItem(_ALL_SLOTS)
-        lay.addWidget(self.slots, 0)
+        row.add_widget(self.slots, 0)
 
-        self._divider = QFrame(row)
-        self._divider.setObjectName("heatmapDivider")
-        self._divider.setFixedSize(1, 20)
-        lay.addSpacing(theme.SPACING["gapXs"])
-        lay.addWidget(self._divider, 0)
-        lay.addSpacing(theme.SPACING["gapXs"])
+        row.add_spacing(theme.SPACING["gapXs"])
+        row.add_divider()
+        row.add_spacing(theme.SPACING["gapXs"])
 
         self.lbl_chip_head = CaptionLabel("조사 layer", row)
         self.lbl_chip_head.setObjectName("dim")
-        lay.addWidget(self.lbl_chip_head, 0)
+        row.add_widget(self.lbl_chip_head, 0)
 
         self._chip_host = QWidget(row)
         self._chip_lay = QHBoxLayout(self._chip_host)
         self._chip_lay.setContentsMargins(0, 0, 0, 0)
         self._chip_lay.setSpacing(theme.SPACING["gapXs"])
-        lay.addWidget(self._chip_host, 0)
+        row.add_widget(self._chip_host, 0)
         self._chips: dict[str, _LayerChip] = {}
         self._chip_more: Optional[_LayerChip] = None
 
-        lay.addStretch(1)
+        row.add_stretch()
         self.lbl_total = CaptionLabel("", row)
         self.lbl_total.setObjectName("dim")
         self.lbl_total.setFont(_font(theme.TYPO["caption"]["size"], mono=True))
-        lay.addWidget(self.lbl_total, 0)
+        row.add_widget(self.lbl_total, 0)
         return row
 
     def _build_body(self) -> QHBoxLayout:
         body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, theme.SPACING["pageV"])
-        body.setSpacing(theme.SPACING["gapL"])
+        pad = PageHeader.PAD_X
+        body.setContentsMargins(pad, theme.SPACING["gapM"], pad, theme.SPACING["gapL"])
+        body.setSpacing(theme.SPACING["gapM"])
         body.addWidget(self._build_map_card(), 0)
         body.addWidget(self._build_read_card(), 1)
         return body
@@ -941,10 +920,6 @@ class HeatmapPage(QWidget):
 
     def _apply_tokens(self, *_args) -> None:
         """순수 Qt 위젯(구분선·스크롤 면)만 토큰으로 칠한다. Fluent 위젯은 스스로 칠한다."""
-        tok = theme.fluent_tokens(isDarkTheme())
-        self._divider.setStyleSheet(
-            f"QFrame#heatmapDivider {{ background: {tok['divider']}; border: none; }}"
-        )
         self._read_host.setStyleSheet(
             "QWidget#heatmapReadHost { background: transparent; }"
         )

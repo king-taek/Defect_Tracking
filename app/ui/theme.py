@@ -411,26 +411,35 @@ QAbstractSpinBox::up-arrow {{ image: url("{up}"); width: 9px; height: 9px; }}
 # 위쪽 레거시 팔레트/STYLESHEET 는 화면 이행이 끝날 때까지 함께 남는다.
 # 이 절은 Qt 를 import 하지 않는 순수 값·계산이라 단위 테스트에서 바로 검증된다.
 
-# ---- 색: 표면 (02 §1.1 라이트 / §1.2 다크) ----
+# ---- 색: 표면 ----
+# 라이트는 Datum(도면) 팔레트다(DefectTracker-Redesign.dc.html, docs/adr/0001). 따뜻한 회백색
+# 바탕에 진한 잉크 글자, 경계선은 알파가 아니라 불투명 값이라 어디에 놓여도 같은 선으로 보인다.
+# 다크는 02 §1.2 의 중립 회색을 그대로 둔다(시안이 "다크는 토큰 교체로 동일 레이아웃" 이라고만
+# 정했고 값을 주지 않았다).
 FLUENT_LIGHT: dict[str, str] = {
-    "win": "#F3F3F3",
-    "layer": "#F9F9F9",
-    "card": "#FFFFFF",
-    "cardHover": "#F7F7F7",
-    "cardBorder": "rgba(0,0,0,.058)",
-    "cardBorderH": "rgba(0,0,0,.16)",
-    "txt1": "rgba(0,0,0,.90)",
-    "txt2": "rgba(0,0,0,.61)",
-    "txt3": "rgba(0,0,0,.62)",
-    "txtDeco": "rgba(0,0,0,.38)",
-    "divider": "rgba(0,0,0,.08)",
-    "ctrlBg": "rgba(255,255,255,.70)",
-    "ctrlBgH": "rgba(249,249,249,.50)",
-    "ctrlBgP": "rgba(249,249,249,.30)",
-    "ctrlBd": "rgba(0,0,0,.07)",
-    "ctrlBdBottom": "rgba(0,0,0,.16)",
-    "subtle": "rgba(0,0,0,.03)",
-    "subtleH": "rgba(0,0,0,.037)",
+    "win": "#ECE9E2",
+    "layer": "#F5F3ED",
+    "card": "#FBFAF7",
+    "cardHover": "#F0EDE5",
+    "cardBorder": "#D9D4C7",
+    "cardBorderH": "#89836F",
+    "txt1": "#1B1A17",
+    "txt2": "#5A574E",
+    "txt3": "#3D3B35",
+    "txtDeco": "#89836F",
+    "divider": "#D9D4C7",
+    "ctrlBg": "#FBFAF7",
+    "ctrlBgH": "#F0EDE5",
+    "ctrlBgP": "#E2DED3",
+    "ctrlBd": "#847F75",
+    "ctrlBdBottom": "#847F75",
+    "subtle": "rgba(27,26,23,.05)",
+    "subtleH": "rgba(27,26,23,.07)",
+    # 시안이 새로 쓰는 면. 팝오버 테두리 / 분절(Segmented) 트랙 / 표 머리 / 선택 썸네일 바탕.
+    "popBorder": "#B7B2A6",
+    "segTrack": "#E2DED3",
+    "tableHead": "#F0EDE5",
+    "thumbSel": "#E1E4E1",
 }
 
 FLUENT_DARK: dict[str, str] = {
@@ -452,6 +461,10 @@ FLUENT_DARK: dict[str, str] = {
     "ctrlBdBottom": "rgba(255,255,255,.09)",
     "subtle": "rgba(255,255,255,.04)",
     "subtleH": "rgba(255,255,255,.06)",
+    "popBorder": "rgba(255,255,255,.16)",
+    "segTrack": "rgba(255,255,255,.08)",
+    "tableHead": "rgba(255,255,255,.04)",
+    "thumbSel": "rgba(76,194,255,.13)",
 }
 
 # ---- 색: accent 3역할 분리 (02 §1.3 + REVIEW-02 A15, 게이트 2) ----
@@ -460,13 +473,25 @@ FLUENT_DARK: dict[str, str] = {
 # REVIEW-02 A15: onAccent 를 테마가 아니라 "채움의 밝기"로 고른다. 다크에서 near-black 을 쓰는
 # 이유는 밝은 채움 위에 흰 글자가 안 읽히기 때문이지 테마 때문이 아니다. 그래서 라이트에서도
 # 밝은 accent(#009FAA 등)를 고르면 near-black 이 맞다. resolve_accent() 가 이 규칙을 구현한다.
-ACCENT_BASE = "#0067B8"
+# Datum 잉크 파랑(시안). 채움 위 글자는 시안의 종이색 #F5F3ED 다(흰색보다 눈이 덜 부시고 6.5:1).
+ACCENT_BASE = "#2C5A86"
 
 ONACCENT_LIGHT = "#FFFFFF"
 ONACCENT_DARK = "#16140F"
 
 ACCENT_LIGHT: dict[str, str] = {
-    "fill": "#0067B8",   # REVIEW-02 A15. 구 #0078D4 는 흰 글자와 4.53 으로 게이트 미달
+    "fill": "#2C5A86",
+    "hover": "#356B9C",
+    "pressed": "#244B70",
+    "onAccent": "#F5F3ED",
+    # 글자용은 채움과 다른 색이어야 한다(게이트 2). 눈으로는 같은 파랑이지만 한 단계 진하다.
+    "text": "#28527A",
+    "tint": "rgba(44,90,134,.09)",
+}
+
+# 이전 라이트 기본값(Windows 파랑, REVIEW-02 A15). #0078D4 / #0067B8 프리셋이 이 값을 쓴다.
+_WINDOWS_BLUE_LIGHT: dict[str, str] = {
+    "fill": "#0067B8",   # 구 #0078D4 는 흰 글자와 4.53 으로 게이트 미달
     "hover": "#005A9E",
     "pressed": "#004C85",
     "onAccent": "#FFFFFF",
@@ -486,15 +511,16 @@ ACCENT_DARK: dict[str, str] = {
 # ---- 색: 상태 (02 §1.4) ----
 # REVIEW-02 A16. 라이트 글자만 여유값으로 교체하고 배경 3색과 다크는 그대로 둔다.
 # 구 값(#0F7B0F / #9D5D00 / #C42B1E)은 4.76~4.79 로 게이트 미달이었다.
+# Datum 상태색(시안). 배경은 시안의 알파 틴트(.12 / .10)를 카드 면 위에 미리 합성한 값이다.
 STATUS_LIGHT: dict[str, str] = {
-    "pass": "#0B6A0B",
-    "passBg": "#DFF6DD",
-    "warn": "#8A5200",
-    "warnBg": "#FFF4CE",
-    "danger": "#B02218",
-    "dangerBg": "#FDE7E9",
+    "pass": "#3B6438",
+    "passBg": "#E7ECE5",
+    "warn": "#8C4A0F",
+    "warnBg": "#F3ECE4",
+    "danger": "#A5271E",
+    "dangerBg": "#F2E5E2",
     "info": ACCENT_LIGHT["text"],
-    "infoBg": "#F4F9FE",
+    "infoBg": "#E8ECF0",
 }
 
 STATUS_DARK: dict[str, str] = {
@@ -511,8 +537,17 @@ STATUS_DARK: dict[str, str] = {
 # 사진 바탕은 두 테마 모두 순검정. 예외 없음(명암 판독에 바탕색이 섞이면 안 된다).
 PHOTO_BG = "#000000"
 
-# ---- 형태 (02 §2) ----
-RADIUS: dict[str, int] = {"control": 5, "card": 7, "sheet": 8, "chip": 13}
+# ---- 글꼴 ----
+# 시안의 본문 서체. 없는 환경에서는 다음 후보로 내려간다. 수치는 등폭(MONO)이다.
+FONT_FAMILIES = ["NanumSquare", "Segoe UI", "Malgun Gothic"]
+MONO_FAMILIES = ["Cascadia Mono", "Consolas", "Menlo", "monospace"]
+
+# ---- 형태 (02 §2 + Datum 시안: 컨트롤 6 · 카드 9) ----
+RADIUS: dict[str, int] = {"control": 6, "card": 9, "sheet": 8, "chip": 13}
+# 시안의 고정 높이. 페이지 머리 행(제목·조건이 한 줄) / 판독 하단 바(색인·필름스트립·담기).
+HEADER_ROW_PX = 44
+BOTTOM_BAR_PX = 112
+NAV_RAIL_PX = 48
 
 SPACING: dict[str, int] = {
     "pageV": 22,
@@ -801,8 +836,9 @@ def resolve_accent(base: str, dark: bool, target: float | None = None) -> dict[s
 # 표 값은 손으로 고른 표준색이라 clamp 루프를 타지 않는다. None 은 규칙에 위임한다는 뜻이고,
 # 표에 없는 색도 규칙이 받는다. 표 값도 게이트 검증은 거친다(표가 틀리면 드러나도록).
 ACCENT_PRESETS: dict[str, dict[bool, dict[str, str] | None]] = {
-    "#0078D4": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},   # Windows
-    "#0067B8": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},   # 라이트 기본값 자체
+    "#2C5A86": {False: dict(ACCENT_LIGHT), True: dict(ACCENT_DARK)},   # Datum(라이트 기본값)
+    "#0078D4": {False: dict(_WINDOWS_BLUE_LIGHT), True: dict(ACCENT_DARK)},   # Windows
+    "#0067B8": {False: dict(_WINDOWS_BLUE_LIGHT), True: dict(ACCENT_DARK)},
     "#009FAA": {                                                        # QFluent
         False: {
             "fill": "#009FAA",

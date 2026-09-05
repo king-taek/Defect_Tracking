@@ -90,7 +90,7 @@ _SECTION_FEATURE = "기능 안내"
 _KEYCAP_MIN_PX = 214
 # 수치·키 표기는 등폭(02 §2). 사진 카드와 같은 글꼴 목록을 쓴다.
 _MONO = "'Cascadia Mono','Consolas',monospace"
-_FEATURE_COLUMNS = 2
+_FEATURE_COLUMNS = 1  # 두 열 배치의 오른쪽 열 안에서는 카드가 한 줄씩 쌓인다
 # 02 §2 의 굵기 600. PySide6 setFont 는 정수 대신 QFont.Weight 를 받는다.
 _W600 = QFont.Weight.DemiBold
 
@@ -142,15 +142,21 @@ class HelpPage(QWidget):
         self.subtitle.setObjectName("dim")
         lay.addWidget(self.subtitle)
 
-        lay.addSpacing(24)
-        lay.addWidget(self._section_label(_SECTION_SHORTCUT, body))
-        lay.addSpacing(10)
-        lay.addWidget(self._build_shortcut_card(body))
-
-        lay.addSpacing(24)
-        lay.addWidget(self._section_label(_SECTION_FEATURE, body))
-        lay.addSpacing(10)
-        lay.addLayout(self._build_feature_grid(body))
+        # 시안(docs/adr/0001): 단축키(왼쪽) | 기능 안내(오른쪽) 두 열. 세로로 이어 붙이면
+        # 기능 카드가 화면 아래로 밀려 스크롤해야만 보인다.
+        lay.addSpacing(22)
+        columns = QGridLayout()
+        columns.setContentsMargins(0, 0, 0, 0)
+        columns.setHorizontalSpacing(22)
+        columns.setVerticalSpacing(8)
+        columns.addWidget(self._section_label(_SECTION_SHORTCUT, body), 0, 0)
+        columns.addWidget(self._build_shortcut_card(body), 1, 0, Qt.AlignTop)
+        columns.addWidget(self._section_label(_SECTION_FEATURE, body), 0, 1)
+        columns.addLayout(self._build_feature_grid(body), 1, 1, Qt.AlignTop)
+        columns.setColumnStretch(0, 1)
+        columns.setColumnStretch(1, 1)
+        columns.setRowStretch(1, 1)
+        lay.addLayout(columns)
         lay.addStretch(1)
 
         self.scroll.setWidget(body)

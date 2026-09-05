@@ -430,14 +430,17 @@ def test_excel_layer_order_preserved(win, app, tmp_path):
 
 
 def test_grid_rollback_base_top_left(win):
-    # 항목 5 롤백: 기준 셀이 압축 배치의 (0,0)에 온다.
+    # 기준 셀은 비교 격자 밖(왼쪽 대형 카드)에 있고, 첫 비교 셀이 격자의 (0,0)에 온다.
     win.top.spn_tol.setValue(100000.0)
     for _ in range(5):
         QCoreApplication.processEvents()
     win._goto(0)
     gl = win.grid._grid
     base_cell = win.grid._cells[win.grid._base_layer]
-    r, c, _, _ = gl.getItemPosition(gl.indexOf(base_cell))
+    assert base_cell is win.grid.base_cell
+    assert gl.indexOf(base_cell) == -1
+    first = next(c for name, c in win.grid._cells.items() if name != win.grid._base_layer)
+    r, c, _, _ = gl.getItemPosition(gl.indexOf(first))
     assert (r, c) == (0, 0)
 
 

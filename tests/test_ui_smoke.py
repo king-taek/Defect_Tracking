@@ -361,10 +361,10 @@ def test_nav_die_label_follows_the_current_photo(win):
     """웨이퍼 맵 위젯은 히트맵 페이지가 흡수했다(A12). 판독 화면에 남는 것은 SLOT·die 링크다."""
     item = win.matches[0]
     win._goto(0)
-    text = win.nav.lbl_die.text()
+    text = win.grid.base_cell.die_link.text()
     assert item.base.wafer_id in text
     assert f"die ({item.base.col}, {item.base.row})" in text
-    assert win.nav.lbl_die.isVisible() or text
+    assert win.grid.base_cell.die_link.isVisible() or text
 
 
 def test_heatmap_page_draws_the_current_lot(win):
@@ -540,20 +540,20 @@ def test_update_check_uptodate_manual_banner(win):
     """
     from app import updater
 
-    win.nav.set_status("업데이트 확인 중...")
+    win.top.set_status("업데이트 확인 중...")
     st = updater.UpdateStatus(available=False, local="a", remote="a", method="zip")
     win._on_update_checked(st, manual=True)  # 모달 없음(available=False)
     assert "settingsInterface" not in win._nav_badges
-    assert win.nav.lbl_status.text() == "최신 버전입니다"
+    assert win.top.lbl_status.text() == "최신 버전입니다"
 
 
 def test_update_check_error_manual_updates_status(win):
     from app import updater
 
-    win.nav.set_status("업데이트 확인 중...")
+    win.top.set_status("업데이트 확인 중...")
     st = updater.UpdateStatus(available=False, local="a", remote=None, method="zip", error="네트워크 오류")
     win._on_update_checked(st, manual=True)
-    assert win.nav.lbl_status.text() == "업데이트 확인 실패"
+    assert win.top.lbl_status.text() == "업데이트 확인 실패"
 
 
 def test_update_finished_message_shows_new_version(win, monkeypatch):

@@ -151,7 +151,7 @@ def test_large_font_uses_large_height_token(page):
     # 카드 높이도 같은 증가분만큼 올라간다(고정 70px 이면 글자가 잘린다).
     assert page.card_workspace.minimumHeight() == 70 + (large - normal)
     # 형태 토큰은 배율과 무관하게 그대로다(게이트).
-    assert theme.RADIUS["card"] == 7
+    assert theme.RADIUS["card"] == 9
     assert theme.SPACING["gapM"] == 12
 
     page.card_font.segment.setCurrentItem("normal")

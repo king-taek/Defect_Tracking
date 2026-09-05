@@ -48,6 +48,7 @@ from qfluentwidgets import (
 from app.export.excel_report import EXPORT_WARN_BLOCKS
 from app.models import BaseDefectMatches
 from app.ui import theme
+from app.ui.widgets import PageHeader
 
 __all__ = [
     "ExportPage",
@@ -353,81 +354,65 @@ class ExportPage(QWidget):
     # ------------------------------------------------------------ 구성
     def _build(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(
-            theme.SPACING["pageH"], theme.SPACING["pageV"],
-            theme.SPACING["pageH"], theme.SPACING["pageV"],
-        )
-        outer.setSpacing(theme.SPACING["gapM"])
-        outer.addLayout(self._build_header())
-        outer.addLayout(self._build_actions())
-        outer.addWidget(self._build_card(), 1)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self._build_header_row())
+        # 진행 막대는 머리 행 바로 아래 가는 줄로 흐른다(시안).
+        self.progress = ProgressBar(self)
+        self.progress.setVisible(False)
+        outer.addWidget(self.progress)
+        body = QWidget(self)
+        lay = QVBoxLayout(body)
+        pad = PageHeader.PAD_X
+        lay.setContentsMargins(pad, theme.SPACING["gapL"], pad, theme.SPACING["gapL"])
+        lay.addWidget(self._build_card(), 1)
+        outer.addWidget(body, 1)
 
-    def _build_header(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.SPACING["gapS"])
-        row.addWidget(TitleLabel(_PAGE_TITLE, self))
-        row.addStretch(1)
+    def _build_header_row(self) -> QWidget:
+        """머리 행 44(시안): 제목 · 개수 … 담기 버튼들 | Excel 출력."""
+        head = PageHeader(_PAGE_TITLE, self)
+        head.title.setToolTip(_PAGE_SUB)
         # 개수는 등폭이라야 목록이 바뀔 때 자릿수가 흔들리지 않는다.
-        self.lbl_count = QLabel("", self)
+        self.lbl_count = QLabel("", head)
         self.lbl_count.setObjectName("specCount")
-        row.addWidget(self.lbl_count)
-        col.addLayout(row)
-        sub = CaptionLabel(_PAGE_SUB, self)
-        sub.setObjectName("dim")
-        col.addWidget(sub)
-        return col
+        head.add_widget(self.lbl_count)
+        head.add_stretch()
 
-    def _build_actions(self) -> QVBoxLayout:
-        box = QVBoxLayout()
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(theme.SPACING["gapXs"])
-
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.SPACING["gapXs"])
-        height = theme.fluent_height("control", self._size_key)
-
-        self.btn_add_all = PushButton("매치 전체 담기", self)
+        height = theme.fluent_height("control", self._size_key) - 2
+        self.btn_add_all = PushButton("매치 전체 담기", head)
         self.btn_add_all.setFixedHeight(height)
         self.btn_add_all.setToolTip(
             "지금 기준 layer 로 매칭된 사진을 한 묶음으로 담습니다."
         )
         self.btn_add_all.clicked.connect(self._add_all_matched)
-        row.addWidget(self.btn_add_all)
+        head.add_widget(self.btn_add_all)
 
-        self.btn_add_all_layers = PushButton("모든 매치 담기", self)
+        self.btn_add_all_layers = PushButton("모든 매치 담기", head)
         self.btn_add_all_layers.setFixedHeight(height)
         self.btn_add_all_layers.setToolTip(
             "layer 를 하나씩 기준으로 삼아 어디서든 매치된 defect 을 모두 담습니다"
             "(중복 제거). layer 수만큼 다시 매칭하므로 잠시 걸립니다."
         )
         self.btn_add_all_layers.clicked.connect(self._add_all_layers)
-        row.addWidget(self.btn_add_all_layers)
+        head.add_widget(self.btn_add_all_layers)
 
-        self.btn_clear = PushButton("전체 비우기", self)
+        self.btn_clear = PushButton("전체 비우기", head)
         self.btn_clear.setFixedHeight(height)
         self.btn_clear.setToolTip("담은 사진을 모두 뺍니다.")
         self.btn_clear.clicked.connect(self._on_clear_clicked)
-        row.addWidget(self.btn_clear)
+        head.add_widget(self.btn_clear)
 
-        row.addStretch(1)
+        head.add_spacing(theme.SPACING["gapXs"])
+        head.add_divider()
+        head.add_spacing(theme.SPACING["gapXs"])
 
         # 강조는 한 화면에 하나. 원본의 [취소][확인][Excel 출력] 3버튼 동급을 여기서 끝낸다.
-        self.btn_export = PrimaryPushButton("Excel 출력", self)
-        self.btn_export.setFixedHeight(theme.fluent_height("primary", self._size_key))
-        self.btn_export.setToolTip("담은 사진을 지금 Excel 파일로 출력합니다.")
+        self.btn_export = PrimaryPushButton("Excel 출력", head)
+        self.btn_export.setFixedHeight(theme.fluent_height("control", self._size_key))
+        self.btn_export.setToolTip("담은 사진을 지금 Excel 파일로 출력합니다. (Ctrl+E)")
         self.btn_export.clicked.connect(self._on_export_clicked)
-        row.addWidget(self.btn_export)
-        box.addLayout(row)
-
-        self.progress = ProgressBar(self)
-        self.progress.setVisible(False)
-        box.addWidget(self.progress)
-        return box
+        head.add_widget(self.btn_export)
+        return head
 
     def _build_card(self) -> QWidget:
         card = QFrame(self)

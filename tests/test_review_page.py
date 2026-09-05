@@ -46,12 +46,11 @@ def win(app, tmp_path):
 
 # ---------------------------------------------------------------- 컨트롤 행
 def test_control_row_is_one_fixed_height_row(win):
-    """A14: 행 40, 컨트롤 32. 판독 중에 조건이 화면을 차지하지 않아야 한다."""
+    """시안: 조건 행 44, 안의 브레드크럼 항목 28. 판독 중에 조건이 화면을 차지하지 않아야 한다."""
     top = win.top
-    assert top.height() == 40
-    for widget in (top.btn_open, top.cmb_base, top.spn_tol, top.btn_compare,
-                   top.btn_nomatch, top.btn_add_export):
-        assert widget.height() == theme.fluent_height("control")
+    assert top.height() == theme.HEADER_ROW_PX == 44
+    for widget in (top.btn_open, top.cmb_base, top.spn_tol, top.btn_compare, top.btn_nomatch):
+        assert widget.height() == 28
 
 
 def test_settings_and_export_buttons_left_the_control_row(win):
@@ -61,10 +60,25 @@ def test_settings_and_export_buttons_left_the_control_row(win):
     assert win.top.btn_export is None
 
 
-def test_add_export_button_lives_in_the_control_row(win):
-    """＋ 출력에 담기는 A14 우측 그룹의 주요 액션이다."""
-    assert win.btn_add_export is win.top.btn_add_export
+def test_add_export_button_lives_in_the_bottom_bar(win):
+    """＋ 출력에 담기는 하단 바(112) 오른쪽 끝의 주요 액션이다(시안)."""
+    assert win.btn_add_export is win.nav.btn_add_export
     assert "담기" in win.btn_add_export.text()
+    assert win.nav.height() == theme.BOTTOM_BAR_PX == 112
+
+
+def test_lot_name_is_the_open_button(win):
+    """LOT 이름 자체가 버튼이다. 누르면 다른 LOT 을 고른다."""
+    win.top.set_lot_name("204. DEVAINT.226 (PKG)")
+    assert win.top.btn_open.text() == "204. DEVAINT.226 (PKG)"
+    win.top.set_lot_name("")
+    assert win.top.btn_open.text() == "LOT 폴더"
+
+
+def test_status_text_moved_into_the_control_row(win):
+    """스캔·업데이트 상태 문구는 조건 행 오른쪽에 있다(옛 탐색 바에서 이동)."""
+    win.top.set_status("스캔 중...")
+    assert win.top.lbl_status.text() == "스캔 중..."
 
 
 def test_nomatch_jump_button_reaches_the_same_handler(win):
@@ -96,13 +110,13 @@ def test_compare_checks_keep_the_layer_name_contract(app):
 
 def test_compare_button_shows_the_selected_count(app):
     sb = SideBar()
-    assert sb.btn_compare.text() == "비교 layer"
+    assert sb.btn_compare.text() == "layer"
     assert not sb.btn_compare.isEnabled()
     sb.set_layers(["LYA4", "LYB4", "LYB3"], base="LYA4", compares=["LYB4", "LYB3"])
-    assert sb.btn_compare.text() == "비교 layer 2"
+    assert sb.btn_compare.text() == "2 layer"
     assert sb.btn_compare.isEnabled()
     sb._set_all_compares(False)
-    assert sb.btn_compare.text() == "비교 layer 0"
+    assert sb.btn_compare.text() == "0 layer"
 
 
 def test_compare_flyout_view_is_hidden_until_opened(app):
@@ -120,12 +134,10 @@ def test_cluster_radius_moved_into_the_flyout(app):
 
 
 # ---------------------------------------------------------------- 판독대
-@pytest.mark.parametrize(
-    ("cells", "cols"),
-    [(1, 2), (4, 2), (5, 3), (9, 3), (10, 4), (12, 4)],
-)
-def test_reading_well_column_rule(cells, cols):
-    assert columns_for(cells) == cols
+@pytest.mark.parametrize("cells", [1, 4, 5, 9, 10, 12])
+def test_reading_well_column_rule(cells):
+    """시안: 기준이 왼쪽 절반을 쓰므로 비교 카드는 칸 수와 무관하게 2열이다."""
+    assert columns_for(cells) == 2
 
 
 def test_twelve_cells_keep_the_minimum_reading_height(win):
@@ -140,6 +152,17 @@ def test_twelve_cells_keep_the_minimum_reading_height(win):
         QCoreApplication.processEvents()
     assert len(win.grid._cells) == 12
     assert min(c.height() for c in win.grid._cells.values()) >= theme.WELL_MIN_PX
+
+
+def test_base_card_is_one_persistent_widget(win):
+    """기준 칸은 하나를 계속 쓴다. 기준 layer 가 바뀌어도 SLOT·die 링크 객체가 같다."""
+    from app import layout
+
+    link = win.grid.base_cell.die_link
+    win.grid.build_layout(layout.build_grid(["LYA4", "LYB4"]), "LYB4")
+    assert win.grid.base_cell.die_link is link
+    assert win.grid._cells["LYB4"] is win.grid.base_cell
+    assert win.grid.base_cell.title.text() == "LYB4"
 
 
 def test_unmatched_cells_stay_with_a_reason(win):
@@ -180,22 +203,50 @@ def test_filmstrip_keeps_vertical_wheel_to_horizontal_scroll(win):
     assert win.strip.verticalScrollBarPolicy().name.startswith("ScrollBarAlwaysOff")
 
 
-# ---------------------------------------------------------------- 탐색 바
-def test_nav_die_link_is_the_way_back_to_the_heatmap(app):
-    """A12: SLOT·die 를 누르면 히트맵으로 간다.
+def test_filmstrip_marks_photos_that_are_in_the_tray(win):
+    """시안: 출력 명세에 담긴 사진은 필름스트립 카드 좌상단에 '담김' 표식이 붙는다."""
+    win._goto(0)
+    win._add_current_to_export()
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert not win.strip._thumbs[0].tray_mark.isHidden()
+    assert win.strip._thumbs[1].tray_mark.isHidden()
+    assert win.btn_add_export.text().startswith("✓ 담김")
+    win._goto(1)
+    assert win.btn_add_export.text().startswith("＋ 출력에 담기")
 
-    창 배선(모달 히트맵)을 타지 않도록 탐색 바만 세워 신호를 확인한다.
+
+# ---------------------------------------------------------------- 기준 카드 머리
+def test_die_link_is_the_way_back_to_the_heatmap(app):
+    """A12: 기준 카드 머리의 SLOT·die 를 누르면 히트맵으로 간다.
+
+    창 배선(모달 히트맵)을 타지 않도록 판독대만 세워 신호를 확인한다.
     """
-    from app.ui.controls import NavBar
+    from app.ui.compare_grid import CompareGrid
 
-    nav = NavBar()
-    nav.set_die("")
-    assert not nav.lbl_die.isVisible() or nav.lbl_die.text() == ""
-    nav.set_die("wafer 03 · die (3, 3)")
-    assert nav.lbl_die.text() == "wafer 03 · die (3, 3)"
+    grid = CompareGrid()
+    link = grid.base_cell.die_link
+    grid.set_die("")
+    assert link.isHidden() or link.text() == ""
+    grid.set_die("wafer 03 · die (3, 3)")
+    assert link.text() == "wafer 03 · die (3, 3)"
     seen = []
-    nav.die_clicked.connect(lambda: seen.append(True))
-    nav.lbl_die.click()
+    grid.die_clicked.connect(lambda: seen.append(True))
+    link.click()
     for _ in range(3):
         QCoreApplication.processEvents()
     assert seen
+
+
+def test_empty_state_lists_recent_lots(win, tmp_path):
+    """빈 상태는 최근 LOT 을 목록으로 보여 준다(버튼 하나가 아니라)."""
+    lot = tmp_path / "src"
+    win._push_recent(str(lot))
+    empty = win.review_page.empty_state
+    assert empty.recent_folders()[0] == str(lot)
+    seen = []
+    empty.recent_chosen.connect(seen.append)
+    empty._rows[0].click()
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert seen == [str(lot)]

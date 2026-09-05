@@ -1,11 +1,17 @@
-"""판독 화면의 컨트롤 행과 탐색 바.
+"""판독 화면의 조건 행(위)과 하단 바(아래).
 
-원본은 좌측 240px 사이드바에 폼 아홉 줄을 세워 두고 판독 내내 시야를 차지했다. 판독 중에 조건은
-비켜나 있어야 하므로 한 줄(높이 40)로 접고, 후보가 많은 비교 layer 선택은 필요할 때만 여는
-Flyout 으로 옮겼다(03-screens §1, REVIEW-01 A14).
+시안(DefectTracker-Redesign.dc.html, docs/adr/0001)은 판독 화면을 세 띠로 나눈다.
+  위   44px  조건 행: LOT › 기준 › 비교 › 오차 … 매칭 요약 · 미매칭 점프. 브레드크럼처럼 읽힌다.
+  중간       판독대(기준 대형 + 비교 2열). compare_grid.py 가 맡는다.
+  아래 112px 하단 바: 색인·이전/다음 | 필름스트립 | ＋ 출력에 담기.
 
-클래스 이름과 공개 API(시그널·메서드·속성)는 유지한다. 배선과 테스트가 이 계약에 기대고 있고,
-레이아웃 교체와 계약 변경을 한 커밋에 섞으면 회귀 원인을 분리할 수 없다.
+원본은 좌측 240px 사이드바에 폼 아홉 줄을 세워 두고 판독 내내 시야를 차지했다. 조건은 한 줄로
+접고, 후보가 많은 비교 layer 선택은 필요할 때만 여는 Flyout 으로 둔다(REVIEW-01 A14 계승).
+
+클래스 이름과 공개 API(시그널·메서드·속성)는 되도록 유지한다. 배선과 테스트가 이 계약에 기대고
+있고, 레이아웃 교체와 계약 변경을 한 커밋에 섞으면 회귀 원인을 분리할 수 없다.
+옮긴 것: 상태 문구(set_status)는 조건 행으로, SLOT·die 링크는 기준 카드 머리(compare_grid)로,
+＋ 출력에 담기는 하단 바로 갔다.
 
 휠로 값이 바뀌지 않는 입력(NoScroll*)은 계승 필수 항목이다.
 """
@@ -47,12 +53,20 @@ from qfluentwidgets import (
 
 from app import config
 from app.ui import theme
+from app.ui.widgets import mono_font
 
 # 표시 이름 뒤에 붙는 재리뷰 깊이. 긴 것부터 봐야 "재재리뷰" 가 "재리뷰" 로 잘리지 않는다.
 _DEPTH_SUFFIXES = ("_재재리뷰", "_재리뷰")
 
-# A14 고정값: 컨트롤 행 높이 40, 항목 간 gap 6, 구분선 1px x 20.
-_ROW_H = 40
+# 시안 고정값: 조건 행 44, 좌우 여백 20, 항목 간 gap 6, 안의 컨트롤 28.
+_ROW_H = theme.HEADER_ROW_PX
+_ROW_PAD_X = 20
+_CRUMB_H = 28
+# 하단 바 112 = 위 12 + 필름스트립 86 + 아래 14.
+_BAR_H = theme.BOTTOM_BAR_PX
+_INDEX_COL_W = 72
+_ARROW_W, _ARROW_H = 30, 28
+_LOT_PLACEHOLDER = "LOT 폴더"
 
 
 def split_depth(display: str) -> tuple[str, str]:
@@ -106,13 +120,17 @@ class _LayerCheck(CheckBox):
         super().__init__(parent)
         self._layer = layer
         self.setText(label)
+        self.setFont(mono_font(13, bold=True))
 
     def text(self) -> str:  # noqa: D102  (계약: 표시 라벨이 아니라 layer 이름)
         return self._layer
 
 
-class _DepthChip(QLabel):
-    """재리뷰 깊이 칩. 순수 Qt 위젯이라 setStyleSheet 를 직접 쓴다."""
+class DepthChip(QLabel):
+    """재리뷰 깊이 칩. 순수 Qt 위젯이라 setStyleSheet 를 직접 쓴다.
+
+    비교 layer Flyout 의 행과 판독대 비교 카드 머리가 같은 칩을 쓴다.
+    """
 
     def __init__(self, text: str, parent: Optional[QWidget] = None):
         super().__init__(text, parent)
@@ -125,14 +143,16 @@ class _DepthChip(QLabel):
     def _apply_tokens(self) -> None:
         tok = theme.fluent_tokens(isDarkTheme())
         self.setStyleSheet(
-            f"QLabel {{ color: {tok['txt2']}; background: {tok['subtle']};"
-            f" border: 1px solid {tok['ctrlBd']}; border-radius: {theme.RADIUS['chip']}px;"
-            f" padding: 0 7px; font-size: {theme.fluent_font_px('captionSm')}px; }}"
+            f"QLabel {{ color: {theme.flatten(tok['txt2'], tok['card'])};"
+            f" background: {theme.flatten(tok['segTrack'], tok['card'])};"
+            f" border: 1px solid {theme.flatten(tok['cardBorder'], tok['card'])};"
+            f" border-radius: {theme.RADIUS['chip']}px;"
+            f" padding: 0 7px; font-size: {theme.fluent_font_px('label'):.0f}px; }}"
         )
 
 
 def _divider(parent: Optional[QWidget] = None) -> QFrame:
-    """컨트롤 행의 1px 세로 구분선(A14: 높이 20, 좌우 마진 4)."""
+    """조건 행의 1px 세로 구분선(높이 20, 좌우 마진 6)."""
     line = QFrame(parent)
     line.setObjectName("ctrlDivider")
     line.setFixedSize(1, 20)
@@ -140,11 +160,53 @@ def _divider(parent: Optional[QWidget] = None) -> QFrame:
 
     def paint() -> None:
         tok = theme.fluent_tokens(isDarkTheme())
-        line.setStyleSheet(f"QFrame#ctrlDivider {{ background: {tok['divider']}; border: none; }}")
+        line.setStyleSheet(
+            f"QFrame#ctrlDivider {{ background: {theme.flatten(tok['popBorder'], tok['layer'])};"
+            " border: none; }"
+        )
 
     paint()
     qconfig.themeChanged.connect(paint)
     return line
+
+
+def _chevron(parent: Optional[QWidget] = None) -> CaptionLabel:
+    """브레드크럼 사이의 › 구분자. txtDeco 는 구분자 전용이라 여기서만 쓴다."""
+    label = CaptionLabel("›", parent)
+    label.setObjectName("crumbSeparator")
+
+    def paint() -> None:
+        tok = theme.fluent_tokens(isDarkTheme())
+        rule = f"CaptionLabel#crumbSeparator {{ color: {tok['txtDeco']}; }}"  # 구분자
+        setCustomStyleSheet(label, rule, rule)
+
+    paint()
+    qconfig.themeChanged.connect(paint)
+    return label
+
+
+def _crumb_caption(text: str, parent: Optional[QWidget] = None) -> CaptionLabel:
+    """브레드크럼 항목 앞의 작은 이름표(기준 / 비교 / 오차)."""
+    label = CaptionLabel(text, parent)
+    label.setObjectName("dim")
+    return label
+
+
+def _tint_transparent_button(button: PushButton, color_key: str, bold: bool) -> None:
+    """투명 버튼의 글자색을 토큰으로 칠한다(LOT 이름은 accentText, 그 외는 본문색)."""
+
+    def paint() -> None:
+        tok_l, tok_d = theme.fluent_tokens(False), theme.fluent_tokens(True)
+        weight = "600" if bold else "400"
+        rule = "TransparentPushButton {{ color: {0}; font-weight: {1}; }}"
+        setCustomStyleSheet(
+            button,
+            rule.format(theme.flatten(tok_l[color_key], tok_l["layer"]), weight),
+            rule.format(theme.flatten(tok_d[color_key], tok_d["layer"]), weight),
+        )
+
+    paint()
+    qconfig.themeChanged.connect(paint)
 
 
 class CompareLayerView(FlyoutViewBase):
@@ -229,8 +291,8 @@ class CompareLayerView(FlyoutViewBase):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    def add_row(self, check: _LayerCheck, depth: str) -> QWidget:
-        """canonical 체크박스 한 줄 + 깊이 칩."""
+    def add_row(self, check: _LayerCheck, depth: str, count: Optional[int] = None) -> QWidget:
+        """canonical 체크박스 한 줄 + 깊이 칩 + (있으면) 사진 장수."""
         row = QWidget(self.host)
         lay = QHBoxLayout(row)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -238,8 +300,13 @@ class CompareLayerView(FlyoutViewBase):
         check.setParent(row)
         lay.addWidget(check)
         if depth:
-            lay.addWidget(_DepthChip(depth, row))
+            lay.addWidget(DepthChip(depth, row))
         lay.addStretch(1)
+        if count is not None:
+            n = CaptionLabel(f"{count}장", row)
+            n.setObjectName("dim")
+            n.setFont(mono_font(11))
+            lay.addWidget(n)
         self.rows.insertWidget(self.rows.count() - 1, row)
         return row
 
@@ -260,10 +327,10 @@ def _divider_h(parent: Optional[QWidget] = None) -> QFrame:
 
 
 class SideBar(QFrame):
-    """판독 화면 상단 컨트롤 행.
+    """판독 화면 위 조건 행(44px). 이름은 원본 그대로다(배선·테스트 계약).
 
-    이름은 원본 그대로다(배선·테스트 계약). 세로 사이드바가 아니라 높이 40 의 한 줄이며
-    좌측은 조건, 우측은 행동이다(A14).
+    왼쪽은 브레드크럼 LOT › 기준 › 비교 › 오차, 오른쪽은 매칭 요약과 미매칭 점프. 아래에 1px
+    경계선이 있어 판독대와 나뉜다.
     """
 
     open_folder = Signal()
@@ -283,39 +350,61 @@ class SideBar(QFrame):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._compare_checks: list[_LayerCheck] = []
         self._rereview_set: set = set()  # '재리뷰' 버튼이 선택할 선호 재리뷰 집합
+        self._layer_counts: dict[str, int] = {}
         self._flyout: Optional[Flyout] = None
         self._build()
+        self._apply_tokens()
+        qconfig.themeChanged.connect(self._apply_tokens)
 
     def _build(self) -> None:
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        row.setContentsMargins(_ROW_PAD_X, 0, _ROW_PAD_X, 0)
         row.setSpacing(theme.SPACING["gapXs"])
-        height = theme.fluent_height("control")
 
-        self.btn_open = PushButton(FluentIcon.FOLDER, "LOT 폴더", self)
-        self.btn_open.setFixedHeight(height)
+        # LOT 이름 자체가 버튼이다. 누르면 다른 LOT 을 고른다(우클릭: 최근 폴더).
+        self.btn_open = TransparentPushButton(FluentIcon.FOLDER, _LOT_PLACEHOLDER, self)
+        self.btn_open.setFixedHeight(_CRUMB_H)
         self.btn_open.setToolTip("리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O)")
         self.btn_open.clicked.connect(self.open_folder)
+        _tint_transparent_button(self.btn_open, "accentText", bold=True)
         row.addWidget(self.btn_open)
 
-        self.lbl_lot = BodyLabel("선택된 LOT 없음", self)
-        self.lbl_lot.setObjectName("lotName")
-        row.addWidget(self.lbl_lot)
+        row.addWidget(_chevron(self))
 
-        row.addSpacing(4)
-        row.addWidget(_divider(self))
-        row.addSpacing(4)
-
-        row.addWidget(CaptionLabel("기준", self))
+        row.addWidget(_crumb_caption("기준", self))
         self.cmb_base = NoScrollComboBox(self)
-        self.cmb_base.setFixedHeight(height)
-        self.cmb_base.setMinimumWidth(132)
-        self.cmb_base.setPlaceholderText("기준 layer 선택")
+        self.cmb_base.setFixedHeight(_CRUMB_H)
+        self.cmb_base.setMinimumWidth(110)
+        self.cmb_base.setPlaceholderText("layer 선택")
         self.cmb_base.setToolTip("이 layer 의 defect 을 기준으로 다른 layer 에서 같은 위치를 찾습니다.")
         self.cmb_base.currentTextChanged.connect(self._on_base_changed)
         row.addWidget(self.cmb_base)
 
-        row.addWidget(CaptionLabel("오차", self))
+        row.addWidget(_chevron(self))
+
+        row.addWidget(_crumb_caption("비교", self))
+        self.compare_view = CompareLayerView(self)
+        # Flyout 이 가져가기 전까지는 조건 행 위에 겹쳐 그려진다. 숨겨 둔다.
+        self.compare_view.hide()
+        self.compare_view.btn_rereview.clicked.connect(self._set_rereview_compares)
+        self.compare_view.btn_all.clicked.connect(lambda: self._set_all_compares(True))
+        self.compare_view.btn_none.clicked.connect(lambda: self._set_all_compares(False))
+        self.compare_view.spn_cluster.valueChanged.connect(self.cluster_radius_changed)
+        # 호환 별칭: 배선과 테스트가 조건 행에서 직접 찾는다.
+        self.btn_rereview = self.compare_view.btn_rereview
+        self.btn_all = self.compare_view.btn_all
+        self.btn_none = self.compare_view.btn_none
+        self.spn_cluster = self.compare_view.spn_cluster
+
+        self.btn_compare = TransparentPushButton("layer", self)
+        self.btn_compare.setFixedHeight(_CRUMB_H)
+        self.btn_compare.clicked.connect(self._open_compare_flyout)
+        _tint_transparent_button(self.btn_compare, "txt1", bold=True)
+        row.addWidget(self.btn_compare)
+
+        row.addWidget(_chevron(self))
+
+        row.addWidget(_crumb_caption("오차", self))
         self.spn_tol = NoScrollDoubleSpinBox(self)
         self.spn_tol.setObjectName("tol")
         # ↑↓ 버튼 제거(깔끔한 입력). Fluent 는 자체 심볼을 그리므로 둘 다 꺼야 한다.
@@ -326,7 +415,8 @@ class SideBar(QFrame):
         self.spn_tol.setValue(config.DEFAULT_TOLERANCE)
         self.spn_tol.setSingleStep(10.0)
         self.spn_tol.setSuffix(" µm")
-        self.spn_tol.setFixedSize(120, height)
+        self.spn_tol.setFixedSize(100, _CRUMB_H)
+        self.spn_tol.setFont(mono_font(13, bold=True))
         self.spn_tol.setToolTip(
             "기준과 비교 defect 의 die 내 local 좌표 거리(µm) 허용값.\n"
             "작을수록 엄격, 클수록 느슨하게 매칭됩니다."
@@ -334,50 +424,44 @@ class SideBar(QFrame):
         self.spn_tol.valueChanged.connect(self.tolerance_changed)
         row.addWidget(self.spn_tol)
 
-        self.compare_view = CompareLayerView(self)
-        # Flyout 이 가져가기 전까지는 컨트롤 행 위에 겹쳐 그려진다. 숨겨 둔다.
-        self.compare_view.hide()
-        self.compare_view.btn_rereview.clicked.connect(self._set_rereview_compares)
-        self.compare_view.btn_all.clicked.connect(lambda: self._set_all_compares(True))
-        self.compare_view.btn_none.clicked.connect(lambda: self._set_all_compares(False))
-        self.compare_view.spn_cluster.valueChanged.connect(self.cluster_radius_changed)
-        # 호환 별칭: 배선과 테스트가 사이드바에서 직접 찾는다.
-        self.btn_rereview = self.compare_view.btn_rereview
-        self.btn_all = self.compare_view.btn_all
-        self.btn_none = self.compare_view.btn_none
-        self.spn_cluster = self.compare_view.spn_cluster
-
-        self.btn_compare = PushButton("비교 layer", self)
-        self.btn_compare.setFixedHeight(height)
-        self.btn_compare.clicked.connect(self._open_compare_flyout)
-        row.addWidget(self.btn_compare)
-
-        self.lbl_match = CaptionLabel("", self)
-        self.lbl_match.setObjectName("dim")
-        row.addWidget(self.lbl_match)
-
         row.addStretch(1)
 
-        self.btn_nomatch = PushButton("미매칭 점프", self)
-        self.btn_nomatch.setFixedHeight(height)
+        # 오른쪽: 보기 수 · 상태 · 매칭 요약(등폭) | 미매칭 점프
+        self.lbl_view = CaptionLabel("", self)
+        self.lbl_view.setObjectName("dim")
+        row.addWidget(self.lbl_view)
+        self.lbl_status = CaptionLabel("", self)
+        self.lbl_status.setObjectName("dim")
+        row.addWidget(self.lbl_status)
+        self.lbl_match = CaptionLabel("", self)
+        self.lbl_match.setObjectName("dim")
+        self.lbl_match.setFont(mono_font(12))
+        row.addWidget(self.lbl_match)
+
+        row.addSpacing(6)
+        row.addWidget(_divider(self))
+        row.addSpacing(6)
+
+        self.btn_nomatch = TransparentPushButton("미매칭 점프", self)
+        self.btn_nomatch.setFixedHeight(_CRUMB_H)
         self.btn_nomatch.setToolTip("다음 미매칭 기준 사진으로 점프 (U)")
         self.btn_nomatch.clicked.connect(self.nomatch_requested)
         row.addWidget(self.btn_nomatch)
 
-        self.btn_add_export = PrimaryPushButton("＋ 출력에 담기", self)
-        self.btn_add_export.setFixedHeight(height)
-        self.btn_add_export.setToolTip(
-            "현재 기준 사진을 출력 명세에 담습니다. (A)\n담은 것들은 Excel 출력 시 함께 나옵니다."
-        )
-        self.btn_add_export.setEnabled(False)
-        row.addWidget(self.btn_add_export)
-
         self._update_available = False
-        # 업데이트/설정은 nav 로 옮겼다. 옛 이름을 참조하는 코드가 남아도 죽지 않게 둔다.
+        # 업데이트/설정/Excel 출력은 nav 로, ＋ 출력에 담기는 하단 바(NavBar)로 옮겼다.
+        # 옛 이름을 참조하는 코드가 남아도 죽지 않게 둔다.
         self.btn_update = None
         self.btn_settings = None
         self.btn_export = None
         self._refresh_compare_button()
+
+    def _apply_tokens(self, *_args) -> None:
+        tok = theme.fluent_tokens(isDarkTheme())
+        self.setStyleSheet(
+            f"QFrame#controlRow {{ background: transparent;"
+            f" border-bottom: 1px solid {theme.flatten(tok['divider'], tok['layer'])}; }}"
+        )
 
     # ---- Flyout -------------------------------------------------------
     def _open_compare_flyout(self) -> None:
@@ -397,7 +481,7 @@ class SideBar(QFrame):
         """버튼에 현재 선택 수를 적는다. Flyout 을 열지 않고도 몇 개인지 보이게."""
         total = len(self._compare_checks)
         chosen = len(self.compare_layers())
-        self.btn_compare.setText(f"비교 layer {chosen}" if total else "비교 layer")
+        self.btn_compare.setText(f"{chosen} layer" if total else "layer")
         self.btn_compare.setToolTip(
             f"비교 layer 선택 - 후보 {total}개, 선택 {chosen}개" if total
             else "비교 layer 선택 - LOT 을 열면 후보가 채워집니다"
@@ -406,8 +490,11 @@ class SideBar(QFrame):
 
     # ---- API ----------------------------------------------------------
     def set_lot_name(self, name: str) -> None:
-        self.lbl_lot.setText(name)
-        self.lbl_lot.setToolTip(f"LOT: {name}")
+        self.btn_open.setText(name or _LOT_PLACEHOLDER)
+        self.btn_open.setToolTip(
+            f"LOT: {name}\n누르면 다른 LOT 폴더를 고릅니다 (Ctrl+O) · 우클릭: 최근 폴더"
+            if name else "리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
+        )
 
     def set_layers(
         self,
@@ -415,21 +502,24 @@ class SideBar(QFrame):
         base: Optional[str] = None,
         compares: Optional[list[str]] = None,
         rereview: Optional[set] = None,
+        counts: Optional[dict[str, int]] = None,
     ) -> None:
         """layer 목록으로 기준 콤보 + 비교 체크박스를 채운다.
 
         기본값 설정 중에는 시그널을 차단하여 재계산이 0회가 되도록 한다(호출 측에서 1회만 재구성).
         base 가 None 이면 기준은 **빈칸**으로 두어 사용자가 직접 고르게 한다(자동 선택 안 함).
         compares 가 None 이면 비교 기본값은 rereview(선호 재리뷰 집합)만 체크한다.
+        counts 는 layer 별 사진 장수(있으면 Flyout 행 끝에 적는다).
         """
         self._rereview_set = set(rereview) if rereview else set()
+        self._layer_counts = dict(counts or {})
 
         self.cmb_base.blockSignals(True)
         self.cmb_base.clear()
         self.cmb_base.addItems(layers)
-        self.cmb_base.setPlaceholderText("기준 layer 선택")
+        self.cmb_base.setPlaceholderText("layer 선택")
 
-        # 비교 체크박스 재구성: canonical 한 줄 + 깊이 칩
+        # 비교 체크박스 재구성: canonical 한 줄 + 깊이 칩 + 장수
         self.compare_view.clear_rows()
         self._compare_checks.clear()
         for lyr in layers:
@@ -437,7 +527,7 @@ class SideBar(QFrame):
             cb = _LayerCheck(lyr, canonical)
             cb.blockSignals(True)
             cb.stateChanged.connect(self._on_compare_toggled)
-            self.compare_view.add_row(cb, depth)
+            self.compare_view.add_row(cb, depth, self._layer_counts.get(lyr))
             self._compare_checks.append(cb)
 
         # 기준 선택: base 가 주어지면 적용, 없으면 빈칸(-1)으로 두어 사용자 선택을 유도.
@@ -476,6 +566,13 @@ class SideBar(QFrame):
 
     def set_match_summary(self, text: str) -> None:
         self.lbl_match.setText(text)
+
+    def set_status(self, text: str) -> None:
+        """스캔·업데이트 진행 문구. 옛 탐색 바에서 옮겨 왔다."""
+        self.lbl_status.setText(text)
+
+    def set_status_tooltip(self, text: str) -> None:
+        self.lbl_status.setToolTip(text)
 
     def set_tolerance(self, value: float) -> None:
         self.spn_tol.blockSignals(True)
@@ -563,79 +660,68 @@ class SideBar(QFrame):
 
 
 class NavBar(QFrame):
-    """판독대 아래 탐색 바: 이전 / index·전체 / SLOT·die / 힌트 / 다음.
+    """판독대 아래 하단 바(112px): 색인 + 이전/다음 | 필름스트립 | ＋ 출력에 담기.
 
-    SLOT·die 는 눌리는 링크다. 히트맵에서 die 로 오갈 때 지금 자리를 잃지 않게 하는
-    되돌아가기 지점이다(A12).
+    이름은 원본 그대로다(배선·테스트 계약). 필름스트립은 페이지가 `add_widget` 으로 끼운다.
+    SLOT·die 링크는 기준 카드 머리로(compare_grid), 상태 문구는 조건 행으로 옮겼다.
     """
 
     prev_clicked = Signal()
     next_clicked = Signal()
-    die_clicked = Signal()
-
-    _HINT = "사진 클릭 = 원본 뷰어 · 휠 = 필름스트립 좌우"
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setObjectName("navBar")
-        self.setFixedHeight(44)
+        self.setObjectName("bottomBar")
+        self.setFixedHeight(_BAR_H)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 6, 0, 6)
-        lay.setSpacing(theme.SPACING["gapXs"])
+        lay.setContentsMargins(_ROW_PAD_X, 12, _ROW_PAD_X, 14)
+        lay.setSpacing(theme.SPACING["gapM"])
 
-        size = theme.fluent_height("control")
-        self.btn_prev = PushButton("‹", self)
-        self.btn_prev.setFixedSize(size, size)
+        # 색인 열: 위 "5 / 24", 아래 ‹ ›
+        column = QWidget(self)
+        column.setFixedWidth(_INDEX_COL_W)
+        col = QVBoxLayout(column)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+        col.setAlignment(Qt.AlignCenter)
+        self.lbl_index = StrongBodyLabel("0 / 0", column)
+        self.lbl_index.setFont(mono_font(15, bold=True))
+        self.lbl_index.setAlignment(Qt.AlignCenter)
+        col.addWidget(self.lbl_index)
+        arrows = QHBoxLayout()
+        arrows.setContentsMargins(0, 0, 0, 0)
+        arrows.setSpacing(4)
+        arrows.setAlignment(Qt.AlignCenter)
+        self.btn_prev = PushButton("‹", column)
+        self.btn_prev.setFixedSize(_ARROW_W, _ARROW_H)
         self.btn_prev.setToolTip("이전 기준 사진 (← / PageUp)")
         self.btn_prev.clicked.connect(self.prev_clicked)
-        self.btn_next = PushButton("›", self)
-        self.btn_next.setFixedSize(size, size)
+        self.btn_next = PushButton("›", column)
+        self.btn_next.setFixedSize(_ARROW_W, _ARROW_H)
         self.btn_next.setToolTip("다음 기준 사진 (→ / PageDown)")
         self.btn_next.clicked.connect(self.next_clicked)
+        arrows.addWidget(self.btn_prev)
+        arrows.addWidget(self.btn_next)
+        col.addLayout(arrows)
+        lay.addWidget(column, 0)
 
-        self.lbl_index = StrongBodyLabel("0 / 0", self)
-        self.lbl_index.setMinimumWidth(72)
-
-        self.lbl_die = TransparentPushButton("", self)
-        self.lbl_die.setFixedHeight(size)
-        self.lbl_die.setToolTip("이 defect 의 wafer 와 die. 눌러 히트맵에서 위치를 봅니다.")
-        self.lbl_die.clicked.connect(self.die_clicked)
-        self.lbl_die.hide()  # 내용이 있을 때만 보인다
-
-        self.lbl_status = CaptionLabel("", self)
-        self.lbl_status.setObjectName("dim")
-
-        self.lbl_hint = CaptionLabel(self._HINT, self)
-        self.lbl_hint.setObjectName("dim")
-
-        lay.addWidget(self.btn_prev)
-        lay.addWidget(self.btn_next)
-        lay.addWidget(self.lbl_index)
-        lay.addWidget(_divider(self))
-        lay.addWidget(self.lbl_die)
-        lay.addWidget(self.lbl_status)
-        lay.addStretch(1)
-        lay.addWidget(self.lbl_hint)
+        # 주요 액션. 강조는 한 화면에 하나(02 §4).
+        self.btn_add_export = PrimaryPushButton("＋ 출력에 담기", self)
+        self.btn_add_export.setFixedHeight(theme.fluent_height("primary"))
+        self.btn_add_export.setToolTip(
+            "현재 기준 사진을 출력 명세에 담습니다. (A)\n담은 것들은 Excel 출력 시 함께 나옵니다."
+        )
+        self.btn_add_export.setEnabled(False)
+        lay.addWidget(self.btn_add_export, 0)
         self._lay = lay
         self.set_enabled(False)
 
-    def add_widget(self, widget: QWidget) -> None:
-        """탐색 바 오른쪽(힌트 앞)에 보조 위젯을 추가한다."""
-        self._lay.insertWidget(self._lay.count() - 1, widget)
+    def add_widget(self, widget: QWidget, stretch: int = 1) -> None:
+        """색인 열과 담기 버튼 사이(필름스트립 자리)에 위젯을 끼운다."""
+        self._lay.insertWidget(self._lay.count() - 1, widget, stretch)
 
     def set_index(self, current: int, total: int) -> None:
         self.lbl_index.setText(f"{current} / {total}")
-
-    def set_status(self, text: str) -> None:
-        self.lbl_status.setText(text)
-
-    def set_status_tooltip(self, text: str) -> None:
-        self.lbl_status.setToolTip(text)
-
-    def set_die(self, text: str) -> None:
-        """SLOT·die 표기. 빈 문자열이면 구분선처럼 사라진다."""
-        self.lbl_die.setText(text)
-        self.lbl_die.setVisible(bool(text))
 
     def set_enabled(self, enabled: bool) -> None:
         self.btn_prev.setEnabled(enabled)

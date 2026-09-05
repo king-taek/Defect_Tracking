@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QVariantAnimation, Qt, Signal
-from PySide6.QtGui import QPainter, QImage, QPixmap
+from PySide6.QtGui import QFont, QPainter, QImage, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QLabel,
     QVBoxLayout,
     QWidget,
@@ -22,6 +23,18 @@ from qfluentwidgets import isDarkTheme, qconfig
 
 from app.ui import theme
 from app.ui.image_loader import ImageLoader
+
+
+def mono_font(px: float, *, bold: bool = False) -> QFont:
+    """수치용 등폭 글꼴(02 §2: Δ µm · 개수 · 좌표는 예외 없이 등폭).
+
+    스타일시트의 font-size 는 QFont 에 남지 않아 회귀 테스트가 크기를 못 읽는다. QFont 로 준다.
+    """
+    f = QFont()
+    f.setFamilies(theme.MONO_FAMILIES)
+    f.setPixelSize(max(1, int(round(px))))
+    f.setWeight(QFont.DemiBold if bold else QFont.Normal)
+    return f
 
 
 class FadeImageLabel(QLabel):
@@ -150,6 +163,60 @@ class FadeImageLabel(QLabel):
         self._prev_pixmap = None
 
 
+class PageHeader(QFrame):
+    """페이지 머리 행(44px). 제목 15/600 과 그 화면의 조건·행동을 한 줄에 놓고 아래 1px 선을 긋는다.
+
+    시안(docs/adr/0001)은 26px 제목 + 부제 두 줄 대신 이 한 줄을 쓴다. 지도·목록이 그만큼
+    높이를 더 가져간다. 좌우 여백 20 은 행이 스스로 갖는다(경계선이 페이지 끝까지 닿도록).
+    """
+
+    HEIGHT = theme.HEADER_ROW_PX
+    PAD_X = 20
+
+    def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("pageHeader")
+        self.setFixedHeight(self.HEIGHT)
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(self.PAD_X, 0, self.PAD_X, 0)
+        self._lay.setSpacing(theme.SPACING["gapS"])
+        self.title = QLabel(title, self)
+        self.title.setObjectName("pageTitle")
+        self._lay.addWidget(self.title, 0)
+        self._apply_tokens()
+        qconfig.themeChanged.connect(self._apply_tokens)
+
+    def add_widget(self, widget: QWidget, stretch: int = 0) -> None:
+        self._lay.addWidget(widget, stretch)
+
+    def add_stretch(self) -> None:
+        self._lay.addStretch(1)
+
+    def add_spacing(self, px: int) -> None:
+        self._lay.addSpacing(px)
+
+    def add_divider(self) -> None:
+        """1px x 20 세로 구분선."""
+        line = QFrame(self)
+        line.setObjectName("headerDivider")
+        line.setFixedSize(1, 20)
+        self._lay.addWidget(line, 0)
+
+    def _apply_tokens(self, *_args) -> None:
+        t = theme.fluent_tokens(isDarkTheme())
+        layer = t["layer"]
+        divider = theme.flatten(t["divider"], layer)
+        self.setStyleSheet(
+            f"QFrame#pageHeader {{ background: transparent; border-bottom: 1px solid {divider}; }}"
+            f"QFrame#headerDivider {{ background: {theme.flatten(t['popBorder'], layer)};"
+            " border: none; }"
+        )
+        self.title.setStyleSheet(
+            f"color: {theme.flatten(t['txt1'], layer)}; font-size: 15px; font-weight: 600;"
+            " background: transparent;"
+        )
+
+
 class ClickableThumb(QFrame):
     """필름스트립 카드 한 장. 클릭하면 그 사진이 기준이 된다.
 
@@ -159,10 +226,11 @@ class ClickableThumb(QFrame):
 
     clicked = Signal(int)
 
-    CARD_W = 104
+    # 시안: 카드 96x80, 사진 86x50, 캡션 등폭 11px.
+    CARD_W = 96
     CARD_H = 80
-    IMG_W = 94
-    IMG_H = 52
+    IMG_W = 86
+    IMG_H = 50
 
     def __init__(self, index: int, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -180,7 +248,7 @@ class ClickableThumb(QFrame):
     def _build(self) -> None:
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(2)
+        lay.setSpacing(3)
         self.img = QLabel(self)
         self.img.setAlignment(Qt.AlignCenter)
         self.img.setFixedSize(self.IMG_W, self.IMG_H)
@@ -192,10 +260,20 @@ class ClickableThumb(QFrame):
         self.dot.setFixedSize(8, 8)
         self.dot.move(self.IMG_W - 12, 4)
         self.dot.hide()
+        # 좌상단 "담김": 이 사진이 출력 명세에 들어 있다는 표식
+        self.tray_mark = QLabel("담김", self.img)
+        self.tray_mark.setFixedHeight(14)
+        self.tray_mark.move(4, 3)
+        self.tray_mark.hide()
         self.caption = QLabel("", self)
         self.caption.setAlignment(Qt.AlignCenter)
+        self.caption.setFont(mono_font(11))
         lay.addWidget(self.img)
         lay.addWidget(self.caption)
+
+    def set_in_tray(self, in_tray: bool) -> None:
+        """출력 명세에 담긴 사진이면 좌상단에 '담김' 표식을 보인다."""
+        self.tray_mark.setVisible(bool(in_tray))
 
     # ---- 사진 --------------------------------------------------------
     def set_source(self, path: Optional[str | Path]) -> None:
@@ -254,7 +332,7 @@ class ClickableThumb(QFrame):
         radius = 6
         if self._selected:
             border = t["accentFill"]
-            background = t["accentTint"]
+            background = theme.flatten(t["thumbSel"], t["layer"])
         else:
             border = theme.flatten(t["cardBorder"], t["card"])
             background = t["card"]
@@ -262,11 +340,14 @@ class ClickableThumb(QFrame):
         self.setStyleSheet(
             f"QFrame#thumb {{ background: {background}; border: 1px solid {border};"
             f" border-radius: {radius}px; }}"
-            f"QFrame#thumb:hover {{ border-color: {hover}; }}"
+            f"QFrame#thumb:hover {{ border-color: {hover}; background: {t['cardHover']}; }}"
         )
         self.caption.setStyleSheet(
-            f"color: {theme.flatten(t['txt2'], t['card'])};"
-            f" font-size: {theme.fluent_font_px('captionSm'):.0f}px; background: transparent;"
+            f"color: {theme.flatten(t['txt2'], t['card'])}; background: transparent;"
+        )
+        self.tray_mark.setStyleSheet(
+            f"color: {t['onAccent']}; background: {t['accentFill']}; border-radius: 3px;"
+            " padding: 0 4px; font-size: 10px;"
         )
 
     def mousePressEvent(self, event):  # noqa: N802

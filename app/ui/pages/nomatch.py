@@ -40,6 +40,7 @@ from qfluentwidgets import (
 from app.models import NoMatchReason
 from app.ui import theme
 from app.ui.compare_grid import CompareGrid
+from app.ui.widgets import PageHeader
 
 _PAGE_TITLE = "미매칭"
 _PAGE_SUB = (
@@ -364,31 +365,23 @@ class NoMatchPage(QWidget):
     # ------------------------------------------------------------ 구성
     def _build(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(
-            theme.SPACING["pageH"], theme.SPACING["pageV"], theme.SPACING["pageH"], 0
-        )
-        outer.setSpacing(theme.SPACING["gapM"])
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        head = QVBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(2)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.SPACING["gapS"])
-        row.addWidget(TitleLabel(_PAGE_TITLE, self))
-        row.addStretch(1)
-        self.lbl_count = CaptionLabel("", self)
+        # 머리 행 44(시안): 제목 · 설명 … 총계 · 사유 필터. 목록이 그만큼 높이를 더 가진다.
+        head = PageHeader(_PAGE_TITLE, self)
+        self.lbl_sub = CaptionLabel(_PAGE_SUB, head)
+        self.lbl_sub.setObjectName("dim")
+        head.add_widget(self.lbl_sub)
+        head.add_stretch()
+        self.lbl_count = CaptionLabel("", head)
         self.lbl_count.setObjectName("dim")
         self.lbl_count.setFont(_font(_ROW_PX, mono=True))
-        row.addWidget(self.lbl_count)
-        head.addLayout(row)
-        self.lbl_sub = CaptionLabel(_PAGE_SUB, self)
-        self.lbl_sub.setObjectName("dim")
-        head.addWidget(self.lbl_sub)
-        outer.addLayout(head)
+        head.add_widget(self.lbl_count)
+        head.add_spacing(theme.SPACING["gapXs"])
 
         # 사유 필터. 원본 ComboBox 는 값이 접혀 있어 지금 무엇으로 걸러진 상태인지 안 보였다.
-        self.filter = SegmentedWidget(self)
+        self.filter = SegmentedWidget(head)
         self.filter.addItem("all", "전체", lambda: self._set_filter("all"))
         for reason in _PRIORITY:
             self.filter.addItem(
@@ -398,7 +391,8 @@ class NoMatchPage(QWidget):
             )
         self.filter.setCurrentItem("all")
         self._filter = "all"
-        outer.addWidget(self.filter, 0, Qt.AlignLeft)
+        head.add_widget(self.filter)
+        outer.addWidget(head)
 
         self.scroll = SmoothScrollArea(self)
         self.scroll.setWidgetResizable(True)
@@ -409,7 +403,8 @@ class NoMatchPage(QWidget):
         host = QWidget(self.scroll)
         self._grid = QGridLayout(host)
         # 오른쪽 여백은 겹쳐 그려지는 스크롤바 자리. 없으면 마지막 열이 가려진다.
-        self._grid.setContentsMargins(0, 0, theme.SPACING["gapM"], theme.SPACING["pageV"])
+        pad = PageHeader.PAD_X
+        self._grid.setContentsMargins(pad, theme.SPACING["gapL"], pad, theme.SPACING["gapL"])
         self._grid.setHorizontalSpacing(theme.SPACING["gapM"])
         self._grid.setVerticalSpacing(theme.SPACING["gapM"])
         self._grid.setAlignment(Qt.AlignTop)

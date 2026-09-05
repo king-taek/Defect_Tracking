@@ -18,8 +18,8 @@ from PySide6.QtWidgets import QHBoxLayout, QScrollArea, QWidget
 
 from app.ui.widgets import ClickableThumb
 
-# 프로토타입 필름스트립 96 에서 아래 여백 12 를 뺀 값(카드 80 + 상하 여백 4).
-_STRIP_H = 84
+# 시안 하단 바(112) 안의 필름스트립 86 - 카드 80 + 상하 여백 2 + 가로 스크롤바 자리 없음.
+_STRIP_H = 86
 # 화면 밖으로 이만큼까지는 미리 읽어 둔다. 스크롤을 시작하자마자 빈 칸이 보이지 않게.
 _PRELOAD_PX = 320
 
@@ -46,7 +46,7 @@ class ThumbnailStrip(QScrollArea):
         self._container.setStyleSheet("#stripHost { background: transparent; }")
         self._layout = QHBoxLayout(self._container)
         self._layout.setContentsMargins(0, 2, 0, 2)
-        self._layout.setSpacing(8)
+        self._layout.setSpacing(6)
         self._layout.addStretch()
         self.setWidget(self._container)
         self._thumbs: list[ClickableThumb] = []
@@ -140,6 +140,12 @@ class ThumbnailStrip(QScrollArea):
         """각 썸네일에 매칭 상태 점을 표시(matched/none)."""
         for i, t in enumerate(self._thumbs):
             t.set_status(statuses[i] if i < len(statuses) else "matched")
+
+    def set_tray_marks(self, indices) -> None:
+        """출력 명세에 담긴 기준(index 집합)에 '담김' 표식을 붙인다."""
+        chosen = set(indices or ())
+        for i, t in enumerate(self._thumbs):
+            t.set_in_tray(i in chosen)
 
     def set_visible_set(self, indices: Optional[list[int]]) -> None:
         """주어진 인덱스의 썸네일만 보이고 나머지는 숨긴다(후보 제외 반영).

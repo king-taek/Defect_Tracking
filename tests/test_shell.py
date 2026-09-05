@@ -66,8 +66,10 @@ def test_starts_on_the_empty_state(win):
 
 def test_empty_state_offers_open_and_recent(win):
     empty = win.review_page.empty_state
-    assert empty.btn_open.text() == "LOT 폴더 선택"
-    assert empty.btn_recent.text() == "최근 폴더"
+    assert empty.btn_open.text() == "LOT 폴더 열기"
+    # 최근 LOT 은 버튼이 아니라 목록이다(시안). 없으면 머리글도 숨긴다.
+    assert empty.recent_folders() == []
+    assert empty.recent_head.isHidden()
 
 
 def test_review_widget_aliases_survive_the_shell_move(win):
