@@ -45,7 +45,6 @@ from qfluentwidgets import (
     SettingCardGroup,
     SmoothScrollArea,
     SwitchButton,
-    SwitchSettingCard,
     Theme,
     TitleLabel,
     isDarkTheme,
@@ -69,7 +68,7 @@ GROUP_PATHS = "경로 · 데이터"
 GROUP_DISPLAY = "표시 · 동작"
 CARD_ORDER: list[tuple[str, list[str]]] = [
     (GROUP_PATHS, ["작업공간 폴더", "출력 폴더", "디바이스 DB", "제품 프로파일"]),
-    (GROUP_DISPLAY, ["테마", "글자 크기", "자동 업데이트", "개발자 모드"]),
+    (GROUP_DISPLAY, ["테마", "글자 크기", "업데이트", "개발자 모드"]),
 ]
 
 # 원본 보호 안내. 원본(LOT) 폴더 안에는 어떤 것도 쓰지 않는다는 절대 규칙의 사용자 문구다.
@@ -278,19 +277,6 @@ class _SegmentSettingCard(SettingCard):
         return self.segment.currentRouteKey()
 
 
-class _KoSwitchSettingCard(SwitchSettingCard):
-    """스위치 표기를 한글로. 기본 구현이 On/Off 를 강제로 다시 쓴다."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.switchButton.setOnText("켜짐")
-        self.switchButton.setOffText("꺼짐")
-
-    def setValue(self, isChecked: bool) -> None:  # noqa: N802 - 상위 클래스 이름
-        super().setValue(isChecked)
-        self.switchButton.setText("켜짐" if isChecked else "꺼짐")
-
-
 class _DevExpandCard(ExpandGroupSettingCard):
     """개발자 모드 카드. 펼침 250ms / 접힘 150ms 로 토큰에 맞춘다(02 §3).
 
@@ -396,14 +382,18 @@ class SettingsPage(QWidget):
 
         self.card_workspace = _PathSettingCard(
             FluentIcon.FOLDER, "작업공간 폴더",
-            "결과 · 캐시 · 로그를 저장할 폴더", self._settings.workspace, group,
+            "결과 · 캐시 · 로그를 모아 두는 폴더입니다. 원본(자재/LOT) 폴더에는 "
+            "아무것도 쓰지 않으므로 원본 밖에 따로 둡니다",
+            self._settings.workspace, group,
         )
         self.card_workspace.clicked.connect(self._pick_workspace)
         self.card_workspace.path_changed.connect(self._on_workspace_changed)
 
         self.card_output = _PathSettingCard(
             FluentIcon.SAVE_AS, "출력 폴더",
-            "비우면 작업공간/exports 를 씁니다", self._settings.output_folder, group,
+            "Excel 결과만 따로 받을 폴더입니다. 공유 폴더 등 다른 곳에 결과를 바로 "
+            "내보낼 때 지정하고, 비우면 작업공간/exports 를 씁니다",
+            self._settings.output_folder, group,
         )
         self.card_output.clicked.connect(self._pick_output)
         self.card_output.path_changed.connect(self._on_output_changed)
@@ -439,23 +429,19 @@ class SettingsPage(QWidget):
         self.group_display = group
 
         self.card_theme = _SegmentSettingCard(
-            FluentIcon.BRIGHTNESS, "테마", "기본은 라이트입니다. 바꾸면 즉시 반영됩니다",
+            FluentIcon.BRIGHTNESS, "테마", "",
             _THEME_OPTIONS, (self._settings.theme_mode or "light").lower(), group,
         )
         self.card_theme.current_changed.connect(self._on_theme_changed)
 
         self.card_font = _SegmentSettingCard(
-            FluentIcon.FONT_SIZE, "글자 크기", "크게는 본문 기준 1.3배입니다",
+            FluentIcon.FONT_SIZE, "글자 크기", "",
             _FONT_OPTIONS, self._size_key, group,
         )
         self.card_font.current_changed.connect(self._on_font_changed)
 
-        self.card_update = _KoSwitchSettingCard(
-            FluentIcon.UPDATE, "자동 업데이트", "시작할 때 새 버전을 확인합니다",
-            parent=group,
-        )
-        self.card_update.setChecked(bool(self._settings.auto_update_check))
-        self.card_update.checkedChanged.connect(self._on_auto_update_changed)
+        # 자동 확인은 항상 켜져 있다(토글 없음). 이 카드는 수동 확인 버튼만 둔다.
+        self.card_update = SettingCard(FluentIcon.UPDATE, "업데이트", "", group)
         self._add_update_action(self.card_update)
 
         self.card_dev = self._build_dev_card(group)
@@ -468,21 +454,20 @@ class SettingsPage(QWidget):
         return group
 
     def _add_update_action(self, card: SettingCard) -> None:
-        """자동 업데이트 카드 오른쪽에 수동 확인 버튼을 붙인다(사이드바에서 옮겨 온 기능)."""
+        """업데이트 카드 오른쪽에 수동 확인 버튼을 붙인다(사이드바에서 옮겨 온 기능)."""
         self.lbl_update = CaptionLabel("", card)
         self.lbl_update.setVisible(False)
         self.btn_update = PushButton("업데이트 확인", card)
         self.btn_update.setToolTip("최신 버전(메인 브랜치)으로 업데이트합니다.")
         self.btn_update.clicked.connect(self._on_update_clicked)
-        index = card.hBoxLayout.count() - 2  # 스위치 바로 앞
-        card.hBoxLayout.insertWidget(index, self.lbl_update, 0, Qt.AlignRight)
-        card.hBoxLayout.insertSpacing(index + 1, theme.SPACING["gapS"])
-        card.hBoxLayout.insertWidget(index + 2, self.btn_update, 0, Qt.AlignRight)
-        card.hBoxLayout.insertSpacing(index + 3, theme.SPACING["gapM"])
+        card.hBoxLayout.addWidget(self.lbl_update, 0, Qt.AlignRight)
+        card.hBoxLayout.addSpacing(theme.SPACING["gapS"])
+        card.hBoxLayout.addWidget(self.btn_update, 0, Qt.AlignRight)
+        card.hBoxLayout.addSpacing(16)
 
     def _build_dev_card(self, parent: QWidget) -> _DevExpandCard:
         card = _DevExpandCard(
-            FluentIcon.DEVELOPER_TOOLS, "개발자 모드", "파일 로그 · 진단 리포트", parent
+            FluentIcon.DEVELOPER_TOOLS, "개발자 모드", "", parent
         )
         dev_on = self._dev_env_forced or bool(getattr(self._settings, "dev_mode", False))
         self._dev_labels: list[tuple[QWidget, QWidget]] = []
@@ -585,10 +570,6 @@ class SettingsPage(QWidget):
 
     def _on_product_changed(self, data: object) -> None:
         self._settings.product = str(data or config.DEFAULT_PRODUCT)
-        self._changed()
-
-    def _on_auto_update_changed(self, checked: bool) -> None:
-        self._settings.auto_update_check = bool(checked)
         self._changed()
 
     def _on_dev_toggled(self, checked: bool) -> None:
@@ -694,7 +675,6 @@ class SettingsPage(QWidget):
         )
         self._settings.theme_mode = self.card_theme.current()
         self._settings.ui_font_size = self.card_font.current()
-        self._settings.auto_update_check = bool(self.card_update.isChecked())
         self._settings.dev_mode = bool(self.sw_dev.isChecked())
         return self._settings
 

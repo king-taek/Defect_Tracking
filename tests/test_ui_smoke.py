@@ -600,11 +600,11 @@ def test_settings_cards_write_through(app, tmp_path):
     s = AppSettings(workspace=str(tmp_path / "ws"))
     page = SettingsPage(s, None)
     page.card_workspace.set_path(str(tmp_path / "ws2"))
-    page.card_update.setChecked(False)
     out = page.updated_settings()
     # 허용오차는 판독 화면의 컨트롤 행에서만 조절한다.
     assert not hasattr(page, "spn_tol")
-    assert out.auto_update_check is False
+    # 자동 업데이트 토글은 없다(항상 켜짐). 수동 확인 버튼만 남는다.
+    assert not hasattr(page.card_update, "switchButton")
     assert out.workspace == str(tmp_path / "ws2")
 
 

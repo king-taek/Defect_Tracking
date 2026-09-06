@@ -293,7 +293,7 @@ class AppSettings:
     window_geometry: str = ""  # "x,y,w,h" - 모니터 환경별 창 크기/위치 기억(최대화 해제 시 복원)
     window_maximized: bool = True  # 시작 시 최대화(기본). 사용자가 해제하면 False 로 저장
     sidebar_width: int = 240  # 좌측 사이드바 폭(스플리터) 기억
-    auto_update_check: bool = True  # 시작 시 백그라운드 업데이트 확인
+    auto_update_check: bool = True  # 시작 시 업데이트 확인. UI 토글은 없고(항상 켜짐) 테스트에서만 끈다
     update_token: str = ""  # (선택) 비공개 저장소용 GitHub 토큰. public 이면 빈값.
     dev_mode: bool = False  # 개발자 모드(파일 로그·진단·로그 경로 UI). 설정 창에서 토글.
 
