@@ -67,7 +67,8 @@ _PAGE_SUB = "경로 · 표시 · 동작"
 GROUP_PATHS = "경로 · 데이터"
 GROUP_DISPLAY = "표시 · 동작"
 CARD_ORDER: list[tuple[str, list[str]]] = [
-    (GROUP_PATHS, ["작업공간 폴더", "출력 폴더", "디바이스 DB", "제품 프로파일"]),
+    (GROUP_PATHS, ["작업공간 폴더", "출력 폴더", "디바이스 DB", "제품 프로파일",
+                   "AOI 엔지니어 전용 모드"]),
     (GROUP_DISPLAY, ["테마", "글자 크기", "업데이트", "개발자 모드"]),
 ]
 
@@ -411,9 +412,25 @@ class SettingsPage(QWidget):
         )
         self.card_product.current_changed.connect(self._on_product_changed)
 
+        # AOI 엔지니어 전용 모드: LOT 폴더 대신 layer 이름↔폴더를 손으로 지정하고, 좌표는
+        # 제품 프로파일 상수 없이 AOI scanresult 안의 파일(Params_WaferInfo.ini·.001)로 뽑는다.
+        self.card_aoi = SettingCard(
+            FluentIcon.ROBOT, "AOI 엔지니어 전용 모드",
+            "Ctrl+O 가 layer 이름·폴더 지정 창을 엽니다. 좌표는 AOI scanresult 에서 "
+            "직접 추출합니다(제품 프로파일 미사용)", group,
+        )
+        self.sw_aoi = SwitchButton(self.card_aoi, IndicatorPosition.RIGHT)
+        self.sw_aoi.setOnText("켜짐")
+        self.sw_aoi.setOffText("꺼짐")
+        self.sw_aoi.setChecked(bool(getattr(self._settings, "aoi_mode", False)))
+        self.sw_aoi.checkedChanged.connect(self._on_aoi_toggled)
+        self.card_aoi.hBoxLayout.addWidget(self.sw_aoi, 0, Qt.AlignRight)
+        self.card_aoi.hBoxLayout.addSpacing(16)
+
         # 순서는 A8 확정값이다. ExpandLayout 은 담은 위젯을 되돌려 주지 않으므로 직접 기억한다.
         self._path_cards = [
             self.card_workspace, self.card_output, self.card_device_db, self.card_product,
+            self.card_aoi,
         ]
         for card in self._path_cards:
             group.addSettingCard(card)
@@ -572,6 +589,10 @@ class SettingsPage(QWidget):
         self._settings.product = str(data or config.DEFAULT_PRODUCT)
         self._changed()
 
+    def _on_aoi_toggled(self, checked: bool) -> None:
+        self._settings.aoi_mode = bool(checked)
+        self._changed()
+
     def _on_dev_toggled(self, checked: bool) -> None:
         """개발자 모드. 켤 때만 로그 항목을 펼쳐 보여 준다(꺼져 있으면 볼 이유가 없다)."""
         self._settings.dev_mode = bool(checked)
@@ -676,6 +697,7 @@ class SettingsPage(QWidget):
         self._settings.theme_mode = self.card_theme.current()
         self._settings.ui_font_size = self.card_font.current()
         self._settings.dev_mode = bool(self.sw_dev.isChecked())
+        self._settings.aoi_mode = bool(self.sw_aoi.isChecked())
         return self._settings
 
     def wants_update(self) -> bool:
@@ -846,6 +868,7 @@ class SettingsPage(QWidget):
     def _all_cards(self) -> list[QWidget]:
         return [
             self.card_workspace, self.card_output, self.card_device_db, self.card_product,
+            self.card_aoi,
             self.card_theme, self.card_font, self.card_update, self.card_dev,
         ]
 

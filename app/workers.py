@@ -30,9 +30,12 @@ class ScanSignals(QObject):
 class ScanWorker(QRunnable):
     """LOT 폴더를 백그라운드에서 스캔한다."""
 
-    def __init__(self, lot_path: str | Path):
+    def __init__(self, lot_path: str | Path, scan_fn=None):
+        """``scan_fn(progress, cancel_check) -> LotIndex`` 를 주면 그걸 돌린다
+        (AOI 모드의 ``scanner.scan_aoi``).  없으면 ``scanner.scan_lot(lot_path)``."""
         super().__init__()
         self.lot_path = lot_path
+        self.scan_fn = scan_fn
         self.signals = ScanSignals()
         self._cancelled = False
 
@@ -46,9 +49,11 @@ class ScanWorker(QRunnable):
             def cb(msg: str, cur: int, total: int) -> None:
                 self.signals.progress.emit(msg, cur, total)
 
-            index: LotIndex = scanner.scan_lot(
-                self.lot_path, progress=cb, cancel_check=lambda: self._cancelled
-            )
+            cancel = lambda: self._cancelled  # noqa: E731
+            if self.scan_fn is not None:
+                index: LotIndex = self.scan_fn(cb, cancel)
+            else:
+                index = scanner.scan_lot(self.lot_path, progress=cb, cancel_check=cancel)
             if self._cancelled:
                 return  # 중단된 결과는 UI 로 보내지 않는다(토큰 게이트와 이중 안전)
             self.signals.finished.emit(index)

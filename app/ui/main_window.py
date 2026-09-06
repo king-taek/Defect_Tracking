@@ -77,6 +77,7 @@ class MainWindow(FluentWindow):
         self._scan_token = 0  # stale 스캔/썸네일 결과 무시용
         self._match_token = 0  # stale 매칭(중첩 요청) 결과 무시용
         self._wafer_filter: Optional[str] = None  # 특정 wafer 만 보기(wafer 폴더 선택 시)
+        self._aoi_layers: list = []  # AOI 모드에서 마지막으로 스캔한 layer 지정(F5 재스캔용)
         self._exporting = False  # Excel 출력 진행 중(중복 방지)
         # 매칭 인덱스 캐시(비교 layer 집합이 같으면 허용오차만 바뀔 때 재사용)
         self._match_sig: object = None
@@ -115,6 +116,7 @@ class MainWindow(FluentWindow):
         )
         self._install_shortcuts()
         self._apply_saved_prefs()
+        self._apply_aoi_mode_ui()
         self._maybe_check_update()
         # 창이 그려진 뒤에 안내한다. 생성 도중 띄우면 창 뒤에 숨는다.
         QTimer.singleShot(0, self._maybe_show_theme_notice)
@@ -375,6 +377,9 @@ class MainWindow(FluentWindow):
 
     # ----------------------------------------------------------- 폴더/스캔
     def _choose_folder(self) -> None:
+        if getattr(self.settings, "aoi_mode", False):
+            self._choose_aoi_layers()
+            return
         last = self.settings.last_lot_folder
         start = str(Path(last).parent) if last and Path(last).exists() else str(Path.home())
         # 네이티브 탐색기 대신 앱 내 커스텀 폴더 트리 선택기를 사용한다.
@@ -444,6 +449,9 @@ class MainWindow(FluentWindow):
 
     def _rescan(self) -> None:
         """현재 LOT 폴더를 다시 스캔한다(F5). 데이터가 갱신됐을 때 사용."""
+        if self.lot_index is not None and self.lot_index.aoi_mode and self._aoi_layers:
+            self.load_aoi(self._aoi_layers)
+            return
         last = self.settings.last_lot_folder
         if last and Path(last).exists():
             self.load_lot(last)
@@ -509,6 +517,43 @@ class MainWindow(FluentWindow):
 
         self.settings.last_lot_folder = folder
         self._push_recent(folder)
+        self._launch_scan(Path(folder).name, ScanWorker(folder))
+
+    # ----------------------------------------------------------- AOI 엔지니어 모드
+    def _apply_aoi_mode_ui(self) -> None:
+        """모드에 따라 '열기' 버튼 문구·툴팁을 맞춘다(기능은 `_choose_folder` 가 분기)."""
+        aoi = bool(getattr(self.settings, "aoi_mode", False))
+        empty = self.review_page.empty_state
+        empty.btn_open.setText("AOI layer 폴더 지정" if aoi else "LOT 폴더 열기")
+        self.top.btn_open.setToolTip(
+            "AOI 엔지니어 모드: layer 이름과 scanresult 폴더를 지정 (Ctrl+O)"
+            if aoi else "리뷰가 진행된 LOT 폴더를 선택 (Ctrl+O) · 우클릭: 최근 폴더"
+        )
+
+    def _choose_aoi_layers(self) -> None:
+        """AOI 모드: layer 이름↔폴더 표를 편집하고 그대로 스캔한다."""
+        from app.ui.sheets.aoi_layers import AoiLayersDialog
+
+        dlg = AoiLayersDialog(self.settings, self)
+        if dlg.exec():
+            self.load_aoi(dlg.layers())
+
+    def load_aoi(self, layers: list) -> None:
+        """AOI 모드 스캔: 지정한 layer 폴더들을 `scanner.scan_aoi` 로 읽는다."""
+        for lyr in layers:
+            if not self._verify_workspace_outside(str(lyr.folder)):
+                return
+        self._wafer_filter = None
+        self._aoi_layers = list(layers)
+        self.settings.aoi_layers = [lyr.to_dict() for lyr in layers]
+        worker = ScanWorker(
+            "", scan_fn=lambda cb, cancel: scanner.scan_aoi(
+                list(layers), progress=cb, cancel_check=cancel),
+        )
+        self._launch_scan("AOI 모드", worker)
+
+    def _launch_scan(self, title: str, worker: ScanWorker) -> None:
+        """스캔 워커를 띄우고 진행 UI 를 준비한다(LOT/AOI 공통)."""
         self._scan_token += 1
         token = self._scan_token
 
@@ -520,10 +565,9 @@ class MainWindow(FluentWindow):
         self.progress.setTextVisible(True)
         self.progress.setFormat("스캔 준비 중...")
         self.top.set_status("스캔 중...")
-        self.top.set_lot_name(Path(folder).name)
-        self.setWindowTitle(f"{self._base_title}  -  {Path(folder).name}")
+        self.top.set_lot_name(title)
+        self.setWindowTitle(f"{self._base_title}  -  {title}")
 
-        worker = ScanWorker(folder)
         self._scan_worker = worker
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.finished.connect(lambda idx, t=token: self._on_scan_finished(idx, t))
@@ -1256,6 +1300,7 @@ class MainWindow(FluentWindow):
             "device_db_path": s.device_db_path,
             "product": s.product,
             "ui_font_size": getattr(s, "ui_font_size", "normal"),
+            "aoi_mode": bool(getattr(s, "aoi_mode", False)),
         }
 
     def _apply_settings(self, s) -> None:
@@ -1280,6 +1325,13 @@ class MainWindow(FluentWindow):
             self.thumb_cache = ThumbnailCache(s.cache_path)
         if now["ui_font_size"] != before["ui_font_size"]:
             self._apply_font_size(s)
+        if now["aoi_mode"] != before["aoi_mode"]:
+            self._apply_aoi_mode_ui()
+            self.banner.show_message(
+                "AOI 엔지니어 전용 모드를 켰습니다. Ctrl+O 로 layer 이름과 폴더를 지정하세요."
+                if now["aoi_mode"] else "AOI 엔지니어 전용 모드를 껐습니다(LOT 폴더 스캔).",
+                "info",
+            )
 
         self._settings_applied = now
         if config.dev_mode(s):
@@ -1551,7 +1603,7 @@ class MainWindow(FluentWindow):
             tolerance=self.top.tolerance(),
             selected=selected,
             thumb_cache=self.thumb_cache,
-            source_roots=[self.lot_index.lot_path],
+            source_roots=self.lot_index.source_roots,
             # 원래 layer 순서(폴더 스캔 순서). 기준 layer 를 맨 왼쪽에 고정하지 않는다.
             layer_order=self.lot_index.layer_canonicals(),
             # 화면의 글자 크기 설정을 리포트에도 그대로 적용한다. 크게 로 보는 사람이

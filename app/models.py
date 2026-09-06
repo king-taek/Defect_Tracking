@@ -19,6 +19,11 @@ class Source(str, Enum):
     CAMTEK_FILENAME = "Camtek(파일명)"
     CAMTEK_INI = "Camtek(INI)"
     KLA = "KLA"
+    # AOI 엔지니어 모드(app.aoi) — AOI scanresult 에서 직접 뽑은 좌표.
+    AOI_CAMTEK_LIVE = "AOI Camtek(LIVE 파일명)"
+    AOI_CAMTEK_INI = "AOI Camtek(INI)"
+    AOI_CAMTEK_ABS = "AOI Camtek(절대좌표)"
+    AOI_KLA = "AOI KLA"
     UNKNOWN = "Unknown"
 
 

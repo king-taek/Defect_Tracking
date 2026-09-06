@@ -1,0 +1,213 @@
+"""KLA .001 정보 파일 파싱 → DefectCoord (AOI 모드).
+
+`king-taek/coding` ``coords/kla_info.py`` 의 이식.  변환식 — die 인덱스 원점은 상수가
+아니라 같은 파일의 헤더에서 읽는다(:mod:`~.wafer_geometry`)::
+
+    col = XINDEX + geom.zero_x
+    row = YINDEX + geom.zero_y
+    x   = round(XREL)
+    y   = round(DiePitchY - YREL)
+
+파일 선택 우선순위:
+    1. 확장자 .001 파일
+    2. .jpg / .pass 가 아닌 파일(단, 폴더 내에 1개만 있을 때)
+"""
+
+from __future__ import annotations
+
+import re
+from functools import lru_cache
+from pathlib import Path
+from typing import Optional
+
+from .ini_text import decode_ini_bytes, read_ini_text
+from .models import DefectCoord
+from .wafer_geometry import kla_geometry
+
+__all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
+           "peek_die_pitch"]
+
+# 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트.
+_NON_INFO_SUFFIXES = ('.jpg', '.jpeg', '.pass', '.ini', '.py')
+
+# DefectList 행: 공백/탭 구분 숫자 필드
+# 필드 순서(0-based): 0=ID, 1=X, 2=Y, 3=XREL, 4=YREL, 5=XINDEX, 6=YINDEX, ...
+_DEFECT_PAT = re.compile(
+    r'^\s*([\d.eE+\-]+)'   # 0: ID
+    r'\s+([\d.eE+\-]+)'    # 1: X
+    r'\s+([\d.eE+\-]+)'    # 2: Y
+    r'\s+([\d.eE+\-]+)'    # 3: XREL
+    r'\s+([\d.eE+\-]+)'    # 4: YREL
+    r'\s+([-\d]+)'         # 5: XINDEX
+    r'\s+([-\d]+)'         # 6: YINDEX
+)
+
+# DiePitch X Y; 헤더 라인
+_DIEPITCH_PAT = re.compile(r'DiePitch\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)', re.IGNORECASE)
+
+# TiffFileName 라인 (파일명 추출)
+_TIFF_PAT = re.compile(r'TiffFileName\s+(\S+)', re.IGNORECASE)
+
+# WaferID "W6459076XYG1";  — 정보파일 **헤더**의 slot명(WaferID) 줄.
+_WAFER_ID_PAT = re.compile(r'Wafer\s*ID\s+"([^"]*)"', re.IGNORECASE)
+# WaferID 는 헤더(파일 앞부분)에 있으므로 앞부분만 읽는다.
+_HEAD_BYTES = 65536
+
+
+def _find_info_file(folder: Path) -> Optional[Path]:
+    """폴더에서 KLA .001 정보 파일 탐색."""
+    for p in folder.glob("*.001"):
+        return p
+    # 2순위: .jpg/.pass 가 아닌 파일 (확장자 없는 파일 포함).
+    # ★ 조건 순서를 바꾸지 마라 — `is_file()` 은 파일 하나당 stat 이라 **맨 뒤**에 둔다.
+    candidates = [
+        p for p in folder.iterdir()
+        if p.suffix.lower() not in _NON_INFO_SUFFIXES
+        and not p.name.startswith('.')
+        and p.is_file()
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _info_candidates(folder: Path) -> list[Path]:
+    """폴더의 정보파일 후보 — ``.001`` 을 앞에, 그다음 나머지 비-사진 파일."""
+    try:
+        files = [p for p in folder.iterdir()
+                 if p.suffix.lower() not in _NON_INFO_SUFFIXES
+                 and not p.name.startswith('.')
+                 and p.is_file()]
+    except OSError:
+        return []
+    files.sort(key=lambda p: (p.suffix.lower() != '.001', p.name.lower()))
+    return files
+
+
+def _read_head(p: Path) -> Optional[bytes]:
+    try:
+        with open(p, "rb") as fh:       # 원본은 'rb' 로만 연다(read-only)
+            return fh.read(_HEAD_BYTES)
+    except OSError:
+        return None
+
+
+@lru_cache(maxsize=256)
+def read_wafer_id(folder: Path) -> Optional[str]:
+    """폴더의 KLA 정보파일에서 ``WaferID "XXXX";`` 를 읽어 대문자로 반환(없으면 None)."""
+    for p in _info_candidates(folder):
+        head = _read_head(p)
+        if head is None:
+            continue
+        m = _WAFER_ID_PAT.search(decode_ini_bytes(head))
+        if m:
+            wid = m.group(1).strip().upper()
+            if wid:
+                return wid
+    return None
+
+
+def peek_die_pitch(folder: Path) -> Optional[tuple[float, float]]:
+    """정보파일 **헤더**에서 ``DiePitch X Y`` 만 읽는다(안내용).  없으면 ``None``."""
+    for p in _info_candidates(folder):
+        head = _read_head(p)
+        if head is None:
+            continue
+        m = _DIEPITCH_PAT.search(decode_ini_bytes(head))
+        if not m:
+            continue
+        try:
+            return (float(m.group(1)), float(m.group(2)))
+        except ValueError:
+            continue
+    return None
+
+
+@lru_cache(maxsize=256)
+def load_folder_raw(folder: Path) -> dict[str, dict]:
+    """폴더의 KLA 정보 파일을 파싱해 {stem(소문자) → raw 필드} 맵 반환.
+
+    raw 필드: ``{xrel, yrel, xindex, yindex, die_pitch_y}`` (원본값 그대로)."""
+    try:
+        info = _find_info_file(folder)
+    except OSError:
+        return {}
+    if info is None:
+        return {}
+    try:
+        return _parse_info_raw(info)
+    except Exception:
+        return {}
+
+
+@lru_cache(maxsize=256)
+def load_folder(folder: Path) -> dict[str, DefectCoord]:
+    """폴더의 KLA 정보 파일을 파싱해 {stem(소문자) → DefectCoord} 맵 반환."""
+    result: dict[str, DefectCoord] = {}
+    raw = load_folder_raw(folder)
+    if not raw:
+        return result
+    geom = kla_geometry(folder)
+    for stem, r in raw.items():
+        col = r["xindex"] + geom.zero_x
+        row = r["yindex"] + geom.zero_y
+        x = round(r["xrel"])
+        y = round(r["die_pitch_y"] - r["yrel"])
+        result[stem] = DefectCoord(
+            col=col, row=row, x=float(x), y=float(y), source="kla",
+            native_x=float(r["xrel"]), native_y=float(r["yrel"]),
+        )
+    return result
+
+
+def _parse_info_raw(path: Path) -> dict[str, dict]:
+    text = read_ini_text(path) or ""
+    lines = text.splitlines()
+
+    # DiePitchY 추출
+    die_pitch_y: Optional[float] = None
+    for line in lines:
+        m = _DIEPITCH_PAT.search(line)
+        if m:
+            die_pitch_y = float(m.group(2))
+            break
+
+    if die_pitch_y is None:
+        return {}
+
+    result: dict[str, dict] = {}
+    current_stem: Optional[str] = None
+
+    for line in lines:
+        # TiffFileName 라인 → 현재 이미지 stem 갱신
+        tm = _TIFF_PAT.match(line)
+        if tm:
+            tiff_name = tm.group(1).strip()
+            current_stem = Path(tiff_name).stem.lower()
+            continue
+
+        # DefectList 데이터 행
+        if current_stem is not None:
+            dm = _DEFECT_PAT.match(line)
+            if dm:
+                try:
+                    xrel = float(dm.group(4))
+                    yrel = float(dm.group(5))
+                    xindex = int(dm.group(6))
+                    yindex = int(dm.group(7))
+                except ValueError:
+                    continue
+                result[current_stem] = {
+                    "xrel": xrel, "yrel": yrel,
+                    "xindex": xindex, "yindex": yindex,
+                    "die_pitch_y": die_pitch_y,
+                }
+                current_stem = None  # 한 TiffFileName 당 하나의 DefectList 행
+
+    return result
+
+
+def resolve(image_path: Path) -> Optional[DefectCoord]:
+    """이미지 1장 → DefectCoord. 정보 파일이 없거나 섹션이 없으면 None."""
+    coords = load_folder(image_path.parent)
+    return coords.get(image_path.stem.lower())

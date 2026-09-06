@@ -54,6 +54,16 @@ class LotIndex:
     layers: list[LayerInfo] = field(default_factory=list)
     records: list[DefectRecord] = field(default_factory=list)
     scan_errors: list[str] = field(default_factory=list)  # 접근 불가 경로(권한/네트워크)
+    # AOI 모드: layer 폴더가 흩어져 있어 원본 루트가 여럿이다(출력 안전 검사·진단용).
+    # 비어 있으면 lot_path 하나뿐이다.
+    extra_roots: list[Path] = field(default_factory=list)
+    aoi_mode: bool = False
+
+    @property
+    def source_roots(self) -> list[Path]:
+        """원본(read-only) 루트 전부 — 출력 경로가 이 안이면 안 된다."""
+        roots = [self.lot_path] + [r for r in self.extra_roots if r != self.lot_path]
+        return roots
 
     def layer_canonicals(self) -> list[str]:
         """선택 UI 에 표시할 layer 이름 목록(폴더 순서, 유니크).
@@ -488,6 +498,139 @@ def scan_lot(
         index.scan_errors = list(_scan_errors)
     _log.info(
         "스캔 완료: layer %d · record %d · 접근오류 %d",
+        len(index.layers), len(index.records), len(index.scan_errors),
+    )
+    if progress:
+        progress("스캔 완료", total, total)
+    return index
+
+
+# ---------------------------------------------------------------------------
+# AOI 엔지니어 전용 모드 — layer 이름↔폴더를 손으로 지정, AOI scanresult 에서 좌표 추출
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AoiLayer:
+    """AOI 모드의 layer 하나: 사용자가 지정한 이름과 그 layer 의 scanresult 폴더.
+
+    폴더 구조는 두 가지를 받는다:
+      · ``folder/<slot>/사진…``  — slot(wafer) 폴더들이 들어 있는 상위 폴더(일반적).
+      · ``folder/사진…``          — 사진을 직접 담은 wafer 폴더 하나.
+    """
+
+    name: str
+    folder: Path
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AoiLayer":
+        return cls(name=str(d.get("name", "")).strip(), folder=Path(str(d.get("folder", ""))))
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "folder": str(self.folder)}
+
+
+_AOI_SOURCE = {
+    "camtek_live": Source.AOI_CAMTEK_LIVE,
+    "camtek_ini": Source.AOI_CAMTEK_INI,
+    "camtek_abs": Source.AOI_CAMTEK_ABS,
+    "kla": Source.AOI_KLA,
+}
+
+
+def _aoi_wafer_dirs(layer: AoiLayer) -> list[tuple[str, Path]]:
+    """layer 폴더 → ``[(wafer_id, 사진 폴더), …]``.
+
+    사진을 직접 담은 폴더면 그 폴더 하나(wafer_id 는 KLA WaferID → 폴더명 순).
+    아니면 하위 폴더 각각을 slot(wafer) 로 본다 — 참고 저장소가 slot 을 폴더명으로
+    묶는 것과 같은 규칙이라 layer 간 slot 폴더명이 같아야 매칭된다.
+    """
+    from app import aoi
+
+    folder = layer.folder
+    if _dir_has_image(folder):
+        wid = aoi.kla_info.read_wafer_id(folder) or folder.name
+        return [(wid, folder)]
+    return [(d.name, d) for d in _list_dirs(folder)]
+
+
+def scan_aoi(
+    layers: list[AoiLayer],
+    progress: ProgressCb = None,
+    cancel_check: CancelCb = None,
+) -> LotIndex:
+    """AOI 모드 스캔.  좌표는 :mod:`app.aoi` (참고 저장소 이식)로만 뽑는다.
+
+    좌표 프레임 통일(:func:`app.aoi.resolve_batch`)이 **한 실행 전체**에 걸쳐야 하므로
+    사진을 전부 모은 뒤 한 번에 resolve 한다.  원본은 read-only.
+    """
+    from app import aoi
+
+    layers = [lyr for lyr in layers if lyr.name and str(lyr.folder)]
+    first = layers[0].folder if layers else Path(".")
+    index = LotIndex(lot_name="AOI 모드", lot_path=first, aoi_mode=True,
+                     extra_roots=[lyr.folder for lyr in layers])
+    with _scan_errors_lock:
+        _scan_errors.clear()
+    aoi.clear_caches()  # 재스캔이 갱신된 INI/.001 을 다시 읽게
+    _log.info("AOI 스캔 시작: %s", [(lyr.name, str(lyr.folder)) for lyr in layers])
+
+    for lyr in layers:
+        index.layers.append(LayerInfo(
+            folder_name=lyr.folder.name, canonical=lyr.name, path=lyr.folder,
+            display=lyr.name,
+        ))
+
+    # 1) 사진 열거 (layer → wafer 폴더 → 이미지)
+    items: list[tuple[LayerInfo, str, Path, Path]] = []  # (layer, wafer_id, wafer_dir, image)
+    wafers: list[tuple[LayerInfo, str, Path]] = []
+    for info, lyr in zip(index.layers, layers):
+        if not lyr.folder.is_dir():
+            _record_scan_error(lyr.folder, OSError("폴더가 없거나 접근할 수 없음"))
+            continue
+        for wid, wdir in _aoi_wafer_dirs(lyr):
+            wafers.append((info, wid, wdir))
+    total = len(wafers) or 1
+    for done, (info, wid, wdir) in enumerate(wafers, start=1):
+        if cancel_check and cancel_check():
+            _log.info("AOI 스캔 중단 요청 - %d/%d wafer 에서 멈춤", done, total)
+            break
+        for img in _list_files(wdir):
+            if _is_image(img.name):
+                items.append((info, wid, wdir, img))
+        if progress:
+            progress(f"스캔: {info.canonical}/{wid}", done, total)
+
+    # 2) 좌표 일괄 추출 (프레임 통일 포함)
+    coords = aoi.resolve_batch([it[3] for it in items])
+
+    # 3) DefectRecord 로 변환
+    for info, wid, wdir, img in items:
+        c = coords.get(img)
+        if c is None:
+            index.records.append(DefectRecord(
+                image_path=img, wafer_id=wid, layer=info.canonical,
+                layer_folder=info.folder_name, source=Source.UNKNOWN,
+                status=ParseStatus.NOT_FOUND,
+                note="AOI: LIVE 파일명·ColorImageGrabingInfo.ini·KLA .001 어디서도 좌표를 찾지 못함",
+                diag={"wafer_dir": str(wdir), "aoi_mode": True},
+            ))
+            continue
+        name = ""
+        if c.source == "camtek_live":
+            fn = camtek_filename.parse_camtek_filename(img.name)
+            if fn.status == ParseStatus.OK:
+                name = fn.defect_name
+        index.records.append(DefectRecord(
+            image_path=img, wafer_id=wid, layer=info.canonical,
+            layer_folder=info.folder_name, source=_AOI_SOURCE[c.source],
+            status=ParseStatus.OK, col=c.col, row=c.row, x=c.x, y=c.y,
+            defect_name=name,
+        ))
+
+    with _scan_errors_lock:
+        index.scan_errors = list(_scan_errors)
+    _log.info(
+        "AOI 스캔 완료: layer %d · record %d · 접근오류 %d",
         len(index.layers), len(index.records), len(index.scan_errors),
     )
     if progress:

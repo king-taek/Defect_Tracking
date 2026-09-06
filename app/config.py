@@ -296,6 +296,10 @@ class AppSettings:
     auto_update_check: bool = True  # 시작 시 업데이트 확인. UI 토글은 없고(항상 켜짐) 테스트에서만 끈다
     update_token: str = ""  # (선택) 비공개 저장소용 GitHub 토큰. public 이면 빈값.
     dev_mode: bool = False  # 개발자 모드(파일 로그·진단·로그 경로 UI). 설정 창에서 토글.
+    # AOI 엔지니어 전용 모드: LOT 폴더 스캔 대신 layer 이름↔폴더를 손으로 지정하고
+    # AOI scanresult 에서 바로 좌표를 뽑는다(app.aoi). aoi_layers 는 [{name, folder}, …].
+    aoi_mode: bool = False
+    aoi_layers: list[dict] = field(default_factory=list)
 
     # ---- 경로 헬퍼 -------------------------------------------------------
     @property
