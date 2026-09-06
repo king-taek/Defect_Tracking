@@ -94,7 +94,7 @@ def test_nav_badge_appears_and_clears(win):
     win._set_nav_badge("exportInterface", 3)
     assert "exportInterface" in win._nav_badges
     win._set_nav_badge("exportInterface", 0)
-    assert "exportInterface" not in win._nav_badges
+    assert win._nav_badges["exportInterface"].isHidden()  # 배지는 재사용(숨김)한다
 
 
 def test_every_route_is_a_real_page(win):

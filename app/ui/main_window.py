@@ -322,22 +322,33 @@ class MainWindow(FluentWindow):
         self.grid.base_cluster_clicked.connect(self._show_cluster_members)
 
     def _set_nav_badge(self, route: str, count: int) -> None:
-        """nav 항목 배지. 0 이면 숨긴다."""
-        existing = self._nav_badges.pop(route, None)
-        if existing is not None:
-            existing.setParent(None)
-            existing.deleteLater()
+        """nav 항목 배지. 0 이면 숨긴다.
+
+        배지는 라우트마다 **한 번만 만들고 재사용**한다. qfluentwidgets 의 InfoBadgeManager 가
+        nav 항목에 이벤트 필터로 남아 삭제된 배지를 옮기려 들기 때문에(☰ 펼침 시 Resize),
+        배지를 deleteLater 하면 `Internal C++ object (InfoBadge) already deleted` 가 난다.
+        """
+        badge = self._nav_badges.get(route)
+        if badge is None:
+            if count <= 0:
+                return
+            item = self.navigationInterface.widget(route)
+            if item is None:
+                return
+            badge = InfoBadge.attension(
+                text=count,
+                parent=item.parent(),
+                target=item,
+                position=InfoBadgePosition.NAVIGATION_ITEM,
+            )
+            self._nav_badges[route] = badge
         if count <= 0:
+            badge.hide()
             return
-        item = self.navigationInterface.widget(route)
-        if item is None:
-            return
-        self._nav_badges[route] = InfoBadge.attension(
-            text=count,
-            parent=item.parent(),
-            target=item,
-            position=InfoBadgePosition.NAVIGATION_ITEM,
-        )
+        badge.setText(str(count))
+        badge.adjustSize()
+        badge.move(badge.manager.position())
+        badge.show()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -569,7 +580,12 @@ class MainWindow(FluentWindow):
         self.setWindowTitle(f"{self._base_title}  -  {title}")
 
         self._scan_worker = worker
-        worker.signals.progress.connect(self._on_scan_progress)
+        # 진행 신호도 토큰으로 막는다 — 중단·재스캔·창 닫힘 뒤에 늦게 오는 progress 가
+        # 이미 사라진 위젯을 만지면 'Internal C++ object already deleted' 가 난다.
+        worker.signals.progress.connect(
+            lambda msg, cur, total, t=token: self._on_scan_progress(msg, cur, total)
+            if t == self._scan_token else None
+        )
         worker.signals.finished.connect(lambda idx, t=token: self._on_scan_finished(idx, t))
         worker.signals.error.connect(lambda msg, t=token: self._on_scan_error(msg, t))
         self._track_worker(worker, worker.signals.finished, worker.signals.error)
@@ -1644,6 +1660,16 @@ class MainWindow(FluentWindow):
 
     # ------------------------------------------------------------ 종료
     def closeEvent(self, event):  # noqa: N802
+        # 돌고 있는 워커(스캔·썸네일·매칭)의 늦은 신호가 삭제된 위젯을 만지지 않게 한다:
+        # 협조적 취소 + 토큰 무효화(NAS 스캔은 창을 닫은 뒤에도 한참 돌 수 있다).
+        self._scan_token += 1
+        self._match_token += 1
+        if self._scan_worker is not None:
+            self._scan_worker.cancel()
+            self._scan_worker = None
+        if self._thumb_worker is not None:
+            self._thumb_worker.cancel()
+            self._thumb_worker = None
         # 최대화 상태를 기억하고, 창 크기는 normal(복원) 기하로 저장한다.
         self.settings.window_maximized = self.isMaximized()
         geo = self.normalGeometry()

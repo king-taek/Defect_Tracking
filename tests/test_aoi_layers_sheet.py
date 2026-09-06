@@ -87,3 +87,30 @@ def test_main_window_routes_open_to_aoi_dialog(app, tmp_path, monkeypatch):
         assert win._aoi_layers == layers
     finally:
         win.close()
+
+
+def test_nav_badge_is_reused_not_deleted(app, tmp_path):
+    """배지를 지웠다 다시 만들면 남은 InfoBadgeManager 필터가 삭제된 배지를 만져 터진다.
+    한 번 만든 배지를 숨김/표시로만 바꿔야 nav 를 펼쳐도(Resize) 안전하다."""
+    from PySide6.QtCore import QEvent, QSize
+    from PySide6.QtGui import QResizeEvent
+
+    from app.ui import main_window as mw
+
+    settings = AppSettings(workspace=str(tmp_path / "ws"), auto_update_check=False)
+    settings.window_maximized = False
+    win = mw.MainWindow(settings)
+    try:
+        win._set_nav_badge("exportInterface", 2)
+        badge = win._nav_badges["exportInterface"]
+        assert badge.text() == "2"
+        win._set_nav_badge("exportInterface", 0)
+        assert badge.isHidden()
+        win._set_nav_badge("exportInterface", 5)
+        assert win._nav_badges["exportInterface"] is badge and badge.text() == "5"
+        item = win.navigationInterface.widget("exportInterface")
+        # nav 펼침이 만드는 Resize 를 흉내 낸다 — 예전엔 여기서 RuntimeError 가 났다.
+        app.sendEvent(item, QResizeEvent(QSize(200, 36), item.size()))
+        assert badge.text() == "5"
+    finally:
+        win.close()

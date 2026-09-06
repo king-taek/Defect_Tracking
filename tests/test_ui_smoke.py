@@ -511,7 +511,7 @@ def test_update_marker_moves_to_the_nav_badge(win):
     assert "settingsInterface" in win._nav_badges
     win._set_update_marker(False)
     assert win.top.update_available() is False
-    assert "settingsInterface" not in win._nav_badges
+    assert win._nav_badges["settingsInterface"].isHidden()  # 배지는 재사용(숨김)한다
 
 
 def test_update_check_available_sets_flag(win, monkeypatch):
