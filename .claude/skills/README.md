@@ -33,3 +33,21 @@ vendoring 방식이라 자동 업데이트되지 않는다. 갱신하려면 위 
 
 - ponytail 은 원본 플러그인의 hook·band(세션 상태 표시줄)는 연결하지 않고 스킬 파일만 복사했다. 강도는 CLAUDE.md 규칙대로 로직 full, UI lite.
 - graphify 는 처음 실행할 때 `graphifyy` 를 pip 으로 설치한다. 코드만 볼 때는 `--code-only` 로 돌린다(문서·이미지는 Claude 로 보내 분석한다). 산출물 `graphify-out/` 은 `.gitignore` 에 있다.
+
+## 10/18 추가 설치 (사용자 요청 — 다양하게, 자동으로)
+
+| 폴더 | 출처 · 고정 커밋 | 라이선스 | 무엇 |
+|---|---|---|---|
+| `interview-me/` · `documentation-and-adrs/` · `observability-and-instrumentation/` · `deprecation-and-migration/` · `security-and-hardening/` · `performance-optimization/` | https://github.com/addyosmani/agent-skills `skills/*` @ `aeac41d4` | MIT (`.claude/licenses/addyosmani-agent-skills-MIT.txt`) | 요구 묻기 · 결정 기록 · 로그 · 삭제/이전 · 보안 · 성능. 체크리스트는 `.claude/references/` |
+| `debugging-and-error-recovery/` · `code-review-and-quality/` | 위와 같음 | MIT | CLAUDE.md 표가 이미 부르던 두 스킬 |
+| `change-impact/` · `codebase-onboarding/` · `code-tour/` · `python-testing/` · `regex-vs-llm-structured-text/` · `skill-stocktake/` + 에이전트 `.claude/agents/silent-failure-hunter.md` · `python-reviewer.md` | https://github.com/affaan-m/ecc @ `76aaa77d` (v2.2.3) 에서 발췌 | MIT (`.claude/licenses/ecc-MIT.txt`) | 변경 영향 · 코드 안내 · pytest · 파서 판단 · 스킬 점검 · 조용한 실패/파이썬 리뷰 |
+| `ui-ux-pro-max/` | https://github.com/nextlevelbuilder/ui-ux-pro-max-skill `.claude/skills/ui-ux-pro-max` @ `56ea9cf1` (2.15.0) | MIT (`.claude/licenses/ui-ux-pro-max-MIT.txt`) | 로컬 CSV 로 팔레트 · 글꼴 · UX 지침 검색(네트워크 없음) |
+| `design-dna/` | https://github.com/zanwei/design-dna @ `593e39bc` | MIT (`LICENSE`) | 참고 화면에서 토큰 · 느낌 · 효과를 JSON 으로 뽑고 적용 |
+| `awesome-design-md/` | https://github.com/VoltAgent/awesome-design-md `design-md/` @ `13be5c05` | MIT (`LICENSE`) | DESIGN.md 73개 참고 라이브러리(SKILL.md 는 이 저장소용으로 새로 씀) |
+| `taste-skill/` | https://github.com/Leonxlnx/taste-skill `skills/taste-skill` @ `ce26fc25` | MIT (`LICENSE`) | 안티-슬롭 원칙(랜딩 페이지 중심 — 원칙만 골라 씀, 사진 URL 조언은 무시) |
+
+- 원본을 고치지 않고 그대로 복사했다(awesome-design-md 의 `SKILL.md` 만 예외). hook 은 하나도 연결하지 않았다 — ECC 의 gateguard 처럼 수정마다 멈추게 하는 것이 있어서다. ECC 의 토큰 · 모델 설정도 가져오지 않았다.
+- 설치 전 NVIDIA SkillSpector(`--no-llm`)로 전부 검사했다. 걸린 항목은 공격 용어를 설명하는 문서 · 스킬 파일을 고치라는 안내(writing-skills) · 중첩 코드 블록을 위한 폭 0 공백(improve-animations `PLAN-TEMPLATE.md`) 같은 오탐이었고, 스크립트에 바깥 전송은 없었다.
+- Addy 스킬이 `../../references/*.md` 로 가리키는 체크리스트는 `.claude/references/` 에 있다. 폴더 안에 라이선스가 없는 출처의 원문은 `.claude/licenses/` 에 있다.
+- 겹칠 때 우선순위는 `CLAUDE.md` 에 적었다. 갱신은 같은 고정 커밋 경로에서 다시 복사한다.
+- 데스크톱(PySide6) 앱이라 디자인 스킬의 CSS · 웹폰트 · CDN 조언은 버리고 원칙만 쓴다.
