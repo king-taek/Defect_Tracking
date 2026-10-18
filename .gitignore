@@ -22,3 +22,6 @@ version.json
 # 회사 기밀 참고자료(디바이스 DB 등) — 저장소에 올리지 않음
 Origin/
 *.xlsm
+
+# graphify 코드 지도(생성물)
+graphify-out/

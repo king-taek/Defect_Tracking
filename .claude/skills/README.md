@@ -8,6 +8,8 @@ Claude Code 세션에서 자동 인식된다(별도 플러그인 설치·네트�
 | Skill 폴더 | 출처 | 버전 |
 |---|---|---|
 | `impeccable/` | https://github.com/pbakaus/impeccable | 3.9.1 |
+| `ponytail/`, `ponytail-review/`, `ponytail-audit/`, `ponytail-debt/`, `ponytail-help/`, `ponytail-gain/` | https://github.com/DietrichGebert/ponytail `skills/*` @ `09c434ab` (MIT) | 2026-10-18 |
+| `graphify/` | https://github.com/safishamsi/graphify `graphify/skill.md` + `graphify/skills/claude/references/` @ `86c57be8` (0.9.92, Apache-2.0 · `NOTICE`) | 2026-10-18 |
 | `brainstorming/`, `systematic-debugging/`, `test-driven-development/`, `writing-plans/`, `executing-plans/`, `subagent-driven-development/`, `dispatching-parallel-agents/`, `requesting-code-review/`, `receiving-code-review/`, `verification-before-completion/`, `finishing-a-development-branch/`, `using-git-worktrees/`, `writing-skills/`, `using-superpowers/` | https://github.com/obra/superpowers | 6.1.1 |
 
 `impeccable-manual-edit-applier` 서브에이전트(`.claude/agents/`)는 impeccable 의 `live` 수동
@@ -26,3 +28,8 @@ Claude Code 세션에서 자동 인식된다(별도 플러그인 설치·네트�
 
 vendoring 방식이라 자동 업데이트되지 않는다. 갱신하려면 위 저장소에서 해당 폴더
 (impeccable 은 `.claude/skills/impeccable/`, superpowers 는 `skills/*`)를 다시 복사한다.
+
+## ponytail · graphify 메모 (2026-10-18)
+
+- ponytail 은 원본 플러그인의 hook·band(세션 상태 표시줄)는 연결하지 않고 스킬 파일만 복사했다. 강도는 CLAUDE.md 규칙대로 로직 full, UI lite.
+- graphify 는 처음 실행할 때 `graphifyy` 를 pip 으로 설치한다. 코드만 볼 때는 `--code-only` 로 돌린다(문서·이미지는 Claude 로 보내 분석한다). 산출물 `graphify-out/` 은 `.gitignore` 에 있다.
