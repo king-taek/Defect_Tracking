@@ -209,6 +209,18 @@ def test_notifications_sit_below_the_page_header(loaded):
     bar.close()
 
 
+def test_toast_action_keeps_its_captured_argument(loaded):
+    """clicked 의 checked 값이 lambda p=out 의 기본값을 덮어써 '파일 열기' 가 False 를 열었다."""
+    from qfluentwidgets import PushButton
+
+    got = []
+    bar = loaded.banner.show_message(
+        "x", "success", actions=[("열기", lambda p="/tmp/out.xlsx": got.append(p))], timeout_ms=0,
+    )
+    bar.findChildren(PushButton)[0].click()
+    assert got == ["/tmp/out.xlsx"]
+
+
 # ---------------------------------------------------------------- 원본 뷰어
 def test_viewer_fit_enlarges_a_small_photo(app, tmp_path):
     from app.models import DefectRecord, ParseStatus

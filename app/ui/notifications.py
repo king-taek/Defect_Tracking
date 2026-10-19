@@ -112,7 +112,8 @@ class NotificationBanner(QWidget):
             button = PushButton(label, bar)
             # 액션을 누르면 알림을 먼저 닫고 실행한다. 눌렀는데 남아 있으면 두 번 눌리기 쉽다.
             button.clicked.connect(bar.close)
-            button.clicked.connect(callback)
+            # clicked 는 checked(bool) 를 넘긴다. 그대로 넘기면 lambda p=out 의 기본값을 덮어쓴다.
+            button.clicked.connect(lambda _checked=False, cb=callback: cb())
             bar.addWidget(button)
 
         self._bars = [b for b in self._bars if _alive(b)]
