@@ -58,8 +58,12 @@ _NO_MATCH_TITLE = "매치 없음"
 
 
 def columns_for(cell_count: int) -> int:
-    """비교 카드 열 수. 시안은 칸 수와 무관하게 2열이다(기준이 왼쪽 절반을 쓰므로)."""
-    return _COLUMNS
+    """비교 카드 열 수. 기준이 왼쪽 절반을 쓰므로 2열이다.
+
+    비교 layer 가 하나뿐이면 1열이다. 2열로 두면 카드가 오른쪽 절반의 반만 쓰고 나머지가
+    빈 바탕으로 남아, 한 장뿐인 비교 사진이 기준보다 훨씬 작게 보였다.
+    """
+    return 1 if cell_count <= 1 else _COLUMNS
 
 
 class LayerCell(QFrame):
@@ -440,12 +444,17 @@ class CompareGrid(QWidget):
         cols = columns_for(len(visible))
         for index, layer in enumerate(visible):
             self._grid.addWidget(self._cells[layer], index // cols, index % cols)
-        for column in range(cols):
-            self._grid.setColumnStretch(column, 1)
+        # 열 수가 2 -> 1 로 줄면 빈 둘째 열이 늘어난 채로 남지 않게 되돌린다.
+        for column in range(_COLUMNS):
+            self._grid.setColumnStretch(column, 1 if column < cols else 0)
         rows = (len(visible) + cols - 1) // cols if visible else 0
         for row in range(max(rows, 1)):
             self._grid.setRowStretch(row, 1)
             self._grid.setRowMinimumHeight(row, theme.WELL_MIN_PX)
+        # 비교 layer 를 줄였을 때 예전 행의 최소 높이가 남으면 아래에 빈 스크롤이 생긴다.
+        for row in range(max(rows, 1), self._grid.rowCount()):
+            self._grid.setRowStretch(row, 0)
+            self._grid.setRowMinimumHeight(row, 0)
 
     # ------------------------------------------------------------ 내용
     def set_die(self, text: str) -> None:

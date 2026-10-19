@@ -24,6 +24,29 @@ _STRIP_H = 86
 _PRELOAD_PX = 320
 
 
+_WAFER_LABEL_MAX = 5
+
+
+def short_wafer_labels(wafer_ids) -> dict[str, str]:
+    """필름스트립 캡션용 짧은 wafer 이름. wafer 가 하나뿐이면 빈 문자열.
+
+    카드 폭(86px)에 wafer 이름 12자와 die 좌표를 두 줄로 넣으면 캡션이 사진을 덮었다.
+    같은 LOT 의 wafer 이름은 앞부분이 같으므로 공통 앞부분을 떼고 끝 몇 글자만 남긴다.
+    끝 글자만으로 둘이 같아지면 자르지 않는다(전체 이름은 툴팁에 있다).
+    """
+    import os
+
+    uniq = sorted({w for w in wafer_ids if w})
+    if len(uniq) <= 1:
+        return {w: "" for w in uniq}
+    prefix = os.path.commonprefix(uniq)
+    rest = {w: (w[len(prefix):] or w) for w in uniq}
+    short = {w: r[-_WAFER_LABEL_MAX:] for w, r in rest.items()}
+    if len(set(short.values())) < len(uniq):
+        return rest
+    return short
+
+
 class ThumbnailStrip(QScrollArea):
     """기준 사진 썸네일 가로 스트립."""
 

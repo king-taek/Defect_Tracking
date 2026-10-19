@@ -178,11 +178,24 @@ class _PathSettingCard(PushSettingCard):
         placeholder: str,
         value: str = "",
         parent: QWidget | None = None,
+        empty_text=None,
     ) -> None:
         super().__init__("찾아보기", icon, title, placeholder, parent)
         self._placeholder = placeholder
+        # 비어 있을 때 실제로 무엇을 쓰는지 알려 주는 문구(호출 시점에 계산). 설명문만 보이면
+        # 결과가 어디로 가는지 알 수 없었다. 설명은 툴팁으로 옮긴다.
+        self._empty_text = empty_text
+        if empty_text is not None:
+            self.setToolTip(placeholder)
         self._path = ""
         self.set_path(value, notify=False)
+
+    def refresh_content(self) -> None:
+        """빈 칸 문구가 다른 값(작업공간 등)에 기대므로 그 값이 바뀌면 다시 적는다."""
+        self.setContent(self._path or self._empty_content())
+
+    def _empty_content(self) -> str:
+        return self._empty_text() if self._empty_text is not None else self._placeholder
 
     def path(self) -> str:
         return self._path
@@ -191,7 +204,7 @@ class _PathSettingCard(PushSettingCard):
         value = (value or "").strip()
         changed = value != self._path
         self._path = value
-        self.setContent(value or self._placeholder)
+        self.setContent(value or self._empty_content())
         if changed and notify:
             self.path_changed.emit(value)
 
@@ -395,6 +408,8 @@ class SettingsPage(QWidget):
             "Excel 결과만 따로 받을 폴더입니다. 공유 폴더 등 다른 곳에 결과를 바로 "
             "내보낼 때 지정하고, 비우면 작업공간/exports 를 씁니다",
             self._settings.output_folder, group,
+            empty_text=lambda: "지정 안 함 · Excel 은 "
+            f"{Path(self.card_workspace.path() or '.') / 'exports'} 에 저장됩니다",
         )
         self.card_output.clicked.connect(self._pick_output)
         self.card_output.path_changed.connect(self._on_output_changed)
@@ -402,6 +417,11 @@ class SettingsPage(QWidget):
         self.card_device_db = _PathSettingCard(
             FluentIcon.DOCUMENT, "디바이스 DB",
             "선택 항목. AOIDeviceDB.xlsx 경로", self._settings.device_db_path, group,
+            empty_text=lambda: (
+                "지정 안 함 · 앱에 들어 있는 기본 DB 를 씁니다"
+                if config.bundled_device_db_path() else
+                "지정 안 함 · 기본 제품만 씁니다. AOIDeviceDB.xlsx 를 고르면 제품이 늘어납니다"
+            ),
         )
         self.card_device_db.clicked.connect(self._pick_device_db)
         self.card_device_db.path_changed.connect(self._on_device_db_changed)
@@ -563,6 +583,7 @@ class SettingsPage(QWidget):
             self.card_workspace.set_path(self._settings.workspace, notify=False)
             return
         self._settings.workspace = value
+        self.card_output.refresh_content()
         self._changed()
 
     def _on_output_changed(self, value: str) -> None:

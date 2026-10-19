@@ -755,7 +755,13 @@ class HeatmapPage(QWidget):
         body.setAlignment(Qt.AlignCenter)
         col.addWidget(body)
         outer.addWidget(box)
+        self.empty_title, self.empty_body = title, body
         return host
+
+    def set_empty_text(self, title: str = _EMPTY_TITLE, body: str = _EMPTY_BODY) -> None:
+        """빈 상태 문구. LOT 은 열었는데 기준을 안 고른 때는 다른 말을 해야 한다."""
+        self.empty_title.setText(title)
+        self.empty_body.setText(body)
 
     def _build_control_row(self) -> QWidget:
         """머리 행 44(시안): 제목 · 슬롯 레일 | 조사 layer 칩 … 총계. 지도가 높이를 더 가진다."""

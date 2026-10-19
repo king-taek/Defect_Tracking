@@ -54,6 +54,7 @@ from app.ui import theme
 
 _MIN_SCALE = 0.1
 _MAX_SCALE = 8.0
+_FIT_UP_MAX = 4.0   # '맞춤' 이 작은 사진을 키우는 상한(그 이상은 픽셀만 커진다)
 _HEADER_H = 52
 _HUD_MARGIN = 14        # 무대 아래 여백
 _ZOOM_LABEL_CHARS = 6   # 배율은 등폭 6자 고정폭(값이 바뀌어도 HUD 가 흔들리지 않게)
@@ -428,11 +429,16 @@ class ImageViewerDialog(QDialog):
         return (pos, hbar.value() + pos.x(), vbar.value() + pos.y(), self._scale)
 
     def _fit_scale(self) -> float:
+        """창에 꼭 맞는 배율. 작은 사진은 키운다(최대 _FIT_UP_MAX 배).
+
+        예전에는 1배를 넘지 않아 320px 리뷰 사진이 큰 창 가운데에 작게 떠 있었다. 이 창을 여는
+        이유가 크게 보는 것이므로 '맞춤' 은 창을 채운다. 원래 크기는 '1:1' 이 맡는다.
+        """
         area = self._scroll.viewport().size()
         iw, ih = self._image.width(), self._image.height()
         if iw <= 0 or ih <= 0:
             return 1.0
-        return max(min(area.width() / iw, area.height() / ih, 1.0), _MIN_SCALE)
+        return max(min(area.width() / iw, area.height() / ih, _FIT_UP_MAX), _MIN_SCALE)
 
     def _apply_scale(
         self,

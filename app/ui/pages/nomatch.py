@@ -48,6 +48,8 @@ _PAGE_SUB = (
     "누르면 판독 화면의 그 사진으로 갑니다."
 )
 _EMPTY_TEXT = "해당하는 미매칭 기준 사진이 없습니다."
+_ALL_MATCHED_TEXT = "미매칭이 없습니다. 모든 기준 사진이 하나 이상의 비교 layer 와 매치되었습니다."
+_FILTER_EMPTY_TEXT = "이 사유로 빠진 기준 사진은 없습니다. '전체' 를 눌러 다른 사유를 보세요."
 
 _COLUMNS = 4
 _PHOTO_H = 112          # 03-screens §2 의 사진 높이
@@ -360,6 +362,8 @@ class NoMatchPage(QWidget):
         self._compare_layers: list[str] = []
         self._total = 0
         self._shown = 0
+        self._has_data = False
+        self._waiting_text = ""
         self._build()
 
     # ------------------------------------------------------------ 구성
@@ -440,10 +444,30 @@ class NoMatchPage(QWidget):
             (i, matches[i]) for i in fully_unmatched_indices(matches)
         ]
         self._total = len(self._entries)
+        self._has_data = bool(matches)
         self.lbl_sub.setText(
             f"기준 {base_layer}. {_PAGE_SUB}" if base_layer else _PAGE_SUB
         )
+        self._refresh_filter_counts()
         self._populate()
+
+    def set_waiting_text(self, text: str) -> None:
+        """LOT·기준이 없을 때(데이터 없음) 가운데에 보일 문구."""
+        self._waiting_text = text
+        self._populate()
+
+    def _refresh_filter_counts(self) -> None:
+        """사유 필터 칸에 장수를 붙인다. 눌러 보기 전에 어디에 몇 장 있는지 보이게."""
+        counts = {reason: 0 for reason in _PRIORITY}
+        for _index, entry in self._entries:
+            for reason in reasons_of(entry):
+                if reason in counts:
+                    counts[reason] += 1
+        self.filter.setItemText("all", f"전체 {self._total}" if self._total else "전체")
+        for reason in _PRIORITY:
+            name = _REASON_META[reason][0]
+            n = counts[reason]
+            self.filter.setItemText(reason.value, f"{name} {n}" if n else name)
 
     def entries(self) -> list[tuple[int, Any]]:
         """완전 미매칭 (index, 기준) 목록. 창이 nav 배지 수로 쓸 수 있다."""
@@ -490,6 +514,12 @@ class NoMatchPage(QWidget):
             shown += 1
         self._shown = shown
         self.lbl_count.setText(f"총 {self._total}장 · 표시 {shown}장")
+        if not self._has_data:
+            self.lbl_empty.setText(self._waiting_text or _EMPTY_TEXT)
+        elif self._total == 0:
+            self.lbl_empty.setText(_ALL_MATCHED_TEXT)
+        elif shown == 0:
+            self.lbl_empty.setText(_FILTER_EMPTY_TEXT)
         self.lbl_empty.setVisible(shown == 0)
         self.scroll.setVisible(shown > 0)
 

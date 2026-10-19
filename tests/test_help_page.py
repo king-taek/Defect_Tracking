@@ -83,8 +83,9 @@ def test_page_object_name(page):
 
 
 def test_keycap_and_row_use_tokens(page):
-    """키캡 폭 214 유지, 행 높이는 높이표를 따른다."""
-    assert page._keycaps[0].minimumWidth() == 214
+    """키 칸 폭은 214 이상이고 모든 행이 같다(설명 열이 한 줄로 선다). 행 높이는 높이표."""
+    widths = {cap.minimumWidth() for cap in page._keycaps}
+    assert len(widths) == 1 and widths.pop() >= 214
     assert page._rows[0].minimumHeight() == theme.fluent_height("control")
     page.set_font_size("large")
     assert page._rows[0].minimumHeight() == theme.fluent_height("control", "large")

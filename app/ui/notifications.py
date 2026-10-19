@@ -12,11 +12,29 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QWidget
-from qfluentwidgets import InfoBar, InfoBarPosition, PushButton, isDarkTheme, setCustomStyleSheet
+from qfluentwidgets import InfoBar, PushButton, setCustomStyleSheet
+from qfluentwidgets.components.widgets.info_bar import InfoBarManager, TopRightInfoBarManager
 
 from app.ui import theme
+
+# 우상단이되 페이지 머리 행(44px) 아래. 그냥 TOP_RIGHT 면 알림이 머리 행 오른쪽의 버튼
+# (Excel 출력 · 미매칭 점프 · 이 위치 담기)을 3초 넘게 덮어 누를 수가 없었다.
+BELOW_HEADER_RIGHT = "belowHeaderRight"
+
+
+@InfoBarManager.register(BELOW_HEADER_RIGHT)
+class _BelowHeaderRightManager(TopRightInfoBarManager):
+    # 관리자는 클래스마다 싱글턴이다. 이 줄이 없으면 부모(TopRight)의 인스턴스를 물려받아
+    # 아래 _pos 가 한 번도 불리지 않는다.
+    _instance = None
+
+    def _pos(self, infoBar: InfoBar, parentSize=None) -> QPoint:
+        pos = super()._pos(infoBar, parentSize)
+        title_bar = getattr(infoBar.parent(), "titleBar", None)
+        top = title_bar.height() if title_bar is not None else 0
+        return QPoint(pos.x(), pos.y() - self.margin + top + theme.HEADER_ROW_PX + 8)
 
 # 레벨 -> 좌측 톤 바 색을 고르는 상태 토큰 이름.
 _TONES = {
@@ -61,6 +79,7 @@ class NotificationBanner(QWidget):
         action_text: Optional[str] = None,
         action: Optional[Callable[[], None]] = None,
         timeout_ms: Optional[int] = None,
+        actions: Optional[list[tuple[str, Callable[[], None]]]] = None,
     ) -> InfoBar:
         """알림 하나를 우상단에 띄운다.
 
@@ -81,16 +100,19 @@ class NotificationBanner(QWidget):
             content=body,
             orient=Qt.Vertical if body else Qt.Horizontal,
             isClosable=True,
-            position=InfoBarPosition.TOP_RIGHT,
+            position=BELOW_HEADER_RIGHT,
             duration=duration,
             parent=self._host(),
         )
         _add_tone_bar(bar, level)
+        pairs = list(actions or [])
         if action_text and action is not None:
-            button = PushButton(action_text, bar)
+            pairs.insert(0, (action_text, action))
+        for label, callback in pairs:
+            button = PushButton(label, bar)
             # 액션을 누르면 알림을 먼저 닫고 실행한다. 눌렀는데 남아 있으면 두 번 눌리기 쉽다.
             button.clicked.connect(bar.close)
-            button.clicked.connect(action)
+            button.clicked.connect(callback)
             bar.addWidget(button)
 
         self._bars = [b for b in self._bars if _alive(b)]

@@ -23,11 +23,13 @@ class FlowLayout(QLayout):
         margin: int = 0,
         h_spacing: int = 8,
         v_spacing: int = 6,
+        center: bool = False,
     ):
         super().__init__(parent)
         self._items: list[QLayoutItem] = []
         self._h_space = h_spacing
         self._v_space = v_spacing
+        self._center = center  # 줄마다 가운데 정렬(안내판의 버튼 줄)
         self.setContentsMargins(QMargins(margin, margin, margin, margin))
 
     # ---- QLayout 필수 구현 ------------------------------------------------
@@ -82,22 +84,35 @@ class FlowLayout(QLayout):
         x = effective.x()
         y = effective.y()
         line_height = 0
+        line: list[tuple[QLayoutItem, QRect]] = []
+
+        def flush() -> None:
+            if test_only or not line:
+                return
+            shift = 0
+            if self._center:
+                used = line[-1][1].right() - effective.x() + 1
+                shift = max((effective.width() - used) // 2, 0)
+            for it, geo in line:
+                it.setGeometry(geo.translated(shift, 0))
+            line.clear()
 
         for item in self._items:
             widget = item.widget()
-            if widget is not None and not widget.isVisible():
+            if widget is not None and widget.isHidden():
                 continue
             hint = item.sizeHint()
             next_x = x + hint.width() + self._h_space
             if next_x - self._h_space > effective.right() and line_height > 0:
                 # 줄바꿈
+                flush()
                 x = effective.x()
                 y = y + line_height + self._v_space
                 next_x = x + hint.width() + self._h_space
                 line_height = 0
-            if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+            line.append((item, QRect(QPoint(x, y), hint)))
             x = next_x
             line_height = max(line_height, hint.height())
+        flush()
 
         return y + line_height - rect.y() + margins.bottom()

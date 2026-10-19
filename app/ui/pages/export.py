@@ -65,7 +65,7 @@ _PAGE_TITLE = "출력 명세"
 _PAGE_SUB = "담은 사진만 Excel 로 나갑니다. 필요 없는 건은 행 끝에서 뺍니다"
 _EMPTY_BODY = (
     "담은 사진이 없습니다.\n"
-    "판독 화면의 '＋ 출력에 담기' 로 담거나, 위 '매치 전체 담기' 를 누르세요."
+    "판독 화면의 '＋ 출력에 담기' 로 담거나, 위 '이 기준의 매치 담기' 를 누르세요."
 )
 
 # 버튼 한 번에 여러 layer 를 합쳐 담을 때 붙는 묶음 이름.
@@ -379,7 +379,7 @@ class ExportPage(QWidget):
         head.add_stretch()
 
         height = theme.fluent_height("control", self._size_key) - 2
-        self.btn_add_all = PushButton("매치 전체 담기", head)
+        self.btn_add_all = PushButton("이 기준의 매치 담기", head)
         self.btn_add_all.setFixedHeight(height)
         self.btn_add_all.setToolTip(
             "지금 기준 layer 로 매칭된 사진을 한 묶음으로 담습니다."
@@ -387,7 +387,7 @@ class ExportPage(QWidget):
         self.btn_add_all.clicked.connect(self._add_all_matched)
         head.add_widget(self.btn_add_all)
 
-        self.btn_add_all_layers = PushButton("모든 매치 담기", head)
+        self.btn_add_all_layers = PushButton("모든 layer 매치 담기", head)
         self.btn_add_all_layers.setFixedHeight(height)
         self.btn_add_all_layers.setToolTip(
             "layer 를 하나씩 기준으로 삼아 어디서든 매치된 defect 을 모두 담습니다"

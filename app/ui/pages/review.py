@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -37,7 +37,8 @@ from qfluentwidgets import (
 
 from app.ui import theme
 from app.ui.compare_grid import CompareGrid
-from app.ui.controls import NavBar, SideBar
+from app.ui.controls import NavBar, SideBar, split_depth
+from app.ui.flow_layout import FlowLayout
 from app.ui.thumbnail_strip import ThumbnailStrip
 from app.ui.widgets import mono_font
 
@@ -184,6 +185,105 @@ class EmptyState(QWidget):
         )
 
 
+class GridNotice(QWidget):
+    """판독대 자리에 대신 서는 안내판.
+
+    기준 layer 를 아직 안 골랐거나 기준 사진이 하나도 없을 때 판독대는 빈 검은 상자만 남았다.
+    무엇을 해야 하는지 문장으로 말하고, 기준을 고르는 경우에는 layer 버튼을 바로 내민다(콤보를
+    찾아 열 필요가 없게). 추천 layer 하나만 accent 채움이다(강조는 한 화면에 하나).
+    """
+
+    layer_chosen = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("gridNotice")
+        outer = QVBoxLayout(self)
+        outer.setAlignment(Qt.AlignCenter)
+        box = QWidget(self)
+        box.setFixedWidth(520)
+        self._box = box
+        col = QVBoxLayout(box)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(12)
+        self.title = QLabel("", box)
+        self.title.setAlignment(Qt.AlignCenter)
+        col.addWidget(self.title)
+        self.body = BodyLabel("", box)
+        self.body.setObjectName("dim")
+        self.body.setWordWrap(True)
+        self.body.setAlignment(Qt.AlignCenter)
+        col.addWidget(self.body)
+        self._buttons_host = QWidget(box)
+        self._flow = FlowLayout(self._buttons_host, h_spacing=8, v_spacing=8, center=True)
+        col.addWidget(self._buttons_host)
+        self._buttons: list[PushButton] = []
+        outer.addWidget(box)
+        self._apply_tokens()
+        qconfig.themeChanged.connect(self._apply_tokens)
+
+    def set_notice(
+        self,
+        title: str,
+        body: str = "",
+        layers: list[str] | None = None,
+        counts: dict[str, int] | None = None,
+        recommended: str = "",
+    ) -> None:
+        self.title.setText(title)
+        self.body.setText(body)
+        self.body.setVisible(bool(body))
+        for button in self._buttons:
+            self._flow.removeWidget(button)
+            button.setParent(None)
+            button.deleteLater()
+        self._buttons = []
+        counts = counts or {}
+        for layer in layers or []:
+            canonical, depth = split_depth(layer)
+            label = canonical + (f" · {depth}" if depth else "")
+            if layer in counts:
+                label += f"  {counts[layer]}장"
+            cls = PrimaryPushButton if layer == recommended else PushButton
+            button = cls(label, self._buttons_host)
+            button.setFixedHeight(theme.fluent_height("primary"))
+            button.setToolTip(
+                f"{layer} 을 기준으로 봅니다" + (" (추천)" if layer == recommended else "")
+            )
+            button.clicked.connect(lambda _=False, l=layer: self.layer_chosen.emit(l))
+            self._flow.addWidget(button)
+            self._buttons.append(button)
+        self._buttons_host.setVisible(bool(self._buttons))
+        self._sync_heights()
+        QTimer.singleShot(0, self._sync_heights)
+
+    def _sync_heights(self) -> None:
+        """줄바꿈 글과 버튼 줄의 높이를 폭에서 다시 잡는다.
+
+        가운데 정렬 레이아웃은 sizeHint 만 보고 높이를 주므로, 그대로 두면 본문 셋째 줄과
+        둘째 줄 버튼이 잘린다.
+        """
+        width = self._box.width()
+        self.body.setMinimumHeight(self.body.heightForWidth(width) if self.body.text() else 0)
+        self._buttons_host.setMinimumHeight(
+            self._flow.heightForWidth(width) if self._buttons else 0
+        )
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._sync_heights()
+
+    def layer_buttons(self) -> list[PushButton]:
+        return list(self._buttons)
+
+    def _apply_tokens(self, *_args) -> None:
+        t = theme.fluent_tokens(isDarkTheme())
+        self.title.setStyleSheet(
+            f"color:{theme.flatten(t['txt1'], t['layer'])}; font-size:18px; font-weight:600;"
+            " background:transparent;"
+        )
+
+
 class ReviewPage(QWidget):
     """판독 라우트. 위젯을 만들어 두고 배선은 MainWindow 가 한다."""
 
@@ -246,15 +346,16 @@ class ReviewPage(QWidget):
         host_layout = QVBoxLayout(host)
         host_layout.setContentsMargins(_BODY_PAD_X, theme.SPACING["gapM"], _BODY_PAD_X, 0)
         host_layout.setSpacing(0)
-        self.grid = CompareGrid(loader=image_loader, parent=host)
+        # 판독대와 안내판이 같은 자리를 번갈아 쓴다.
+        self.grid_stack = QStackedWidget(host)
+        self.grid = CompareGrid(loader=image_loader, parent=self.grid_stack)
+        self.grid_notice = GridNotice(self.grid_stack)
+        self.grid_stack.addWidget(self.grid)
+        self.grid_stack.addWidget(self.grid_notice)
         # 판독대가 남는 높이를 전부 가져간다. 비교 열이 넘치면 그 열만 스크롤한다.
-        host_layout.addWidget(self.grid, 1)
-        self.grid_message = BodyLabel("", host)
-        self.grid_message.setObjectName("dim")
-        self.grid_message.setAlignment(Qt.AlignCenter)
-        self.grid_message.setMinimumHeight(200)
-        self.grid_message.hide()
-        host_layout.addWidget(self.grid_message)
+        host_layout.addWidget(self.grid_stack, 1)
+        # 옛 이름(본문 라벨).
+        self.grid_message = self.grid_notice.body
         # 옛 이름. 스크롤은 이제 판독대 안(비교 열)에 있다.
         self.grid_scroll = self.grid.scroll
         return host
@@ -273,6 +374,20 @@ class ReviewPage(QWidget):
 
     def is_empty_state(self) -> bool:
         return self.stack.currentWidget() is self.empty_state
+
+    def show_grid_notice(self, title: str, body: str = "", **layer_choice) -> None:
+        """판독대 대신 안내판을 세운다. layer_choice 는 GridNotice.set_notice 인자."""
+        self.grid_notice.set_notice(title, body, **layer_choice)
+        self.grid_stack.setCurrentWidget(self.grid_notice)
+        # 볼 사진이 없으면 "0 / 0" 과 꺼진 버튼뿐인 하단 바도 거둔다.
+        self.nav.setVisible(False)
+
+    def show_grid(self) -> None:
+        self.grid_stack.setCurrentWidget(self.grid)
+        self.nav.setVisible(True)
+
+    def is_grid_notice(self) -> bool:
+        return self.grid_stack.currentWidget() is self.grid_notice
 
     def sidebar_width(self) -> int:
         """옛 창 지오메트리 계약. 사이드바가 없어졌으므로 0."""

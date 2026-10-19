@@ -48,6 +48,7 @@ from app.ui.pages.help import HelpPage
 from app.ui.pages.nomatch import NoMatchPage, fully_unmatched_indices, next_unmatched_index
 from app.ui.pages.settings import SettingsPage, ask_update, show_update_notice
 from app.ui.pages.review import ReviewPage
+from app.ui.thumbnail_strip import short_wafer_labels
 from app.ui.busy_overlay import BusyOverlay
 from app.workers import ExportWorker, MatchWorker, ScanWorker, ThumbnailWorker
 
@@ -117,6 +118,7 @@ class MainWindow(FluentWindow):
         self._install_shortcuts()
         self._apply_saved_prefs()
         self._apply_aoi_mode_ui()
+        self._refresh_nomatch_page()  # 미매칭 페이지의 첫 안내 문구
         self._maybe_check_update()
         # 창이 그려진 뒤에 안내한다. 생성 도중 띄우면 창 뒤에 숨는다.
         QTimer.singleShot(0, self._maybe_show_theme_notice)
@@ -233,8 +235,8 @@ class MainWindow(FluentWindow):
         self.settings_page.font_size_changed.connect(self.help_page.set_font_size)
 
         self.addSubInterface(self.review_page, FluentIcon.VIEW, "판독")
-        # FluentIcon.CANCEL 은 이 버전에서 되돌리기 화살표로 그려진다. D 표의 대체안 CLOSE 를 쓴다.
-        self.addSubInterface(self.nomatch_page, FluentIcon.CLOSE, "미매칭")
+        # 깃발: "다시 볼 것으로 표시된 사진". CLOSE(✕)는 창 닫기·삭제처럼 읽혀 누르기를 망설였다.
+        self.addSubInterface(self.nomatch_page, FluentIcon.FLAG, "미매칭")
         self.addSubInterface(self.heatmap_page, FluentIcon.TILES, "히트맵")
         self.addSubInterface(self.export_page, FluentIcon.DOCUMENT, "출력 명세")
         self.addSubInterface(
@@ -251,6 +253,11 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setMinimumExpandWidth(10**6)
         self._paint_shell()
         qconfig.themeChanged.connect(self._paint_shell)
+        # nav 로 들어온 페이지에도 지금 LOT 의 데이터를 채운다. 예전에는 기준 사진의 die
+        # 링크나 Ctrl+E 로 들어올 때만 채워서, nav 의 히트맵은 LOT 을 열어 둔 채로도
+        # "LOT 폴더를 선택하세요" 를 보였다.
+        self._heatmap_sig = None
+        self.stackedWidget.currentChanged.connect(self._on_route_changed)
 
     def _paint_shell(self, *_args) -> None:
         """창 바탕(win)과 페이지 면(layer)을 토큰으로 칠한다.
@@ -289,12 +296,12 @@ class MainWindow(FluentWindow):
         self.lbl_view = page.lbl_view
         # SLOT·die 는 탐색 바의 링크로 옮겼다(A12). 이름은 그대로 둔다.
         self.lbl_wafer = page.lbl_wafer
-        self._empty_label = page.grid_message
 
     def _wire_review_page(self) -> None:
         page = self.review_page
         page.empty_state.open_requested.connect(self._choose_folder)
         page.empty_state.recent_chosen.connect(self._open_folder)
+        page.grid_notice.layer_chosen.connect(self.top.cmb_base.setCurrentText)
 
         self.top.open_folder.connect(self._choose_folder)
         self.top.base_layer_changed.connect(lambda _: self._rebuild_all())
@@ -377,6 +384,12 @@ class MainWindow(FluentWindow):
         QShortcut(QKeySequence(Qt.Key_U), self, activated=self._jump_unmatched)
         QShortcut(QKeySequence(Qt.Key_A), self, activated=self._add_current_to_export)
         QShortcut(QKeySequence(Qt.Key_F1), self, activated=self._open_help)
+        # 화면 전환. nav 레일은 아이콘뿐이라 키보드로 가는 길도 둔다(도움말 표와 같은 순서).
+        for number, page in enumerate(
+            (self.review_page, self.nomatch_page, self.heatmap_page, self.export_page), 1
+        ):
+            QShortcut(QKeySequence(f"Ctrl+{number}"), self,
+                      activated=lambda p=page: self.switchTo(p))
 
     def _apply_saved_prefs(self) -> None:
         # 0.0(정확 일치)도 유효한 사용자 설정이므로 falsy 검사로 떨어뜨리지 않는다.
@@ -406,20 +419,23 @@ class MainWindow(FluentWindow):
                     self._open_folder(folder)
 
     def _open_wafer_selection(self, wafer_folder: str, lot: str) -> None:
-        """wafer 폴더를 골랐을 때: 개별 wafer 만 볼지 물어보고, 아니면 LOT 로 회귀한다."""
-        from PySide6.QtWidgets import QMessageBox
+        """wafer 폴더를 골랐을 때: 개별 wafer 만 볼지 물어보고, 아니면 LOT 로 회귀한다.
+
+        다른 확인 창(업데이트 등)과 같은 Fluent MessageBox 를 쓴다. 순수 Qt 창은 이 화면만
+        옛 Windows 모양으로 떠서 다른 프로그램 창처럼 보였다.
+        """
+        from qfluentwidgets import MessageBox
 
         wafer_id = Path(wafer_folder).name
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Question)
-        box.setWindowTitle("wafer 폴더 선택")
-        box.setText(f"wafer 폴더 ‘{wafer_id}’ 를 선택했습니다.\n개별 wafer 의 매칭 정보를 볼까요?")
-        box.setInformativeText("‘전체 LOT 보기’를 누르면 상위 LOT 폴더로 이동합니다.")
-        btn_wafer = box.addButton("이 wafer 만 보기", QMessageBox.YesRole)
-        box.addButton("전체 LOT 보기", QMessageBox.NoRole)
-        box.setDefaultButton(btn_wafer)
-        box.exec()
-        if box.clickedButton() is btn_wafer:
+        box = MessageBox(
+            "wafer 폴더를 골랐습니다",
+            f"wafer ‘{wafer_id}’ 만 볼까요, LOT 전체를 볼까요?\n"
+            "LOT 전체를 고르면 이 wafer 를 담은 LOT 폴더를 엽니다.",
+            self,
+        )
+        box.yesButton.setText("이 wafer 만 보기")
+        box.cancelButton.setText("LOT 전체 보기")
+        if box.exec():
             self.load_lot(lot, wafer_filter=wafer_id)
         else:
             self.load_lot(lot)  # 잘못 고른 경우 → LOT 자동 회귀
@@ -671,8 +687,12 @@ class MainWindow(FluentWindow):
                 "warn", timeout_ms=0,
             )
             self.top.set_status("layer 없음")
-            self._empty_label.setVisible(True)
             self.grid.build_layout([], "")
+            self.review_page.show_grid_notice(
+                "layer 를 찾지 못했습니다",
+                "고른 폴더 아래에 layer 폴더가 없습니다. LOT 폴더(layer 폴더들을 담은 곳)를 "
+                "다시 골라 주세요.",
+            )
             self.nav.set_enabled(False)
             return
 
@@ -685,15 +705,15 @@ class MainWindow(FluentWindow):
 
         ok = sum(1 for r in index.records if r.ok)
         failed = [r for r in index.records if not r.ok]
-        status = (
-            f"layer {len(layers)}개 · wafer {len(index.wafers())}개 · "
-            f"이미지 {len(index.records)}개(좌표 OK {ok}개"
-        )
+        # 한 줄은 짧게, 자세한 수는 툴팁에. 예전 문구는 매칭 요약과 이어 붙어 한 덩어리로 읽혔다.
+        status = f"layer {len(layers)} · wafer {len(index.wafers())} · 사진 {len(index.records)}"
         if failed:
-            status += f", 실패 {len(failed)}개"
-        status += ")"
+            status += f" · 좌표 실패 {len(failed)}"
         self.top.set_status(status)
-        self.top.set_status_tooltip(self._failure_summary(failed))
+        self.top.set_status_tooltip(
+            f"사진 {len(index.records)}장 중 좌표를 읽은 사진 {ok}장\n\n"
+            + self._failure_summary(failed)
+        )
         # 좌표 추출 실패 진단 리포트는 개발자 모드(환경변수 또는 설정)에서만 파일로 남긴다.
         report_path = self._write_diag_report(index) if config.dev_mode(self.settings) else None
         if failed:
@@ -780,10 +800,17 @@ class MainWindow(FluentWindow):
         self.nav.set_index(0, 0)
         self.top.set_match_summary("")
         self._update_add_export_button()  # 트레이는 유지, 버튼 상태만 갱신
+        self._refresh_nomatch_page()
         rec = self._recommended_base()
-        hint = f"  (추천: {rec})" if rec else ""
-        self.grid.show_empty(f"기준 layer 를 선택하세요.{hint}")
-        self._empty_label.setVisible(False)
+        layers = self.lot_index.layer_canonicals() if self.lot_index else []
+        by_layer = self.lot_index.records_by_layer() if self.lot_index else {}
+        counts = {lyr: sum(1 for r in by_layer.get(lyr, []) if r.ok) for lyr in layers}
+        self.review_page.show_grid_notice(
+            "기준 layer 를 고르세요",
+            "고른 layer 의 defect 을 하나씩 보면서 다른 layer 의 같은 자리 사진을 옆에 "
+            "놓습니다. 나중에 위쪽 '기준' 칸에서 바꿀 수 있습니다.",
+            layers=layers, counts=counts, recommended=rec,
+        )
 
     # ------------------------------------------------------- 재계산(비동기)
     def _rebuild_all(self) -> None:
@@ -827,12 +854,15 @@ class MainWindow(FluentWindow):
     def _strip_captions_and_tooltips(self) -> tuple[list[str], list[str]]:
         """현재 self.matches 로 상단 썸네일 스트립의 캡션·툴팁을 만든다."""
         captions, tooltips = [], []
+        wafer_label = short_wafer_labels(m.base.wafer_id for m in self.matches)
         for m in self.matches:
             r = m.base
             extra = getattr(m.base_cluster, "extra_count", 0) or 0
-            cap = f"{r.wafer_id}\n({r.col},{r.row})"
+            # 한 줄 캡션: 짧은 wafer 이름 + die. 두 줄이면 카드 높이를 넘어 사진을 덮는다.
+            short = wafer_label.get(r.wafer_id, "")
+            cap = f"{short} {r.col},{r.row}" if short else f"die {r.col},{r.row}"
             if extra:
-                cap += f"  +{extra}"
+                cap += f" +{extra}"
             captions.append(cap)
             tt = f"wafer {r.wafer_id} · die({r.col},{r.row}) · pos {r.position_key}"
             if r.defect_name:
@@ -851,15 +881,19 @@ class MainWindow(FluentWindow):
 
         self._rebuild_grid()
         self.busy.pump()
-        self._empty_label.setVisible(not self.base_records)
         self.nav.set_enabled(bool(self.base_records))
         if self.base_records:
+            self.review_page.show_grid()
             view = self._view_indices()
             self._goto(view[0] if view else 0)
         else:
             self.nav.set_index(0, 0)
-            self.grid.show_empty("기준 layer 에 좌표 OK 인 사진이 없습니다.")
             self.grid.set_die("")
+            self.review_page.show_grid_notice(
+                f"기준 '{self.top.base_layer()}' 에 볼 사진이 없습니다",
+                "이 layer 에는 좌표를 읽을 수 있는 defect 사진이 없습니다. "
+                "다른 layer 를 기준으로 골라 보세요.",
+            )
         self._refresh_strip_marks()
         self._update_add_export_button()
 
@@ -932,10 +966,35 @@ class MainWindow(FluentWindow):
         self.busy.stop()
         self.banner.show_message(f"매칭 실패: {msg}", "error")
 
-    def _open_heatmap(self, select_die=None) -> None:
-        """히트맵 라우트로 간다. select_die 가 있으면 그 die 를 고른 채로 연다(A12)."""
+    def _on_route_changed(self, _index: int = 0) -> None:
+        page = self.stackedWidget.currentWidget()
+        if page is self.heatmap_page:
+            if self._heatmap_signature() != self._heatmap_sig:
+                self._feed_heatmap()
+        elif page is self.export_page:
+            self._feed_export_page()
+
+    def _heatmap_signature(self):
+        return (id(self.matches), len(self.matches), self.top.base_layer(),
+                tuple(self.top.compare_layers()))
+
+    def _waiting_text(self) -> tuple[str, str]:
+        """LOT·기준이 없을 때 다른 페이지가 보일 안내(제목, 본문)."""
+        if self.lot_index is None:
+            return ("LOT 폴더를 선택하세요",
+                    "판독 화면에서 LOT 폴더를 열고 기준 layer 를 고르면 여기에 결과가 나옵니다.")
+        if not self.top.base_layer():
+            return ("기준 layer 를 고르세요",
+                    "LOT 은 열려 있습니다. 판독 화면에서 기준 layer 를 고르면 여기에 결과가 "
+                    "나옵니다.")
+        return ("볼 사진이 없습니다",
+                f"기준 '{self.top.base_layer()}' 에 좌표를 읽을 수 있는 사진이 없습니다.")
+
+    def _feed_heatmap(self, select_die=None) -> None:
+        self._heatmap_sig = self._heatmap_signature()
         if not self.matches:
-            self.banner.show_message("먼저 LOT 폴더와 기준 layer 를 선택하세요.", "info")
+            self.heatmap_page.set_empty_text(*self._waiting_text())
+            self.heatmap_page.set_data([])
             return
         self.heatmap_page.set_data(
             self.matches,
@@ -949,6 +1008,13 @@ class MainWindow(FluentWindow):
             records_by_layer=self.lot_index.records_by_layer() if self.lot_index else {},
             select_die=select_die,
         )
+
+    def _open_heatmap(self, select_die=None) -> None:
+        """히트맵 라우트로 간다. select_die 가 있으면 그 die 를 고른 채로 연다(A12)."""
+        if not self.matches:
+            self.banner.show_message("먼저 LOT 폴더와 기준 layer 를 선택하세요.", "info")
+            return
+        self._feed_heatmap(select_die)
         self.switchTo(self.heatmap_page)
 
     def _goto_die_from_heatmap(self, col: int, row: int) -> None:
@@ -975,22 +1041,23 @@ class MainWindow(FluentWindow):
         bases_matched = sum(
             1 for m in self.matches if any(r.is_match for r in m.results)
         )
-        self.top.set_match_summary(
-            f"매칭 {matched_pairs}/{total_pairs} 쌍 · "
-            f"기준 {bases_matched}/{len(self.matches)}장"
-        )
-        # layer 간 전역 정합오차(median)를 tooltip 으로 안내(레지스트레이션 shift 파악)
-        lines = ["[layer 간 정합오차(중앙값)]"]
+        self.top.set_match_summary(f"매칭 {bases_matched}/{len(self.matches)}장")
+        # 쌍 수와 layer 간 전역 정합오차(median)는 tooltip 으로(레지스트레이션 shift 파악)
+        lines = [
+            f"기준 사진 {len(self.matches)}장 중 {bases_matched}장이 하나 이상의 layer 와 매치",
+            f"layer 쌍으로는 {matched_pairs}/{total_pairs} 쌍 매치",
+            "",
+            "[layer 간 정합오차(중앙값)]",
+        ]
         for layer, off in self._layer_offsets.items():
             if off.count:
                 lines.append(
                     f"  {layer}: dx {off.dx:+.1f}, dy {off.dy:+.1f} µm "
                     f"(1:1 {off.count}쌍 기준, 보정 적용)"
                 )
-        if len(lines) > 1:
-            self.top.lbl_match.setToolTip("\n".join(lines))
-        else:
-            self.top.lbl_match.setToolTip("")
+        if len(lines) == 4:
+            lines = lines[:2]
+        self.top.lbl_match.setToolTip("\n".join(lines))
 
     def _rebuild_grid(self) -> None:
         base_layer = self.top.base_layer()
@@ -1033,12 +1100,12 @@ class MainWindow(FluentWindow):
         if not self.matches or not (0 <= self.current < len(self.matches)):
             self.banner.show_message("담을 기준 사진이 없습니다.", "info")
             return
-        self._add_indices_to_export([self.current])
+        self._add_indices_to_export([self.current], quiet_single=True)
 
     def _tray_keys(self) -> set:
         return {str(m.base.image_path) for m, _tag in self._export_tray}
 
-    def _add_indices_to_export(self, indices: list[int]) -> None:
+    def _add_indices_to_export(self, indices: list[int], quiet_single: bool = False) -> None:
         """주어진 base index 들의 매칭 스냅샷을 출력 트레이에 담는다(중복 무시).
 
         개별로 담는 항목은 태그 없음(개별 행). 묶음(태그)은 출력 명세 페이지의 '전체 담기'
@@ -1055,13 +1122,15 @@ class MainWindow(FluentWindow):
                     keys.add(k)
                     added += 1
         self._sync_export_page()
-        if added:
+        if added > 1 or (added == 1 and not quiet_single):
             self.banner.show_message(
                 f"출력 목록에 {added}장 담았습니다. (현재 {len(self._export_tray)}장)",
                 "success", timeout_ms=2000,
             )
-        else:
+        elif added == 0:
             self.banner.show_message("이미 담긴 사진입니다.", "info", timeout_ms=1500)
+        # 판독 화면에서 지금 사진 한 장을 담을 때는 알림을 띄우지 않는다. 담기 버튼이 '✓ 담김 (n)' 으로, 필름스트립 카드에
+        # '담김' 표식이, nav 에 장수 배지가 바로 붙는다. 알림은 비교 카드의 거리 표시를 덮었다.
 
     def _clear_export_tray(self) -> None:
         self._export_tray = []
@@ -1213,6 +1282,7 @@ class MainWindow(FluentWindow):
 
     def _refresh_nomatch_page(self) -> None:
         """미매칭 페이지와 nav 배지에 현재 매칭 결과를 공급한다."""
+        self.nomatch_page.set_waiting_text(". ".join(self._waiting_text()))
         self.nomatch_page.set_data(
             self.matches, self.thumb_cache,
             self.top.base_layer(), self.top.compare_layers(),
@@ -1220,15 +1290,17 @@ class MainWindow(FluentWindow):
         self._set_nav_badge("nomatchInterface", len(fully_unmatched_indices(self.matches)))
 
     def _refresh_view_count(self) -> None:
+        """필름스트립 후보 수. 매칭 요약('매칭 a/b장')과 같은 수라 화면에는 툴팁으로만 둔다."""
         if self._filter == "all" or not self.matches:
             self.lbl_view.setText("")
             return
         n_view = len(self._view_indices())
         excluded = len(self.matches) - n_view
-        if self._filter == "matched" and excluded > 0:
-            self.lbl_view.setText(f"({n_view}개 · 제외 {excluded})")
-        else:
-            self.lbl_view.setText(f"({n_view}개)")
+        hint = f"아래 목록 {n_view}장"
+        if excluded > 0:
+            hint += f" (매치 없는 {excluded}장은 빼고 미매칭 화면에 모음)"
+        self.lbl_view.setText("")
+        self.strip.setToolTip("세로 휠로 좌우 스크롤 · 클릭하면 기준 사진 변경\n" + hint)
 
     def _refresh_strip_marks(self) -> None:
         """썸네일에 매칭 상태 점을 반영한다."""
@@ -1562,12 +1634,16 @@ class MainWindow(FluentWindow):
         if not self.matches:
             self.banner.show_message("먼저 LOT 폴더를 불러오세요.", "info")
             return
+        self._feed_export_page()
+        self.switchTo(self.export_page)
+
+    def _feed_export_page(self) -> None:
+        """출력 명세에 트레이와 '매치 전체 담기' 후보를 공급한다(nav 로 들어와도)."""
         self.export_page.set_tray(self._export_tray)
         self.export_page.set_all_matched(
             [m for m in self.matches if self._match_status(m) != "none"],
             f"기준 '{self.top.base_layer()}' 매치 전체",
         )
-        self.switchTo(self.export_page)
 
     def _on_export_tray_changed(self, _count: int = 0) -> None:
         """명세 페이지에서 담거나 뺀 것을 창의 트레이에 되돌려 받는다.
@@ -1643,14 +1719,17 @@ class MainWindow(FluentWindow):
         if self.settings.output_folder == "":
             self.settings.output_folder = str(Path(out).parent)
         self.settings.save()
+        # 출력한 다음 할 일은 대개 파일을 열어 보는 것이다. 폴더를 거치지 않고 바로 연다.
         self.banner.show_message(
-            f"결과를 저장했습니다: {Path(out).name}",
+            Path(out).name,
             "success",
-            action_text="폴더 열기",
-            action=lambda p=out: QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(Path(p).parent))
-            ),
-            timeout_ms=7000,
+            title="Excel 저장 완료",
+            actions=[
+                ("파일 열기", lambda p=out: QDesktopServices.openUrl(QUrl.fromLocalFile(p))),
+                ("폴더 열기", lambda p=out: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(Path(p).parent)))),
+            ],
+            timeout_ms=10000,
         )
 
     def _on_export_error(self, msg: str) -> None:

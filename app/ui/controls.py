@@ -81,11 +81,18 @@ def split_depth(display: str) -> tuple[str, str]:
     return display, ""
 
 
+# Fluent 스핀박스 QSS 의 좌우 안쪽 여백(symbolVisible=false) + 테두리 1px.
+_SPIN_EDIT_PAD = 11
+
+
 class NoScrollDoubleSpinBox(DoubleSpinBox):
     """마우스 휠로 값이 바뀌지 않는 스핀박스.
 
     판독대를 스크롤하다 허용오차가 실수로 바뀌는 것을 막는다. 포커스가 있을 때 키보드·직접
     입력은 정상 동작한다. 계승 필수 항목이다.
+
+    PySide6 6.12 는 스타일시트가 걸린 스핀박스의 입력칸 폭을 1px 로 잡는다(6.9 는 정상).
+    그러면 허용오차 값이 화면에서 사라진다. 입력칸이 비정상으로 좁으면 직접 자리를 잡아 준다.
     """
 
     def __init__(self, *args, **kwargs):
@@ -94,6 +101,26 @@ class NoScrollDoubleSpinBox(DoubleSpinBox):
 
     def wheelEvent(self, event):  # noqa: N802
         event.ignore()  # 휠은 항상 무시(부모 스크롤로 전달)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._fix_edit_geometry()
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._fix_edit_geometry()
+
+    def changeEvent(self, event):  # noqa: N802
+        super().changeEvent(event)
+        # 테마·글자 크기가 바뀌면 Qt 가 입력칸 자리를 다시 계산한다(그때 다시 1px 이 된다).
+        self._fix_edit_geometry()
+
+    def _fix_edit_geometry(self) -> None:
+        edit = self.lineEdit()
+        if edit is None or edit.width() >= self.width() // 2:
+            return
+        pad = _SPIN_EDIT_PAD
+        edit.setGeometry(pad, 1, max(self.width() - 2 * pad, 1), max(self.height() - 2, 1))
 
 
 class NoScrollComboBox(ComboBox):
@@ -427,15 +454,17 @@ class SideBar(QFrame):
         row.addStretch(1)
 
         # 오른쪽: 보기 수 · 상태 · 매칭 요약(등폭) | 미매칭 점프
+        # 보기 수는 매칭 요약과 같은 수라 화면에서 뺐다(이름은 배선 계약이라 남긴다).
         self.lbl_view = CaptionLabel("", self)
         self.lbl_view.setObjectName("dim")
-        row.addWidget(self.lbl_view)
+        self.lbl_view.hide()
         self.lbl_status = CaptionLabel("", self)
         self.lbl_status.setObjectName("dim")
         row.addWidget(self.lbl_status)
-        self.lbl_match = CaptionLabel("", self)
-        self.lbl_match.setObjectName("dim")
-        self.lbl_match.setFont(mono_font(12))
+        row.addSpacing(theme.SPACING["gapM"])
+        # 허용오차를 바꾸면 바로 따라 움직이는 수라 흐리게 두지 않는다.
+        self.lbl_match = StrongBodyLabel("", self)
+        self.lbl_match.setFont(mono_font(12, bold=True))
         row.addWidget(self.lbl_match)
 
         row.addSpacing(6)

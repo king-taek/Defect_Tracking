@@ -40,6 +40,7 @@ SHORTCUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("Home / End", "처음 / 끝 기준 사진으로"),
         ("U", "다음 '미매칭 포함' 기준으로 점프"),
         ("F5", "현재 LOT 폴더 다시 스캔"),
+        ("Ctrl + 1 ~ 4", "판독 · 미매칭 · 히트맵 · 출력 명세 화면으로"),
     ]),
     ("선택", [
         ("Ctrl + A / Ctrl + D", "비교 Layer 전체 선택 / 모두 해제"),
@@ -74,8 +75,9 @@ FEATURES: list[tuple[str, str]] = [
      "웨이퍼맵에서 드래그하면 사각형으로 여러 die 를 한 번에 선택합니다(항상 가능). "
      "'여러 다이 선택'을 켜면 클릭이 die 를 누적 토글합니다."),
     ("defect 클러스터링",
-     "같은 layer 에서 거리 50 미만으로 붙은 defect 은 하나로 묶어 대표 1장만 보이고, "
-     "좌하단 '+n' 을 누르면 묶인 나머지도 모두 볼 수 있습니다."),
+     "같은 die 에서 클러스터 길이(기본 50)보다 가까이 붙은 defect 은 하나로 묶어 대표 1장만 "
+     "보입니다. 기준 사진 오른쪽 아래 '＋n 근접' 을 누르면 묶인 나머지도 모두 볼 수 있고, "
+     "길이는 비교 layer 선택 창 아래에서 바꿉니다."),
     ("출력 명세",
      "'담기'로 원하는 defect 을 모아 두었다가 'Excel 출력'으로 한 번에 리포트를 만듭니다. "
      "layer·LOT 을 바꿔도 담은 사진은 유지됩니다."),
@@ -93,6 +95,41 @@ _MONO = "'Cascadia Mono','Consolas',monospace"
 _FEATURE_COLUMNS = 1  # 두 열 배치의 오른쪽 열 안에서는 카드가 한 줄씩 쌓인다
 # 02 §2 의 굵기 600. PySide6 setFont 는 정수 대신 QFont.Weight 를 받는다.
 _W600 = QFont.Weight.DemiBold
+
+
+_KEY_SEPARATORS = {"/", "·", "+", "~"}
+
+
+class _KeyCombo(QWidget):
+    """키 조합 한 칸. 키마다 작은 키캡을 따로 그린다.
+
+    예전에는 조합 전체("Ctrl + A / Ctrl + D")를 214px 테두리 상자 하나에 넣어 입력칸처럼
+    보였다. 키만 키캡으로, 구분자(/ · + ~)와 마우스 동작(이미지 클릭)은 글자로 둔다.
+    `text()` 는 원래 문자열이다(데이터와 1:1 대조용).
+    """
+
+    def __init__(self, key: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._key = key
+        self.caps: list[QLabel] = []
+        self.separators: list[QLabel] = []
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        for token in key.split(" "):
+            if not token:
+                continue
+            label = QLabel(token, self)
+            if token in _KEY_SEPARATORS or any("\uac00" <= ch <= "\ud7a3" for ch in token):
+                self.separators.append(label)
+            else:
+                label.setObjectName("helpKeycap")
+                self.caps.append(label)
+            lay.addWidget(label, 0, Qt.AlignVCenter)
+        lay.addStretch(1)
+
+    def text(self) -> str:
+        return self._key
 
 
 class HelpPage(QWidget):
@@ -189,6 +226,17 @@ class HelpPage(QWidget):
                 col.addWidget(self._shortcut_row(card, key, desc))
         return card
 
+    def _align_keycaps(self) -> None:
+        """설명 열이 한 줄로 서도록 키 칸 폭을 가장 넓은 조합에 맞춘다(최소 214).
+
+        키캡의 안쪽 여백이 스타일시트로 정해지므로 칠한 뒤에 잰다.
+        """
+        for combo in self._keycaps:
+            combo.setMinimumWidth(0)
+        widest = max([_KEYCAP_MIN_PX] + [c.sizeHint().width() for c in self._keycaps])
+        for combo in self._keycaps:
+            combo.setMinimumWidth(widest)
+
     def _shortcut_row(self, parent: QWidget, key: str, desc: str) -> QFrame:
         row = QFrame(parent)
         row.setObjectName("helpRow")
@@ -197,10 +245,8 @@ class HelpPage(QWidget):
         lay.setContentsMargins(18, 11, 18, 11)
         lay.setSpacing(theme.SPACING["gapL"])
 
-        cap = QLabel(key, row)
-        cap.setObjectName("helpKeycap")
+        cap = _KeyCombo(key, row)
         cap.setMinimumWidth(_KEYCAP_MIN_PX)
-        cap.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(cap, 0, Qt.AlignVCenter)
         self._keycaps.append(cap)
 
@@ -301,13 +347,20 @@ class HelpPage(QWidget):
                 f" border-bottom:1px solid {divider}; }}"
                 f"QFrame#helpRow:hover {{ background:{subtle}; }}"
             )
-        for cap in self._keycaps:
-            cap.setStyleSheet(
-                f"QLabel#helpKeycap {{ color:{txt1}; background:{ctrl_bg};"
-                f" border:1px solid {ctrl_bd}; border-bottom-color:{ctrl_bd_bottom};"
-                f" border-radius:4px; padding:4px 9px; font-family:{_MONO};"
-                f" font-size:{self._px('captionSm'):.1f}px; font-weight:600; }}"
-            )
+        for combo in self._keycaps:
+            for cap in combo.caps:
+                cap.setStyleSheet(
+                    f"QLabel#helpKeycap {{ color:{txt1}; background:{ctrl_bg};"
+                    f" border:1px solid {ctrl_bd}; border-bottom:2px solid {ctrl_bd_bottom};"
+                    f" border-radius:4px; padding:2px 7px; font-family:{_MONO};"
+                    f" font-size:{self._px('captionSm'):.1f}px; font-weight:600; }}"
+                )
+            for sep in combo.separators:
+                sep.setStyleSheet(
+                    f"QLabel {{ color:{txt2}; background:transparent;"
+                    f" font-size:{self._px('captionSm'):.1f}px; }}"
+                )
+        self._align_keycaps()
         for desc in self._descs:
             desc.setStyleSheet(
                 f"QLabel#helpDesc {{ color:{txt2}; background:transparent;"

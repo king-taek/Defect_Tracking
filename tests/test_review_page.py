@@ -134,10 +134,15 @@ def test_cluster_radius_moved_into_the_flyout(app):
 
 
 # ---------------------------------------------------------------- 판독대
-@pytest.mark.parametrize("cells", [1, 4, 5, 9, 10, 12])
+@pytest.mark.parametrize("cells", [2, 4, 5, 9, 10, 12])
 def test_reading_well_column_rule(cells):
-    """시안: 기준이 왼쪽 절반을 쓰므로 비교 카드는 칸 수와 무관하게 2열이다."""
+    """시안: 기준이 왼쪽 절반을 쓰므로 비교 카드는 2열이다."""
     assert columns_for(cells) == 2
+
+
+def test_single_compare_card_uses_the_whole_right_half():
+    """비교 layer 가 하나면 1열. 2열이면 카드가 오른쪽의 반만 쓰고 나머지가 비었다."""
+    assert columns_for(1) == 1
 
 
 def test_twelve_cells_keep_the_minimum_reading_height(win):
