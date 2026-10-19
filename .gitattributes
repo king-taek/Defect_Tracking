@@ -1,0 +1,18 @@
+# 자동 업데이트가 받는 GitHub zip 에는 배포에 필요한 것만 담는다.
+# updater 는 zip 을 %TEMP% 에 받은 뒤 _SKIP_DIRS·_SKIP_FILES 로 거르므로, 거를 파일도
+# 일단 사용자 PC 에 내려온다. 여기서 빼면 zip 에 아예 들어가지 않는다.
+# ★ updater 의 두 목록과 같은 결과여야 한다 (tests/test_updater.py 가 대조).
+
+# 개발 전용 폴더 (= updater._SKIP_DIRS 의 (2))
+.claude/**                          export-ignore
+.github/**                          export-ignore
+tests/**                            export-ignore
+tools/**                            export-ignore
+design_handoff_fluent_redesign/**   export-ignore
+
+# 개발 전용 파일, 어느 폴더에 있든 (= updater._SKIP_FILES)
+CLAUDE.md       export-ignore
+README.md       export-ignore
+build_exe.py    export-ignore
+.gitignore      export-ignore
+.gitattributes  export-ignore

@@ -36,6 +36,8 @@ UI 는 오프스크린 스모크, 순수 로직은 단위 테스트로 검증한
   새 브랜치로 옮겨도 이 규칙이 그대로 적용되도록.)
 - 기밀(고객 디바이스 좌표가 담긴 `Origin/*.xlsx`, `*.xlsm`)은 커밋 금지(.gitignore 유지).
   외부 `AOIDeviceDB.xlsx` 는 런타임에만 읽고 저장소에 포함하지 않는다.
+- updater 의 `_SKIP_DIRS`·`_SKIP_FILES` 를 바꾸면 루트 `.gitattributes`(export-ignore)도 같이 고친다.
+  zip 단계에서 빼지 않으면 개발 파일이 사용자 PC 임시 폴더로 내려온다.
 
 ## 스킬 사용 규칙 (세션마다 적용)
 설치한 스킬은 `.claude/skills/README.md` 에 있다. 사용자가 초보라 **알아서 쓰는 쪽**을 원한다(2026-10-18).

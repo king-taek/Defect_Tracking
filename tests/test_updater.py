@@ -223,3 +223,40 @@ def test_apply_via_zip_updates_only_target(tmp_path):
     assert updater.read_version(target) == "newsha"
     # 실제 루트(여기선 tmp_path)에 다른 파일은 그대로
     assert real_root_marker.read_text() == "x"
+
+
+def test_gitattributes_export_ignore_matches_updater_skip_lists(tmp_path):
+    """GitHub zip(export-ignore 반영)에 담긴 파일 = updater 가 실제로 설치하는 파일.
+
+    updater 는 zip 을 받은 뒤 거르므로, 루트 .gitattributes 로 zip 단계에서 미리 빼야
+    개발 파일(.claude 스크립트 등)이 사용자 PC 임시 폴더로 내려오지 않는다.
+    """
+    import shutil
+    import subprocess
+    import tarfile
+
+    import pytest
+
+    root = Path(__file__).resolve().parent.parent
+    if shutil.which("git") is None or not (root / ".git").exists():
+        pytest.skip("git 저장소가 아님")
+
+    def git(*args) -> bytes:
+        return subprocess.run(
+            ["git", *args], cwd=root, check=True, capture_output=True
+        ).stdout
+
+    archive = git("archive", "--worktree-attributes", "HEAD")
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tf:
+        exported = {m.name for m in tf.getmembers() if m.isfile()}
+
+    tracked = git("ls-tree", "-r", "-z", "--name-only", "HEAD").decode().split("\0")
+    tracked = [t for t in tracked if t]
+    zp = _make_zip(tmp_path, {rel: "" for rel in tracked})
+    target = tmp_path / "install"
+    updater.extract_over(zp, target)
+    installed = {p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()}
+
+    assert not any(n.startswith(".claude/") for n in exported)
+    # .gitattributes 는 zip 에서 빠지지만 _SKIP_FILES 에는 없다(유일하게 허용한 차이).
+    assert exported == installed - {".gitattributes"}
