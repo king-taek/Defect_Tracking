@@ -60,9 +60,10 @@ UI 는 오프스크린 스모크, 순수 로직은 단위 테스트로 검증한
 | 파서·매처·좌표 해석을 여러 곳에 걸쳐 고침 | `change-impact` | 고치기 전 영향 범위를 근거로 적고, 고친 뒤 diff 와 대조 |
 | 리뷰 · 머지 전 | `silent-failure-hunter`(에이전트) · `python-reviewer`(에이전트) | 삼킨 예외·조용한 기본값·파이썬 관용 위반을 따로 잡음 |
 | 화면 배치·색·글꼴 | `impeccable` → `ui-ux-pro-max` · `design-dna` · `awesome-design-md` · `taste-skill` | 근거 있는 디자인 결정 |
+| 애니메이션의 이름·시간·이징 고르기 | `motion-reference` (위 디자인 스킬 다음) | 사이트(motion-reference.takayustudio.jp)에서 수치만 참고 — 라이선스 명시가 없어 코드는 복사하지 않음 |
 | "됐다" 고 말하기 직전 | `verification-before-completion` | 실행 결과를 붙여 완료 보고 |
 
 - 사소한 변경(오타, 한 줄 수정, 주석)에는 스킬을 꺼내지 않는다.
-- **겹칠 때 우선순위**: 이 CLAUDE.md(원본 read-only · 버전 규칙) → 작업 절차(superpowers) → 관점(Addy · ECC · ponytail) → 디자인 스킬.
+- **겹칠 때 우선순위**: 이 CLAUDE.md(원본 read-only · 버전 규칙) → 작업 절차(superpowers) → 관점(Addy · ECC · ponytail) → 디자인 스킬 → `motion-reference`(수치 사전).
   같은 일을 하는 스킬이 여럿이면 위 표가 정한 것을 쓴다(표가 superpowers 보다 우선) — 예: 디버깅은 `debugging-and-error-recovery`, 리뷰는 `ponytail-review` → `code-review-and-quality`.
 - 디자인 스킬은 웹 기준으로 쓰인 것이 많다. PySide6 화면에는 원칙(위계 · 간격 · 대비 · 색)만 옮기고 CSS · 웹폰트 · CDN 조언은 따르지 않는다.
